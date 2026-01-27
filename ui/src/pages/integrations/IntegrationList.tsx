@@ -198,10 +198,9 @@ export function IntegrationList() {
                 ) : (
                   <Button
                     className="w-full"
-                    variant={userIntegration ? 'outline' : 'default'}
                     onClick={() => handleConnect(integration)}
                   >
-                    {userIntegration ? 'Reconnect' : 'Connect'}
+                    {userIntegration ? '🔄 Reconnect' : 'Connect'}
                   </Button>
                 )}
               </CardFooter>

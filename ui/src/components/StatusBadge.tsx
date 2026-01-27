@@ -10,7 +10,7 @@ export function IntegrationStatusBadge({ status }: IntegrationStatusBadgeProps) 
     connected: { variant: 'success', label: 'Connected' },
     pending: { variant: 'pending', label: 'Pending' },
     error: { variant: 'error', label: 'Error' },
-    revoked: { variant: 'warning', label: 'Revoked' },
+    revoked: { variant: 'warning', label: 'Disconnected' },
   }
 
   const { variant, label } = variants[status] || { variant: 'pending', label: status }

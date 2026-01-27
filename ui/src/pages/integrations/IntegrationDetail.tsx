@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useApiClient } from '@/hooks/useApiClient'
@@ -7,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Spinner } from '@/components/ui/spinner'
 import { IntegrationStatusBadge, SyncJobStatusBadge } from '@/components/StatusBadge'
+import { OnboardingDialog } from './OnboardingDialog'
 import { formatDate } from '@/lib/utils'
 
 export function IntegrationDetail() {
@@ -56,14 +58,25 @@ export function IntegrationDetail() {
     onSuccess: () => {
       toast.success('Integration disconnected')
       queryClient.invalidateQueries({ queryKey: ['user-integrations'] })
-      navigate('..')
+      queryClient.invalidateQueries({ queryKey: ['user-integration', integrationId] })
     },
     onError: (error: Error) => {
       toast.error('Failed to disconnect', error.message)
     },
   })
 
+  // Reconnect dialog state
+  const [showReconnect, setShowReconnect] = useState(false)
+
+  const handleReconnectComplete = () => {
+    setShowReconnect(false)
+    queryClient.invalidateQueries({ queryKey: ['user-integrations'] })
+    queryClient.invalidateQueries({ queryKey: ['user-integration', integrationId] })
+    toast.success('Integration reconnected', 'You can now sync your data.')
+  }
+
   const isLoading = loadingIntegration || loadingSettings
+  const isConnected = userIntegration?.status === 'connected'
 
   if (isLoading) {
     return (
@@ -108,24 +121,32 @@ export function IntegrationDetail() {
           </div>
         </div>
         <div className="flex gap-2">
-          <Button
-            onClick={() => syncMutation.mutate()}
-            disabled={syncMutation.isPending || userIntegration.status !== 'connected'}
-          >
-            {syncMutation.isPending ? <Spinner size="sm" className="mr-2" /> : null}
-            🔄 Sync Now
-          </Button>
-          <Button
-            variant="destructive"
-            onClick={() => {
-              if (confirm('Are you sure you want to disconnect this integration?')) {
-                disconnectMutation.mutate()
-              }
-            }}
-            disabled={disconnectMutation.isPending}
-          >
-            Disconnect
-          </Button>
+          {isConnected ? (
+            <>
+              <Button
+                onClick={() => syncMutation.mutate()}
+                disabled={syncMutation.isPending}
+              >
+                {syncMutation.isPending ? <Spinner size="sm" className="mr-2" /> : null}
+                🔄 Sync Now
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => {
+                  if (confirm('Are you sure you want to disconnect this integration?')) {
+                    disconnectMutation.mutate()
+                  }
+                }}
+                disabled={disconnectMutation.isPending}
+              >
+                Disconnect
+              </Button>
+            </>
+          ) : (
+            <Button onClick={() => setShowReconnect(true)}>
+              🔄 Reconnect
+            </Button>
+          )}
         </div>
       </div>
 
@@ -217,6 +238,16 @@ export function IntegrationDetail() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Reconnect Dialog */}
+      {integration && (
+        <OnboardingDialog
+          open={showReconnect}
+          onOpenChange={setShowReconnect}
+          integration={integration}
+          onComplete={handleReconnectComplete}
+        />
+      )}
     </div>
   )
 }
