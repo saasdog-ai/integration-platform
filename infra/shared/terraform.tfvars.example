@@ -1,0 +1,25 @@
+# AWS Region
+aws_region = "us-east-1"
+
+# Environment (dev, staging, prod)
+environment = "dev"
+
+# Project name prefix
+project_name = "saasdog"
+
+# VPC CIDR
+vpc_cidr = "10.0.0.0/16"
+
+# Availability zones
+availability_zones = ["us-east-1a", "us-east-1b"]
+
+# RDS Configuration
+db_instance_class    = "db.t3.small"
+db_allocated_storage = 20
+db_username          = "postgres"
+
+# Databases to create (additional DBs created via SQL after initial setup)
+databases = ["import_export", "integration_platform"]
+
+# Protection settings
+enable_deletion_protection = false  # Set to true for prod

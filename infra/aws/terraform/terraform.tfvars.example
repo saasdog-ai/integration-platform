@@ -1,0 +1,55 @@
+# =============================================================================
+# Common Configuration
+# =============================================================================
+
+aws_region  = "us-east-1"
+environment = "dev"
+app_name    = "integration-platform"
+
+# =============================================================================
+# Deployment Mode
+# =============================================================================
+
+# Option 1: Standalone deployment (creates all infrastructure)
+use_shared_infra = false
+
+# Option 2: Use shared infrastructure (set use_shared_infra = true and provide values)
+# use_shared_infra = true
+# shared_vpc_id                    = "vpc-xxx"
+# shared_public_subnet_ids         = ["subnet-xxx", "subnet-yyy"]
+# shared_private_subnet_ids        = ["subnet-aaa", "subnet-bbb"]
+# shared_alb_security_group_id     = "sg-xxx"
+# shared_ecs_security_group_id     = "sg-yyy"
+# shared_rds_security_group_id     = "sg-zzz"
+# shared_ecs_cluster_arn           = "arn:aws:ecs:us-east-1:123456789:cluster/saasdog-dev"
+# shared_rds_endpoint              = "saasdog-dev.xxx.us-east-1.rds.amazonaws.com:5432"
+# shared_db_credentials_secret_arn = "arn:aws:secretsmanager:us-east-1:123456789:secret:saasdog-dev-db-credentials-xxx"
+# shared_kms_key_id                = "xxx-xxx-xxx"
+
+# =============================================================================
+# Standalone Mode Configuration (ignored when use_shared_infra = true)
+# =============================================================================
+
+vpc_cidr           = "10.1.0.0/16"
+availability_zones = ["us-east-1a", "us-east-1b"]
+
+# RDS
+db_instance_class    = "db.t3.micro"
+db_allocated_storage = 20
+db_name              = "integration_platform"
+db_username          = "postgres"
+
+# =============================================================================
+# ECS Configuration (always used)
+# =============================================================================
+
+ecs_task_cpu      = 256
+ecs_task_memory   = 512
+ecs_desired_count = 1
+container_port    = 8000
+
+# =============================================================================
+# Protection Settings
+# =============================================================================
+
+enable_deletion_protection = false  # Set to true for prod

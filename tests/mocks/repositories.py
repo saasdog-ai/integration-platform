@@ -1,0 +1,375 @@
+"""In-memory mock repositories for unit testing."""
+
+from datetime import datetime, timezone
+from typing import Any
+from uuid import UUID, uuid4
+
+from app.domain.entities import (
+    AvailableIntegration,
+    EntitySyncStatus,
+    IntegrationStateRecord,
+    SyncJob,
+    SyncRule,
+    UserIntegration,
+    UserIntegrationSettings,
+)
+from app.domain.enums import (
+    IntegrationStatus,
+    RecordSyncStatus,
+    SyncDirection,
+    SyncJobStatus,
+    SyncJobTrigger,
+    SyncJobType,
+)
+from app.domain.interfaces import (
+    IntegrationRepositoryInterface,
+    IntegrationStateRepositoryInterface,
+    SyncJobRepositoryInterface,
+)
+
+
+class MockIntegrationRepository(IntegrationRepositoryInterface):
+    """In-memory mock implementation of IntegrationRepositoryInterface."""
+
+    def __init__(self) -> None:
+        self._available_integrations: dict[UUID, AvailableIntegration] = {}
+        self._user_integrations: dict[tuple[UUID, UUID], UserIntegration] = {}
+        self._user_settings: dict[tuple[UUID, UUID], UserIntegrationSettings] = {}
+        self._system_settings: dict[UUID, UserIntegrationSettings] = {}
+
+    def seed_available_integration(
+        self,
+        name: str,
+        type: str = "erp",
+        supported_entities: list[str] | None = None,
+        is_active: bool = True,
+        oauth_config: Any | None = None,
+    ) -> AvailableIntegration:
+        """Seed an available integration for testing."""
+        integration = AvailableIntegration(
+            id=uuid4(),
+            name=name,
+            type=type,
+            description=f"Test {name} integration",
+            supported_entities=supported_entities or ["bill", "invoice", "vendor"],
+            oauth_config=oauth_config,
+            is_active=is_active,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        self._available_integrations[integration.id] = integration
+        return integration
+
+    async def get_available_integrations(
+        self, active_only: bool = True
+    ) -> list[AvailableIntegration]:
+        integrations = list(self._available_integrations.values())
+        if active_only:
+            integrations = [i for i in integrations if i.is_active]
+        return integrations
+
+    async def get_available_integration(
+        self, integration_id: UUID
+    ) -> AvailableIntegration | None:
+        return self._available_integrations.get(integration_id)
+
+    async def get_available_integration_by_name(
+        self, name: str
+    ) -> AvailableIntegration | None:
+        for integration in self._available_integrations.values():
+            if integration.name == name:
+                return integration
+        return None
+
+    async def get_user_integration(
+        self, client_id: UUID, integration_id: UUID
+    ) -> UserIntegration | None:
+        return self._user_integrations.get((client_id, integration_id))
+
+    async def get_user_integrations(self, client_id: UUID) -> list[UserIntegration]:
+        return [
+            ui
+            for (cid, _), ui in self._user_integrations.items()
+            if cid == client_id
+        ]
+
+    async def create_user_integration(
+        self, integration: UserIntegration
+    ) -> UserIntegration:
+        key = (integration.client_id, integration.integration_id)
+        self._user_integrations[key] = integration
+        return integration
+
+    async def update_user_integration(
+        self, integration: UserIntegration
+    ) -> UserIntegration:
+        key = (integration.client_id, integration.integration_id)
+        integration.updated_at = datetime.now(timezone.utc)
+        self._user_integrations[key] = integration
+        return integration
+
+    async def delete_user_integration(
+        self, client_id: UUID, integration_id: UUID
+    ) -> bool:
+        key = (client_id, integration_id)
+        if key in self._user_integrations:
+            del self._user_integrations[key]
+            return True
+        return False
+
+    async def get_user_settings(
+        self, client_id: UUID, integration_id: UUID
+    ) -> UserIntegrationSettings | None:
+        return self._user_settings.get((client_id, integration_id))
+
+    async def upsert_user_settings(
+        self, client_id: UUID, integration_id: UUID, settings: UserIntegrationSettings
+    ) -> UserIntegrationSettings:
+        self._user_settings[(client_id, integration_id)] = settings
+        return settings
+
+    async def get_system_settings(
+        self, integration_id: UUID
+    ) -> UserIntegrationSettings | None:
+        return self._system_settings.get(integration_id)
+
+    def clear(self) -> None:
+        """Clear all data (for test isolation)."""
+        self._available_integrations.clear()
+        self._user_integrations.clear()
+        self._user_settings.clear()
+        self._system_settings.clear()
+
+
+class MockSyncJobRepository(SyncJobRepositoryInterface):
+    """In-memory mock implementation of SyncJobRepositoryInterface."""
+
+    def __init__(self) -> None:
+        self._jobs: dict[UUID, SyncJob] = {}
+
+    async def create_job(self, job: SyncJob) -> SyncJob:
+        self._jobs[job.id] = job
+        return job
+
+    async def get_job(self, job_id: UUID) -> SyncJob | None:
+        return self._jobs.get(job_id)
+
+    async def get_jobs_for_client(
+        self,
+        client_id: UUID,
+        integration_id: UUID | None = None,
+        status: SyncJobStatus | None = None,
+        since: datetime | None = None,
+        limit: int = 100,
+    ) -> list[SyncJob]:
+        jobs = [j for j in self._jobs.values() if j.client_id == client_id]
+
+        if integration_id:
+            jobs = [j for j in jobs if j.integration_id == integration_id]
+        if status:
+            jobs = [j for j in jobs if j.status == status]
+        if since:
+            jobs = [j for j in jobs if j.created_at >= since]
+
+        jobs.sort(key=lambda j: j.created_at, reverse=True)
+        return jobs[:limit]
+
+    async def update_job_status(
+        self,
+        job_id: UUID,
+        status: SyncJobStatus,
+        error_code: str | None = None,
+        error_message: str | None = None,
+        error_details: dict[str, Any] | None = None,
+        entities_processed: dict[str, Any] | None = None,
+    ) -> SyncJob:
+        job = self._jobs.get(job_id)
+        if not job:
+            raise ValueError(f"Job not found: {job_id}")
+
+        now = datetime.now(timezone.utc)
+        job.status = status
+        job.updated_at = now
+
+        if status == SyncJobStatus.RUNNING:
+            job.started_at = now
+        elif status in (
+            SyncJobStatus.SUCCEEDED,
+            SyncJobStatus.FAILED,
+            SyncJobStatus.CANCELLED,
+        ):
+            job.completed_at = now
+
+        if error_code is not None:
+            job.error_code = error_code
+        if error_message is not None:
+            job.error_message = error_message
+        if error_details is not None:
+            job.error_details = error_details
+        if entities_processed is not None:
+            job.entities_processed = entities_processed
+
+        return job
+
+    async def get_running_jobs(
+        self, client_id: UUID, integration_id: UUID
+    ) -> list[SyncJob]:
+        return [
+            j
+            for j in self._jobs.values()
+            if j.client_id == client_id
+            and j.integration_id == integration_id
+            and j.status == SyncJobStatus.RUNNING
+        ]
+
+    def clear(self) -> None:
+        """Clear all data (for test isolation)."""
+        self._jobs.clear()
+
+
+class MockIntegrationStateRepository(IntegrationStateRepositoryInterface):
+    """In-memory mock implementation of IntegrationStateRepositoryInterface."""
+
+    def __init__(self) -> None:
+        self._records: dict[tuple[UUID, UUID, str, str], IntegrationStateRecord] = {}
+        self._entity_sync_status: dict[tuple[UUID, UUID, str], EntitySyncStatus] = {}
+
+    async def get_record(
+        self,
+        client_id: UUID,
+        integration_id: UUID,
+        entity_type: str,
+        internal_record_id: str,
+    ) -> IntegrationStateRecord | None:
+        return self._records.get(
+            (client_id, integration_id, entity_type, internal_record_id)
+        )
+
+    async def get_records_by_status(
+        self,
+        client_id: UUID,
+        integration_id: UUID,
+        entity_type: str,
+        status: RecordSyncStatus,
+        limit: int = 1000,
+    ) -> list[IntegrationStateRecord]:
+        records = [
+            r
+            for (cid, iid, et, _), r in self._records.items()
+            if cid == client_id
+            and iid == integration_id
+            and et == entity_type
+            and r.sync_status == status
+        ]
+        return records[:limit]
+
+    async def get_pending_records(
+        self,
+        client_id: UUID,
+        integration_id: UUID,
+        entity_type: str,
+        limit: int = 1000,
+    ) -> list[IntegrationStateRecord]:
+        return await self.get_records_by_status(
+            client_id, integration_id, entity_type, RecordSyncStatus.PENDING, limit
+        )
+
+    async def upsert_record(
+        self, record: IntegrationStateRecord
+    ) -> IntegrationStateRecord:
+        key = (
+            record.client_id,
+            record.integration_id,
+            record.entity_type,
+            record.internal_record_id,
+        )
+        record.updated_at = datetime.now(timezone.utc)
+        self._records[key] = record
+        return record
+
+    async def update_sync_status(
+        self,
+        record_id: UUID,
+        client_id: UUID,
+        status: RecordSyncStatus,
+        error_code: str | None = None,
+        error_message: str | None = None,
+        error_details: dict[str, Any] | None = None,
+    ) -> None:
+        for key, record in self._records.items():
+            if record.id == record_id and record.client_id == client_id:
+                record.sync_status = status
+                record.updated_at = datetime.now(timezone.utc)
+                if error_code is not None:
+                    record.error_code = error_code
+                if error_message is not None:
+                    record.error_message = error_message
+                if error_details is not None:
+                    record.error_details = error_details
+                return
+
+    async def mark_synced(
+        self,
+        record_id: UUID,
+        client_id: UUID,
+        external_record_id: str | None = None,
+    ) -> None:
+        for key, record in self._records.items():
+            if record.id == record_id and record.client_id == client_id:
+                record.sync_status = RecordSyncStatus.SYNCED
+                record.last_synced_at = datetime.now(timezone.utc)
+                record.last_sync_version_id = max(
+                    record.internal_version_id, record.external_version_id
+                )
+                record.error_code = None
+                record.error_message = None
+                record.error_details = None
+                if external_record_id:
+                    record.external_record_id = external_record_id
+                return
+
+    async def get_entity_sync_status(
+        self,
+        client_id: UUID,
+        integration_id: UUID,
+        entity_type: str,
+    ) -> EntitySyncStatus | None:
+        return self._entity_sync_status.get((client_id, integration_id, entity_type))
+
+    async def update_entity_sync_status(
+        self,
+        client_id: UUID,
+        integration_id: UUID,
+        entity_type: str,
+        job_id: UUID,
+        records_count: int,
+    ) -> EntitySyncStatus:
+        key = (client_id, integration_id, entity_type)
+        now = datetime.now(timezone.utc)
+
+        existing = self._entity_sync_status.get(key)
+        if existing:
+            existing.last_successful_sync_at = now
+            existing.last_sync_job_id = job_id
+            existing.records_synced_count += records_count
+            existing.updated_at = now
+            return existing
+        else:
+            status = EntitySyncStatus(
+                id=uuid4(),
+                client_id=client_id,
+                integration_id=integration_id,
+                entity_type=entity_type,
+                last_successful_sync_at=now,
+                last_sync_job_id=job_id,
+                records_synced_count=records_count,
+                created_at=now,
+                updated_at=now,
+            )
+            self._entity_sync_status[key] = status
+            return status
+
+    def clear(self) -> None:
+        """Clear all data (for test isolation)."""
+        self._records.clear()
+        self._entity_sync_status.clear()

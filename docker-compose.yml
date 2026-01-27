@@ -1,0 +1,58 @@
+version: '3.8'
+
+# NOTE: This project shares the PostgreSQL instance with import-export-orchestrator
+# The database runs in the job_runner_db container on port 5433
+# To create the integration_platform database, run:
+#   docker exec -it job_runner_db psql -U postgres -c "CREATE DATABASE integration_platform;"
+
+services:
+  localstack:
+    image: localstack/localstack:latest
+    container_name: integration_platform_localstack
+    environment:
+      SERVICES: sqs,kms
+      DEFAULT_REGION: us-east-1
+      DOCKER_HOST: unix:///var/run/docker.sock
+    ports:
+      - "4566:4566"
+    volumes:
+      - localstack_data:/var/lib/localstack
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: integration_platform_app
+    environment:
+      # Uses shared PostgreSQL from job_runner_db container (port 5433 on host)
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@host.docker.internal:5433/integration_platform
+      APP_ENV: development
+      LOG_LEVEL: DEBUG
+      CLOUD_PROVIDER: aws
+      AWS_ENDPOINT_URL: http://localstack:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_DEFAULT_REGION: us-east-1
+      QUEUE_URL: http://localstack:4566/000000000000/sync-jobs
+    ports:
+      - "8001:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      localstack:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app
+      - ./alembic:/app/alembic
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+
+volumes:
+  localstack_data:
