@@ -204,6 +204,15 @@ class QueueMessage(BaseModel):
     attributes: dict[str, Any] = Field(default_factory=dict)
 
 
+class EntitySyncRequest(BaseModel):
+    """Request to sync specific entities, optionally with specific record IDs."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    entity_type: str  # e.g., "vendor", "bill", "invoice"
+    record_ids: list[str] | None = None  # If None, sync all records of this type
+
+
 class SyncJobMessage(BaseModel):
     """Sync job message for queue dispatch."""
 
@@ -213,4 +222,5 @@ class SyncJobMessage(BaseModel):
     client_id: UUID
     integration_id: UUID
     job_type: SyncJobType
-    entity_types: list[str] | None = None  # If None, sync all enabled entities
+    entity_types: list[str] | None = None  # Simple list of entity types (sync all records)
+    entity_requests: list[EntitySyncRequest] | None = None  # Detailed requests with optional record IDs

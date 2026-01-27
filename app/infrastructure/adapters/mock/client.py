@@ -82,6 +82,7 @@ class MockAdapter(IntegrationAdapterInterface):
         entity_type: str,
         since: datetime | None = None,
         page_token: str | None = None,
+        record_ids: list[str] | None = None,
     ) -> tuple[list[ExternalRecord], str | None]:
         """Mock fetching records."""
         logger.info(
@@ -90,11 +91,16 @@ class MockAdapter(IntegrationAdapterInterface):
                 "integration": self._integration_name,
                 "entity_type": entity_type,
                 "since": since.isoformat() if since else None,
+                "record_ids": record_ids,
             },
         )
 
         entity_records = self._records.get(entity_type, {})
         records = list(entity_records.values())
+
+        # Filter by specific record IDs if provided
+        if record_ids:
+            records = [r for r in records if r.id in record_ids]
 
         # Filter by since if provided
         if since:

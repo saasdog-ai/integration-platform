@@ -61,9 +61,12 @@ def get_adapter_factory() -> AdapterFactory:
         _factory_instance = AdapterFactory()
 
         # Register available adapters
-        # In a real implementation, you'd register actual adapters here:
-        # from app.infrastructure.adapters.quickbooks.client import QuickBooksAdapter
-        # _factory_instance.register("QuickBooks Online", QuickBooksAdapter)
+        from app.infrastructure.adapters.quickbooks.client import QuickBooksAdapter
+
+        _factory_instance.register("QuickBooks Online", QuickBooksAdapter)
+
+        # For integrations without specific adapters, the factory will fall back
+        # to MockAdapter automatically (see get_adapter method)
 
     return _factory_instance
 

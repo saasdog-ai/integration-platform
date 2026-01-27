@@ -41,7 +41,7 @@ class MockIntegrationAdapter(IntegrationAdapterInterface):
         # Track API calls for assertions
         self.authenticate_calls: list[tuple[str, str]] = []
         self.refresh_token_calls: list[str] = []
-        self.fetch_records_calls: list[tuple[str, datetime | None, str | None]] = []
+        self.fetch_records_calls: list[tuple[str, datetime | None, str | None, list[str] | None]] = []
         self.get_record_calls: list[tuple[str, str]] = []
         self.create_record_calls: list[tuple[str, dict]] = []
         self.update_record_calls: list[tuple[str, str, dict]] = []
@@ -110,15 +110,20 @@ class MockIntegrationAdapter(IntegrationAdapterInterface):
         entity_type: str,
         since: datetime | None = None,
         page_token: str | None = None,
+        record_ids: list[str] | None = None,
     ) -> tuple[list[ExternalRecord], str | None]:
         """Mock fetching records."""
-        self.fetch_records_calls.append((entity_type, since, page_token))
+        self.fetch_records_calls.append((entity_type, since, page_token, record_ids))
 
         if self.should_fail_fetch:
             raise Exception(self.fetch_error_message)
 
         entity_records = self._records.get(entity_type, {})
         records = list(entity_records.values())
+
+        # Filter by specific record IDs if provided
+        if record_ids:
+            records = [r for r in records if r.id in record_ids]
 
         # Filter by since if provided
         if since:

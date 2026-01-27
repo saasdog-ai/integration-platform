@@ -342,9 +342,16 @@ class IntegrationAdapterInterface(ABC):
         entity_type: str,  # NOT an enum - string from DB
         since: datetime | None = None,
         page_token: str | None = None,
+        record_ids: list[str] | None = None,
     ) -> tuple[list[ExternalRecord], str | None]:
         """
         Fetch records from external system.
+
+        Args:
+            entity_type: The entity type to fetch (e.g., "vendor", "bill").
+            since: Only fetch records modified after this time.
+            page_token: Pagination token for fetching next page.
+            record_ids: Optional list of specific record IDs to fetch.
 
         Returns:
             Tuple of (records, next_page_token)
