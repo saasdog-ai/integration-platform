@@ -3,11 +3,12 @@
 import asyncio
 import json
 import signal
+import time
 from typing import Any
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
-from app.domain.entities import SyncJob, SyncJobMessage
+from app.domain.entities import QueueMessage, SyncJob, SyncJobMessage
 from app.domain.enums import SyncJobStatus, SyncJobType
 from app.domain.interfaces import (
     AdapterFactoryInterface,
@@ -20,6 +21,14 @@ from app.domain.interfaces import (
 from app.services.sync_orchestrator import SyncOrchestrator
 
 logger = get_logger(__name__)
+
+# Backpressure settings
+BACKPRESSURE_ERROR_THRESHOLD = 5  # Number of consecutive errors to trigger backpressure
+BACKPRESSURE_MAX_DELAY = 60  # Maximum delay in seconds during backpressure
+BACKPRESSURE_BASE_DELAY = 2  # Base delay for exponential backoff
+
+# Stuck job check interval (in seconds)
+STUCK_JOB_CHECK_INTERVAL = 300  # Check every 5 minutes
 
 
 class SyncJobRunner:
@@ -59,6 +68,13 @@ class SyncJobRunner:
         self._semaphore: asyncio.Semaphore | None = None
         self._tasks: set[asyncio.Task] = set()
 
+        # Backpressure state
+        self._consecutive_errors = 0
+        self._backpressure_until: float = 0
+
+        # Stuck job monitoring
+        self._last_stuck_job_check: float = 0
+
         # Create orchestrator
         self._orchestrator = SyncOrchestrator(
             integration_repo=integration_repo,
@@ -69,11 +85,19 @@ class SyncJobRunner:
             adapter_factory=adapter_factory,
         )
         self._job_repo = job_repo
+        self._integration_repo = integration_repo
 
     async def start(self) -> None:
         """Start the job runner."""
         if self._running:
             logger.warning("Job runner is already running")
+            return
+
+        settings = get_settings()
+
+        # Check global kill switch
+        if settings.sync_globally_disabled:
+            logger.warning("Sync is globally disabled via feature flag - job runner not starting")
             return
 
         self._running = True
@@ -92,17 +116,101 @@ class SyncJobRunner:
         # Main polling loop
         while self._running:
             try:
+                # Check for stuck jobs periodically
+                await self._check_stuck_jobs()
+
+                # Apply backpressure if needed
+                if self._backpressure_until > time.time():
+                    delay = min(
+                        self._backpressure_until - time.time(),
+                        BACKPRESSURE_MAX_DELAY,
+                    )
+                    logger.warning(
+                        "Backpressure active, delaying polling",
+                        extra={"delay_seconds": delay, "consecutive_errors": self._consecutive_errors},
+                    )
+                    await asyncio.sleep(delay)
+
                 await self._poll_and_process()
+
             except asyncio.CancelledError:
                 break
             except Exception as e:
+                self._record_error()
                 logger.error(
                     "Error in job runner main loop",
-                    extra={"error": str(e)},
+                    extra={"error": str(e), "consecutive_errors": self._consecutive_errors},
                 )
                 await asyncio.sleep(5)  # Brief pause before retrying
 
         logger.info("Sync job runner stopped")
+
+    def _record_error(self) -> None:
+        """Record an error and potentially trigger backpressure."""
+        self._consecutive_errors += 1
+        if self._consecutive_errors >= BACKPRESSURE_ERROR_THRESHOLD:
+            # Exponential backoff with jitter
+            import random
+            delay = min(
+                BACKPRESSURE_BASE_DELAY ** (self._consecutive_errors - BACKPRESSURE_ERROR_THRESHOLD + 1),
+                BACKPRESSURE_MAX_DELAY,
+            )
+            delay = delay * (0.5 + random.random())  # Add jitter
+            self._backpressure_until = time.time() + delay
+            logger.warning(
+                "Backpressure triggered due to consecutive errors",
+                extra={"consecutive_errors": self._consecutive_errors, "backoff_seconds": delay},
+            )
+
+    def _record_success(self) -> None:
+        """Record a success and reset backpressure."""
+        self._consecutive_errors = 0
+        self._backpressure_until = 0
+
+    async def _check_stuck_jobs(self) -> None:
+        """Check for and terminate stuck jobs."""
+        settings = get_settings()
+
+        # Skip if termination is disabled
+        if not settings.job_termination_enabled:
+            return
+
+        # Rate limit stuck job checks
+        now = time.time()
+        if now - self._last_stuck_job_check < STUCK_JOB_CHECK_INTERVAL:
+            return
+
+        self._last_stuck_job_check = now
+
+        try:
+            stuck_jobs = await self._job_repo.get_stuck_jobs(
+                stuck_threshold_minutes=settings.job_stuck_timeout_minutes
+            )
+
+            for job in stuck_jobs:
+                logger.warning(
+                    "Terminating stuck job",
+                    extra={
+                        "job_id": str(job.id),
+                        "client_id": str(job.client_id),
+                        "started_at": job.started_at.isoformat() if job.started_at else None,
+                    },
+                )
+                await self._job_repo.terminate_stuck_job(
+                    job.id,
+                    reason=f"Job exceeded maximum runtime of {settings.job_stuck_timeout_minutes} minutes",
+                )
+
+            if stuck_jobs:
+                logger.info(
+                    "Terminated stuck jobs",
+                    extra={"count": len(stuck_jobs)},
+                )
+        except Exception as e:
+            logger.error(
+                "Failed to check/terminate stuck jobs",
+                extra={"error": str(e)},
+            )
 
     async def stop(self) -> None:
         """Stop the job runner gracefully."""
@@ -144,7 +252,7 @@ class SyncJobRunner:
             await self._semaphore.acquire()
 
             task = asyncio.create_task(
-                self._process_message(message.body, message.receipt_handle)
+                self._process_message(message)
             )
             self._tasks.add(task)
             task.add_done_callback(self._task_done)
@@ -166,23 +274,74 @@ class SyncJobRunner:
 
     async def _process_message(
         self,
-        message_body: dict[str, Any],
-        receipt_handle: str,
+        message: QueueMessage,
     ) -> None:
         """
         Process a single message.
 
         Args:
-            message_body: The message content.
-            receipt_handle: Handle for deleting the message.
+            message: The queue message to process.
         """
+        message_body = message.body
+        receipt_handle = message.receipt_handle
+        receive_count = int(message.attributes.get("ApproximateReceiveCount", 1))
+        settings = get_settings()
+
         try:
-            # Parse message
+            # Validate required message fields before parsing
+            required_fields = ["job_id", "client_id", "integration_id", "job_type"]
+            missing_fields = [f for f in required_fields if f not in message_body]
+            if missing_fields:
+                logger.error(
+                    "Malformed message - missing required fields",
+                    extra={
+                        "message_id": message.message_id,
+                        "missing_fields": missing_fields,
+                        "message_keys": list(message_body.keys()),
+                    },
+                )
+                # Delete malformed messages - they can't be processed
+                await self._queue.delete_message(receipt_handle)
+                return
+
+            # Validate UUID format for ID fields
+            from uuid import UUID
+            try:
+                job_id = UUID(str(message_body["job_id"]))
+                client_id = UUID(str(message_body["client_id"]))
+                integration_id = UUID(str(message_body["integration_id"]))
+            except (ValueError, TypeError) as e:
+                logger.error(
+                    "Malformed message - invalid UUID format",
+                    extra={
+                        "message_id": message.message_id,
+                        "error": str(e),
+                    },
+                )
+                await self._queue.delete_message(receipt_handle)
+                return
+
+            # Validate job_type enum value
+            try:
+                job_type = SyncJobType(message_body["job_type"])
+            except ValueError:
+                logger.error(
+                    "Malformed message - invalid job_type",
+                    extra={
+                        "message_id": message.message_id,
+                        "job_type": message_body["job_type"],
+                        "valid_types": [t.value for t in SyncJobType],
+                    },
+                )
+                await self._queue.delete_message(receipt_handle)
+                return
+
+            # Parse validated message
             job_message = SyncJobMessage(
-                job_id=message_body["job_id"],
-                client_id=message_body["client_id"],
-                integration_id=message_body["integration_id"],
-                job_type=SyncJobType(message_body["job_type"]),
+                job_id=job_id,
+                client_id=client_id,
+                integration_id=integration_id,
+                job_type=job_type,
                 entity_types=message_body.get("entity_types"),
             )
 
@@ -193,8 +352,18 @@ class SyncJobRunner:
                     "client_id": str(job_message.client_id),
                     "integration_id": str(job_message.integration_id),
                     "job_type": job_message.job_type.value,
+                    "receive_count": receive_count,
                 },
             )
+
+            # Check global kill switch
+            if settings.sync_globally_disabled:
+                logger.warning(
+                    "Sync globally disabled - skipping job",
+                    extra={"job_id": str(job_message.job_id)},
+                )
+                # Don't delete - leave for retry when feature flag is cleared
+                return
 
             # Get the job
             job = await self._job_repo.get_job(job_message.job_id)
@@ -218,11 +387,34 @@ class SyncJobRunner:
                 await self._queue.delete_message(receipt_handle)
                 return
 
+            # Check if integration is disabled via feature flag
+            integration = await self._integration_repo.get_available_integration(
+                job.integration_id
+            )
+            if integration and integration.name in settings.disabled_integrations:
+                logger.warning(
+                    "Integration disabled via feature flag - skipping job",
+                    extra={
+                        "job_id": str(job.id),
+                        "integration": integration.name,
+                    },
+                )
+                # Mark job as cancelled instead of leaving in queue
+                await self._job_repo.update_job_status(
+                    job.id,
+                    SyncJobStatus.CANCELLED,
+                    error_code="INTEGRATION_DISABLED",
+                    error_message=f"Integration '{integration.name}' is currently disabled",
+                )
+                await self._queue.delete_message(receipt_handle)
+                return
+
             # Execute the job
             await self._orchestrator.execute_sync_job(job)
 
             # Delete message on success
             await self._queue.delete_message(receipt_handle)
+            self._record_success()
 
             logger.info(
                 "Sync job processed successfully",
@@ -230,15 +422,35 @@ class SyncJobRunner:
             )
 
         except Exception as e:
+            error_msg = str(e)
+            self._record_error()
             logger.error(
                 "Failed to process sync job",
                 extra={
-                    "error": str(e),
+                    "error": error_msg,
                     "message_body": message_body,
+                    "receive_count": receive_count,
+                    "consecutive_errors": self._consecutive_errors,
                 },
             )
+
+            # Send to DLQ after failure
+            # Note: The memory queue auto-moves to DLQ after max_receive_count,
+            # but we can also explicitly send on catastrophic failures
+            if receive_count >= settings.queue_max_receive_count:
+                logger.warning(
+                    "Moving message to DLQ after max retries",
+                    extra={
+                        "message_id": message.message_id,
+                        "receive_count": receive_count,
+                        "max_receive_count": settings.queue_max_receive_count,
+                    },
+                )
+                await self._queue.send_to_dlq(message, error_msg)
+                await self._queue.delete_message(receipt_handle)
+
             # Don't delete message - it will become visible again for retry
-            # In production, you'd want dead letter queue after N retries
+            # After max_receive_count, the queue will auto-move to DLQ
 
 
 async def run_job_runner() -> None:

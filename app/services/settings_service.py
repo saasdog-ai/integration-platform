@@ -182,7 +182,13 @@ class SettingsService:
         return settings.auto_sync_enabled
 
     def _validate_cron_expression(self, cron_expr: str) -> None:
-        """Validate a cron expression."""
+        """
+        Validate a cron expression (5-part standard format).
+
+        Validates minute, hour, day-of-month, month, day-of-week fields.
+        Supports: numbers, *, ranges (1-5), steps (*/5, 1-10/2), lists (1,3,5),
+        month names (jan-dec), day names (sun-sat).
+        """
         parts = cron_expr.split()
         if len(parts) != 5:
             raise ValidationError(
@@ -190,40 +196,96 @@ class SettingsService:
                 field="sync_frequency",
             )
 
-        # Basic validation - could use croniter for more thorough validation
+        field_names = ["minute", "hour", "day of month", "month", "day of week"]
         for i, part in enumerate(parts):
             if not self._is_valid_cron_part(part, i):
-                field_names = ["minute", "hour", "day of month", "month", "day of week"]
                 raise ValidationError(
                     f"Invalid cron expression: invalid {field_names[i]} value '{part}'",
                     field="sync_frequency",
                 )
 
     def _is_valid_cron_part(self, part: str, field_index: int) -> bool:
-        """Validate a single cron field."""
+        """
+        Validate a single cron field.
+
+        Args:
+            part: The cron field value (e.g., "5", "*/10", "1-5", "jan")
+            field_index: 0=minute, 1=hour, 2=day-of-month, 3=month, 4=day-of-week
+
+        Returns:
+            True if valid, False otherwise.
+        """
+        # Field ranges: (min, max)
+        ranges = [
+            (0, 59),  # minute
+            (0, 23),  # hour
+            (1, 31),  # day of month
+            (1, 12),  # month
+            (0, 7),   # day of week (0 and 7 both = Sunday)
+        ]
+        min_val, max_val = ranges[field_index]
+
+        # Month and day names
+        month_names = {"jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+                       "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12}
+        day_names = {"sun": 0, "mon": 1, "tue": 2, "wed": 3, "thu": 4, "fri": 5, "sat": 6}
+
+        def parse_value(val: str) -> int | None:
+            """Parse a single value (number or name) to integer."""
+            val = val.lower()
+            if val.isdigit():
+                return int(val)
+            if field_index == 3 and val in month_names:
+                return month_names[val]
+            if field_index == 4 and val in day_names:
+                return day_names[val]
+            return None
+
+        def is_valid_value(val: int) -> bool:
+            """Check if value is in valid range for this field."""
+            return min_val <= val <= max_val
+
+        # Handle list (e.g., "1,3,5")
+        if "," in part:
+            return all(self._is_valid_cron_part(p.strip(), field_index) for p in part.split(","))
+
+        # Handle step (e.g., "*/5" or "1-10/2")
+        if "/" in part:
+            base, step = part.split("/", 1)
+            if not step.isdigit() or int(step) == 0:
+                return False
+            step_val = int(step)
+            # Validate step doesn't exceed field range
+            if step_val > max_val:
+                return False
+            # Validate base (can be * or a range)
+            if base == "*":
+                return True
+            return self._is_valid_cron_part(base, field_index)
+
+        # Handle range (e.g., "1-5")
+        if "-" in part:
+            parts = part.split("-")
+            if len(parts) != 2:
+                return False
+            start = parse_value(parts[0])
+            end = parse_value(parts[1])
+            if start is None or end is None:
+                return False
+            if not is_valid_value(start) or not is_valid_value(end):
+                return False
+            # Range start must be <= end
+            if start > end:
+                return False
+            return True
+
+        # Handle wildcard
         if part == "*":
             return True
 
-        # Handle ranges, lists, and steps
-        for char in ",/-":
-            if char in part:
-                subparts = part.replace(",", " ").replace("-", " ").replace("/", " ").split()
-                for subpart in subparts:
-                    if subpart != "*" and not subpart.isdigit():
-                        return False
-                return True
-
-        # Simple number
-        if part.isdigit():
-            value = int(part)
-            ranges = [
-                (0, 59),  # minute
-                (0, 23),  # hour
-                (1, 31),  # day of month
-                (1, 12),  # month
-                (0, 7),  # day of week (0 and 7 both = Sunday)
-            ]
-            min_val, max_val = ranges[field_index]
-            return min_val <= value <= max_val
+        # Handle single value
+        val = parse_value(part)
+        if val is not None:
+            return is_valid_value(val)
 
         return False

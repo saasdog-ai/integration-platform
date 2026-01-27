@@ -14,6 +14,7 @@ from app.api.dto import (
     UserIntegrationResponse,
     UserIntegrationsResponse,
 )
+from app.auth import get_client_id
 from app.core.exceptions import (
     ConflictError,
     IntegrationError,
@@ -40,19 +41,6 @@ def get_integration_service() -> IntegrationService:
         encryption_service=container.encryption_service,
         adapter_factory=get_adapter_factory(),
     )
-
-
-def get_client_id() -> UUID:
-    """
-    Dependency to get client ID from request context.
-
-    In production, this would extract client_id from JWT token.
-    For now, returns a placeholder.
-    """
-    # TODO: Extract from JWT token via auth middleware
-    from uuid import uuid4
-
-    return uuid4()
 
 
 def _to_available_integration_response(

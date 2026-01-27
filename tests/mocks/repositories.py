@@ -222,6 +222,73 @@ class MockSyncJobRepository(SyncJobRepositoryInterface):
             and j.status == SyncJobStatus.RUNNING
         ]
 
+    async def create_job_if_no_running(
+        self, job: SyncJob
+    ) -> tuple[SyncJob | None, SyncJob | None]:
+        """
+        Atomically check for running/pending jobs and create a new job if none exist.
+
+        In this mock, we simulate the atomic behavior by checking and creating
+        in a single operation (no real concurrency in tests).
+        """
+        # Check for running or pending jobs
+        existing_jobs = [
+            j
+            for j in self._jobs.values()
+            if j.client_id == job.client_id
+            and j.integration_id == job.integration_id
+            and j.status in (SyncJobStatus.RUNNING, SyncJobStatus.PENDING)
+        ]
+
+        if existing_jobs:
+            return None, existing_jobs[0]
+
+        # No existing job, create the new one
+        self._jobs[job.id] = job
+        return job, None
+
+    async def get_stuck_jobs(
+        self,
+        stuck_threshold_minutes: int = 60,
+    ) -> list[SyncJob]:
+        """Find jobs that have been running longer than the threshold."""
+        from datetime import timedelta
+
+        cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=stuck_threshold_minutes)
+
+        stuck_jobs = [
+            j
+            for j in self._jobs.values()
+            if j.status == SyncJobStatus.RUNNING
+            and j.started_at is not None
+            and j.started_at < cutoff_time
+        ]
+        return stuck_jobs
+
+    async def terminate_stuck_job(
+        self,
+        job_id: UUID,
+        reason: str = "Job exceeded maximum runtime",
+    ) -> SyncJob | None:
+        """Terminate a stuck job by marking it as failed."""
+        job = self._jobs.get(job_id)
+        if not job or job.status != SyncJobStatus.RUNNING:
+            return None
+
+        now = datetime.now(timezone.utc)
+        job.status = SyncJobStatus.FAILED
+        job.completed_at = now
+        job.error_code = "JOB_TIMEOUT"
+        job.error_message = reason
+        job.error_details = {
+            "terminated_at": now.isoformat(),
+            "started_at": job.started_at.isoformat() if job.started_at else None,
+            "reason": "automatic_termination",
+        }
+        job.updated_at = now
+
+        return job
+
     def clear(self) -> None:
         """Clear all data (for test isolation)."""
         self._jobs.clear()
@@ -368,6 +435,47 @@ class MockIntegrationStateRepository(IntegrationStateRepositoryInterface):
             )
             self._entity_sync_status[key] = status
             return status
+
+    async def batch_upsert_records(
+        self,
+        records: list[IntegrationStateRecord],
+    ) -> list[IntegrationStateRecord]:
+        """Upsert multiple records (mock - all operations succeed or none)."""
+        results: list[IntegrationStateRecord] = []
+        for record in records:
+            key = (
+                record.client_id,
+                record.integration_id,
+                record.entity_type,
+                record.internal_record_id,
+            )
+            record.updated_at = datetime.now(timezone.utc)
+            self._records[key] = record
+            results.append(record)
+        return results
+
+    async def batch_mark_synced(
+        self,
+        updates: list[tuple[UUID, UUID, str | None]],  # (record_id, client_id, external_record_id)
+        client_id: UUID | None = None,
+        integration_id: UUID | None = None,
+    ) -> None:
+        """Mark multiple records as synced (mock - atomic operation)."""
+        # In mock, we don't need advisory locks - just process the updates
+        for record_id, record_client_id, external_record_id in updates:
+            for key, record in self._records.items():
+                if record.id == record_id and record.client_id == record_client_id:
+                    record.sync_status = RecordSyncStatus.SYNCED
+                    record.last_synced_at = datetime.now(timezone.utc)
+                    record.last_sync_version_id = max(
+                        record.internal_version_id, record.external_version_id
+                    )
+                    record.error_code = None
+                    record.error_message = None
+                    record.error_details = None
+                    if external_record_id:
+                        record.external_record_id = external_record_id
+                    break
 
     def clear(self) -> None:
         """Clear all data (for test isolation)."""

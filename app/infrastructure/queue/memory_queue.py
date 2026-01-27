@@ -36,16 +36,23 @@ class InMemoryQueue(MessageQueueInterface):
     It does not persist messages across restarts.
     """
 
-    def __init__(self, visibility_timeout: int = 30) -> None:
+    def __init__(
+        self,
+        visibility_timeout: int = 30,
+        max_receive_count: int = 3,
+    ) -> None:
         """
         Initialize the in-memory queue.
 
         Args:
             visibility_timeout: Default visibility timeout in seconds.
+            max_receive_count: Max times a message can be received before going to DLQ.
         """
         self._messages: deque[InternalMessage] = deque()
         self._in_flight: dict[str, InternalMessage] = {}
+        self._dlq: deque[InternalMessage] = deque()  # Dead letter queue
         self._visibility_timeout = visibility_timeout
+        self._max_receive_count = max_receive_count
         self._lock = asyncio.Lock()
 
     async def send_message(
@@ -108,6 +115,21 @@ class InMemoryQueue(MessageQueueInterface):
                     msg.receipt_handle = str(uuid.uuid4())
                     msg.visible_at = now + timedelta(seconds=self._visibility_timeout)
                     msg.attributes["ApproximateReceiveCount"] = str(msg.receive_count)
+
+                    # Check if message exceeded max receive count - move to DLQ
+                    if msg.receive_count > self._max_receive_count:
+                        msg.attributes["DLQReason"] = f"MaxReceiveCount ({self._max_receive_count}) exceeded"
+                        msg.attributes["MovedToDLQAt"] = str(int(now.timestamp() * 1000))
+                        self._dlq.append(msg)
+                        logger.warning(
+                            "Message moved to DLQ after exceeding max receive count",
+                            extra={
+                                "message_id": msg.message_id,
+                                "receive_count": msg.receive_count,
+                                "max_receive_count": self._max_receive_count,
+                            },
+                        )
+                        continue
 
                     self._in_flight[msg.receipt_handle] = msg
                     received.append(
@@ -198,3 +220,73 @@ class InMemoryQueue(MessageQueueInterface):
     def in_flight_count(self) -> int:
         """Get in-flight message count (for testing)."""
         return len(self._in_flight)
+
+    @property
+    def dlq_count(self) -> int:
+        """Get dead letter queue message count (for testing)."""
+        return len(self._dlq)
+
+    async def send_to_dlq(
+        self,
+        message: QueueMessage,
+        error: str,
+    ) -> str:
+        """Send a failed message to the dead letter queue."""
+        async with self._lock:
+            now = datetime.now(timezone.utc)
+
+            # Remove from in-flight if present
+            if message.receipt_handle in self._in_flight:
+                del self._in_flight[message.receipt_handle]
+
+            dlq_message = InternalMessage(
+                message_id=message.message_id,
+                body=message.body,
+                receipt_handle=str(uuid.uuid4()),
+                sent_at=now,
+                visible_at=now,
+                receive_count=int(message.attributes.get("ApproximateReceiveCount", 1)),
+                attributes={
+                    **message.attributes,
+                    "DLQReason": error,
+                    "MovedToDLQAt": str(int(now.timestamp() * 1000)),
+                },
+            )
+            self._dlq.append(dlq_message)
+
+            logger.warning(
+                "Message sent to DLQ",
+                extra={
+                    "message_id": message.message_id,
+                    "error": error,
+                },
+            )
+            return dlq_message.message_id
+
+    async def get_dlq_messages(
+        self,
+        max_messages: int = 10,
+    ) -> list[QueueMessage]:
+        """Get messages from the dead letter queue for inspection."""
+        async with self._lock:
+            messages: list[QueueMessage] = []
+            for i, msg in enumerate(self._dlq):
+                if i >= max_messages:
+                    break
+                messages.append(
+                    QueueMessage(
+                        message_id=msg.message_id,
+                        receipt_handle=msg.receipt_handle,
+                        body=msg.body,
+                        attributes=msg.attributes,
+                    )
+                )
+            return messages
+
+    async def purge_dlq(self) -> int:
+        """Purge all messages from the DLQ (for testing). Returns count of purged messages."""
+        async with self._lock:
+            count = len(self._dlq)
+            self._dlq.clear()
+            logger.info("Dead letter queue purged", extra={"count": count})
+            return count

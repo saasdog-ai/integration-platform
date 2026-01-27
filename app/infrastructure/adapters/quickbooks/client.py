@@ -8,6 +8,15 @@ from app.core.logging import get_logger
 from app.domain.entities import ExternalRecord, OAuthTokens
 from app.domain.interfaces import IntegrationAdapterInterface
 
+# NOTE: For real QuickBooks API implementation, use the http_client module:
+# from app.infrastructure.adapters.http_client import get_http_client, make_request
+#
+# Example usage:
+#   async with get_http_client(base_url="https://quickbooks.api.intuit.com") as client:
+#       response = await client.get(f"/v3/company/{realm_id}/vendor/{vendor_id}")
+#       response.raise_for_status()
+#       return response.json()
+
 logger = get_logger(__name__)
 
 

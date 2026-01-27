@@ -30,7 +30,7 @@ from app.domain.interfaces import (
     IntegrationStateRepositoryInterface,
     SyncJobRepositoryInterface,
 )
-from app.infrastructure.db.database import get_session_context
+from app.infrastructure.db.database import advisory_lock, get_session_context
 from app.infrastructure.db.models import (
     AvailableIntegrationModel,
     EntitySyncStatusModel,
@@ -322,6 +322,7 @@ class IntegrationRepository(IntegrationRepositoryInterface):
             model = result.scalar_one_or_none()
             if model:
                 await session.delete(model)
+                await session.flush()  # Ensure delete is queued before commit
                 return True
             return False
 
@@ -494,6 +495,115 @@ class SyncJobRepository(SyncJobRepositoryInterface):
             models = result.scalars().all()
             return [_model_to_sync_job(m) for m in models]
 
+    async def create_job_if_no_running(
+        self, job: SyncJob
+    ) -> tuple[SyncJob | None, SyncJob | None]:
+        """
+        Atomically check for running jobs and create a new job if none exist.
+
+        Uses database-level advisory lock to prevent race conditions.
+        """
+        async with get_session_context() as session:
+            # Acquire advisory lock for this client/integration combination
+            async with advisory_lock(session, job.client_id, job.integration_id):
+                # Check for running or pending jobs
+                result = await session.execute(
+                    select(SyncJobModel).where(
+                        and_(
+                            SyncJobModel.client_id == job.client_id,
+                            SyncJobModel.integration_id == job.integration_id,
+                            SyncJobModel.status.in_([
+                                SyncJobStatus.RUNNING.value,
+                                SyncJobStatus.PENDING.value,
+                            ]),
+                        )
+                    )
+                )
+                existing_job = result.scalar_one_or_none()
+
+                if existing_job:
+                    # Return the existing running/pending job
+                    return None, _model_to_sync_job(existing_job)
+
+                # No running job, create the new one
+                model = SyncJobModel(
+                    id=job.id,
+                    client_id=job.client_id,
+                    integration_id=job.integration_id,
+                    job_type=job.job_type.value,
+                    status=job.status.value,
+                    job_params=job.job_params,
+                    started_at=job.started_at,
+                    completed_at=job.completed_at,
+                    entities_processed=job.entities_processed,
+                    error_code=job.error_code,
+                    error_message=job.error_message,
+                    error_details=job.error_details,
+                    triggered_by=job.triggered_by.value,
+                    created_by=job.created_by,
+                    updated_by=job.updated_by,
+                )
+                session.add(model)
+                await session.flush()
+                await session.refresh(model)
+                return _model_to_sync_job(model), None
+
+    async def get_stuck_jobs(
+        self,
+        stuck_threshold_minutes: int = 60,
+    ) -> list[SyncJob]:
+        """Find jobs that have been running longer than the threshold."""
+        from datetime import timedelta
+
+        async with get_session_context() as session:
+            cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=stuck_threshold_minutes)
+
+            result = await session.execute(
+                select(SyncJobModel).where(
+                    and_(
+                        SyncJobModel.status == SyncJobStatus.RUNNING.value,
+                        SyncJobModel.started_at < cutoff_time,
+                    )
+                )
+            )
+            models = result.scalars().all()
+            return [_model_to_sync_job(m) for m in models]
+
+    async def terminate_stuck_job(
+        self,
+        job_id: UUID,
+        reason: str = "Job exceeded maximum runtime",
+    ) -> SyncJob | None:
+        """Terminate a stuck job by marking it as failed."""
+        async with get_session_context() as session:
+            result = await session.execute(
+                select(SyncJobModel).where(
+                    and_(
+                        SyncJobModel.id == job_id,
+                        SyncJobModel.status == SyncJobStatus.RUNNING.value,
+                    )
+                )
+            )
+            model = result.scalar_one_or_none()
+
+            if not model:
+                return None
+
+            now = datetime.now(timezone.utc)
+            model.status = SyncJobStatus.FAILED.value
+            model.completed_at = now
+            model.error_code = "JOB_TIMEOUT"
+            model.error_message = reason
+            model.error_details = {
+                "terminated_at": now.isoformat(),
+                "started_at": model.started_at.isoformat() if model.started_at else None,
+                "reason": "automatic_termination",
+            }
+
+            await session.flush()
+            await session.refresh(model)
+            return _model_to_sync_job(model)
+
 
 class IntegrationStateRepository(IntegrationStateRepositoryInterface):
     """PostgreSQL implementation of IntegrationStateRepositoryInterface."""
@@ -663,6 +773,7 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
                 model.error_details = None
                 if external_record_id:
                     model.external_record_id = external_record_id
+                await session.flush()  # Ensure changes are queued before commit
 
     async def get_entity_sync_status(
         self,
@@ -708,6 +819,7 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
                 model.last_successful_sync_at = now
                 model.last_sync_job_id = job_id
                 model.records_synced_count += records_count
+                await session.flush()  # Flush updates before refresh
             else:
                 model = EntitySyncStatusModel(
                     client_id=client_id,
@@ -718,7 +830,161 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
                     records_synced_count=records_count,
                 )
                 session.add(model)
+                await session.flush()  # Flush insert before refresh
 
-            await session.flush()
             await session.refresh(model)
             return _model_to_entity_sync_status(model)
+
+    async def batch_upsert_records(
+        self,
+        records: list[IntegrationStateRecord],
+    ) -> list[IntegrationStateRecord]:
+        """
+        Upsert multiple records in a single transaction with advisory lock.
+
+        Uses advisory lock to prevent concurrent batch operations on the same
+        client/integration combination from racing and potentially overwriting
+        each other's changes.
+
+        If any record fails, all changes are rolled back.
+        """
+        if not records:
+            return []
+
+        results: list[IntegrationStateRecord] = []
+        async with get_session_context() as session:
+            # All records in a batch should be for the same client/integration
+            # Use advisory lock to prevent concurrent batch operations racing
+            first_record = records[0]
+            async with advisory_lock(session, first_record.client_id, first_record.integration_id):
+                for record in records:
+                    # Check if record exists
+                    existing = await session.execute(
+                        select(IntegrationStateModel).where(
+                            and_(
+                                IntegrationStateModel.client_id == record.client_id,
+                                IntegrationStateModel.integration_id == record.integration_id,
+                                IntegrationStateModel.entity_type == record.entity_type,
+                                IntegrationStateModel.internal_record_id == record.internal_record_id,
+                            )
+                        )
+                    )
+                    model = existing.scalar_one_or_none()
+
+                    if model:
+                        # Update existing
+                        model.external_record_id = record.external_record_id
+                        model.sync_status = record.sync_status.value
+                        model.sync_direction = record.sync_direction.value if record.sync_direction else None
+                        model.internal_version_id = record.internal_version_id
+                        model.external_version_id = record.external_version_id
+                        model.last_sync_version_id = record.last_sync_version_id
+                        model.last_synced_at = record.last_synced_at
+                        model.error_code = record.error_code
+                        model.error_message = record.error_message
+                        model.error_details = record.error_details
+                        model.metadata_ = record.metadata
+                    else:
+                        # Insert new
+                        model = IntegrationStateModel(
+                            id=record.id,
+                            client_id=record.client_id,
+                            integration_id=record.integration_id,
+                            entity_type=record.entity_type,
+                            internal_record_id=record.internal_record_id,
+                            external_record_id=record.external_record_id,
+                            sync_status=record.sync_status.value,
+                            sync_direction=record.sync_direction.value if record.sync_direction else None,
+                            internal_version_id=record.internal_version_id,
+                            external_version_id=record.external_version_id,
+                            last_sync_version_id=record.last_sync_version_id,
+                            last_synced_at=record.last_synced_at,
+                            error_code=record.error_code,
+                            error_message=record.error_message,
+                            error_details=record.error_details,
+                            metadata_=record.metadata,
+                        )
+                        session.add(model)
+
+                # Flush all changes at once (still within transaction)
+                await session.flush()
+
+                # Refresh all models and convert to entities
+                for record in records:
+                    result = await session.execute(
+                        select(IntegrationStateModel).where(
+                            and_(
+                                IntegrationStateModel.client_id == record.client_id,
+                                IntegrationStateModel.integration_id == record.integration_id,
+                                IntegrationStateModel.entity_type == record.entity_type,
+                                IntegrationStateModel.internal_record_id == record.internal_record_id,
+                            )
+                        )
+                    )
+                    model = result.scalar_one()
+                    results.append(_model_to_integration_state(model))
+
+        return results
+
+    async def batch_mark_synced(
+        self,
+        updates: list[tuple[UUID, UUID, str | None]],  # (record_id, client_id, external_record_id)
+        client_id: UUID | None = None,
+        integration_id: UUID | None = None,
+    ) -> None:
+        """
+        Mark multiple records as synced in a single transaction with advisory lock.
+
+        Uses advisory lock when client_id and integration_id are provided to prevent
+        concurrent batch operations from racing.
+
+        If any update fails, all changes are rolled back.
+
+        Args:
+            updates: List of (record_id, client_id, external_record_id) tuples.
+            client_id: Optional client_id for advisory lock (recommended).
+            integration_id: Optional integration_id for advisory lock (recommended).
+        """
+        if not updates:
+            return
+
+        async with get_session_context() as session:
+            # Use advisory lock if client_id and integration_id provided
+            if client_id and integration_id:
+                async with advisory_lock(session, client_id, integration_id):
+                    await self._do_batch_mark_synced(session, updates)
+            else:
+                await self._do_batch_mark_synced(session, updates)
+
+    async def _do_batch_mark_synced(
+        self,
+        session: AsyncSession,
+        updates: list[tuple[UUID, UUID, str | None]],
+    ) -> None:
+        """Internal method to perform batch mark synced operations."""
+        now = datetime.now(timezone.utc)
+
+        for record_id, client_id, external_record_id in updates:
+            result = await session.execute(
+                select(IntegrationStateModel).where(
+                    and_(
+                        IntegrationStateModel.id == record_id,
+                        IntegrationStateModel.client_id == client_id,
+                    )
+                )
+            )
+            model = result.scalar_one_or_none()
+            if model:
+                model.sync_status = RecordSyncStatus.SYNCED.value
+                model.last_synced_at = now
+                model.last_sync_version_id = max(
+                    model.internal_version_id, model.external_version_id
+                )
+                model.error_code = None
+                model.error_message = None
+                model.error_details = None
+                if external_record_id:
+                    model.external_record_id = external_record_id
+
+        # Flush all changes at once (within single transaction)
+        await session.flush()

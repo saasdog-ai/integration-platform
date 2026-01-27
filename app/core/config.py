@@ -30,10 +30,12 @@ class Settings(BaseSettings):
     database_max_overflow: int = Field(default=20)
     database_pool_recycle: int = Field(default=3600)
     database_pool_timeout: int = Field(default=30)
+    database_statement_timeout_ms: int = Field(default=30000)  # 30 seconds max query time
 
     # API
     api_host: str = Field(default="0.0.0.0")
     api_port: int = Field(default=8000)
+    api_max_request_size: int = Field(default=10 * 1024 * 1024)  # 10 MB max request body
 
     # JWT Authentication
     auth_enabled: bool = Field(default=False)
@@ -55,6 +57,7 @@ class Settings(BaseSettings):
     # Queue Configuration
     queue_url: str | None = Field(default=None)
     queue_wait_time_seconds: int = Field(default=20)
+    queue_max_receive_count: int = Field(default=3)  # Max retries before DLQ
 
     # Encryption (KMS)
     kms_key_id: str | None = Field(default=None)
@@ -71,10 +74,33 @@ class Settings(BaseSettings):
     # Job Runner
     job_runner_max_workers: int = Field(default=5)
     job_runner_enabled: bool = Field(default=True)
+    job_stuck_timeout_minutes: int = Field(default=60)  # Jobs running longer than this are considered stuck
+    job_termination_enabled: bool = Field(default=True)  # Enable automatic stuck job termination
+
+    # Feature Flags - can be used to disable specific integrations or features
+    # Format: comma-separated list of integration names to disable
+    disabled_integrations: list[str] = Field(default_factory=list)
+    sync_globally_disabled: bool = Field(default=False)  # Kill switch for all sync jobs
 
     # Scheduler
     scheduler_enabled: bool = Field(default=True)
     scheduler_timezone: str = Field(default="UTC")
+
+    # External API timeouts (for integration adapters)
+    api_connect_timeout: float = Field(default=10.0)  # Connection timeout in seconds
+    api_read_timeout: float = Field(default=30.0)  # Read timeout in seconds
+    api_total_timeout: float = Field(default=60.0)  # Total request timeout in seconds
+
+    # Rate Limiting (in-process)
+    # NOTE: In production, rate limiting should be done at the API gateway level
+    # (Kong, AWS API Gateway, nginx) or via Redis for distributed rate limiting.
+    # This in-process rate limiter is useful for:
+    # - Local development
+    # - Single-instance deployments
+    # - Defense-in-depth as a secondary limit
+    rate_limit_enabled: bool = Field(default=False)  # Disabled by default - use API gateway
+    rate_limit_requests_per_minute: int = Field(default=60)  # Max requests per minute per client
+    rate_limit_burst: int = Field(default=10)  # Allow short bursts above limit
 
     # CORS
     cors_allowed_origins: list[str] = Field(
@@ -91,6 +117,19 @@ class Settings(BaseSettings):
             except json.JSONDecodeError:
                 return [origin.strip() for origin in v.split(",")]
         return v
+
+    @field_validator("disabled_integrations", mode="before")
+    @classmethod
+    def parse_disabled_integrations(cls, v: str | list[str]) -> list[str]:
+        """Parse disabled integrations from JSON string, comma-separated, or list."""
+        if isinstance(v, str):
+            if not v.strip():
+                return []
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                return [name.strip() for name in v.split(",") if name.strip()]
+        return v or []
 
     @property
     def database_url_sync(self) -> str:

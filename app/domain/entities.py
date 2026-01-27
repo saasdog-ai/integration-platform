@@ -68,8 +68,9 @@ class OAuthConfig(BaseModel):
     authorization_url: str
     token_url: str
     scopes: list[str] = Field(default_factory=list)
-    client_id_env_var: str | None = None
-    client_secret_env_var: str | None = None
+    client_id_env_var: str | None = None  # Name of env var holding client_id
+    client_secret_env_var: str | None = None  # Name of env var holding client_secret
+    client_id: str | None = None  # Actual client_id (loaded from env var)
 
 
 class AvailableIntegration(BaseEntity):

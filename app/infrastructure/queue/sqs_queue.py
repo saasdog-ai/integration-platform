@@ -11,6 +11,10 @@ from app.domain.interfaces import MessageQueueInterface
 
 logger = get_logger(__name__)
 
+# Default timeouts for SQS operations (in seconds)
+DEFAULT_CONNECT_TIMEOUT = 10  # Time to establish connection
+DEFAULT_READ_TIMEOUT = 30  # Time to wait for response (should be > WaitTimeSeconds)
+
 
 class SQSQueue(MessageQueueInterface):
     """AWS SQS message queue implementation."""
@@ -39,10 +43,11 @@ class SQSQueue(MessageQueueInterface):
             raise QueueError("SQS queue URL not configured")
 
     def _get_client(self):
-        """Lazily create SQS client."""
+        """Lazily create SQS client with proper timeouts."""
         if self._client is None:
             try:
                 import boto3
+                from botocore.config import Config
 
                 settings = get_settings()
                 session_kwargs = {}
@@ -51,7 +56,21 @@ class SQSQueue(MessageQueueInterface):
                 if settings.aws_secret_access_key:
                     session_kwargs["aws_secret_access_key"] = settings.aws_secret_access_key
 
-                client_kwargs = {"region_name": self._region}
+                # Configure timeouts to prevent operations from hanging indefinitely
+                # read_timeout should be > WaitTimeSeconds for long polling to work properly
+                boto_config = Config(
+                    connect_timeout=DEFAULT_CONNECT_TIMEOUT,
+                    read_timeout=DEFAULT_READ_TIMEOUT,
+                    retries={
+                        "max_attempts": 3,
+                        "mode": "adaptive",  # Uses exponential backoff with jitter
+                    },
+                )
+
+                client_kwargs = {
+                    "region_name": self._region,
+                    "config": boto_config,
+                }
                 if self._endpoint_url:
                     client_kwargs["endpoint_url"] = self._endpoint_url
 

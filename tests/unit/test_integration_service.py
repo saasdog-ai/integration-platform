@@ -179,9 +179,11 @@ class TestOAuthFlow:
         )
 
         assert "oauth.example.com/authorize" in auth_url
-        assert "redirect_uri=https://app.example.com/callback" in auth_url
+        # URL-encoded redirect_uri for security
+        assert "redirect_uri=https%3A%2F%2Fapp.example.com%2Fcallback" in auth_url
         assert "state=csrf-token-123" in auth_url
-        assert "scope=read%20write" in auth_url or "scope=read write" in auth_url
+        # Scope with space encoded as + (urlencode default)
+        assert "scope=read+write" in auth_url
 
     async def test_get_oauth_authorization_url_no_oauth_config(
         self, service, mock_repo, sample_client_id

@@ -150,6 +150,59 @@ class SyncJobRepositoryInterface(ABC):
         """Get currently running jobs for a client/integration."""
         pass
 
+    @abstractmethod
+    async def create_job_if_no_running(
+        self, job: SyncJob
+    ) -> tuple[SyncJob | None, SyncJob | None]:
+        """
+        Atomically check for running jobs and create a new job if none exist.
+
+        Uses database-level advisory lock to prevent race conditions.
+
+        Args:
+            job: The job to create.
+
+        Returns:
+            Tuple of (created_job, running_job):
+            - If no running jobs: (created_job, None)
+            - If running job exists: (None, running_job)
+        """
+        pass
+
+    @abstractmethod
+    async def get_stuck_jobs(
+        self,
+        stuck_threshold_minutes: int = 60,
+    ) -> list[SyncJob]:
+        """
+        Find jobs that have been running longer than the threshold.
+
+        Args:
+            stuck_threshold_minutes: Minutes after which a running job is considered stuck.
+
+        Returns:
+            List of stuck jobs.
+        """
+        pass
+
+    @abstractmethod
+    async def terminate_stuck_job(
+        self,
+        job_id: UUID,
+        reason: str = "Job exceeded maximum runtime",
+    ) -> SyncJob | None:
+        """
+        Terminate a stuck job by marking it as failed.
+
+        Args:
+            job_id: The job to terminate.
+            reason: Reason for termination.
+
+        Returns:
+            The terminated job, or None if job not found or not running.
+        """
+        pass
+
 
 class IntegrationStateRepositoryInterface(ABC):
     """Interface for integration state data access."""
@@ -240,6 +293,47 @@ class IntegrationStateRepositoryInterface(ABC):
         """Update the entity sync status after a sync."""
         pass
 
+    @abstractmethod
+    async def batch_upsert_records(
+        self,
+        records: list[IntegrationStateRecord],
+    ) -> list[IntegrationStateRecord]:
+        """
+        Upsert multiple records in a single transaction.
+
+        If any record fails, all changes are rolled back.
+        This prevents orphaned records on partial failures.
+
+        Args:
+            records: List of records to upsert.
+
+        Returns:
+            List of upserted records.
+        """
+        pass
+
+    @abstractmethod
+    async def batch_mark_synced(
+        self,
+        updates: list[tuple[UUID, UUID, str | None]],  # (record_id, client_id, external_record_id)
+        client_id: UUID | None = None,
+        integration_id: UUID | None = None,
+    ) -> None:
+        """
+        Mark multiple records as synced in a single transaction.
+
+        Uses advisory lock when client_id and integration_id are provided to prevent
+        concurrent batch operations from racing.
+
+        If any update fails, all changes are rolled back.
+
+        Args:
+            updates: List of (record_id, client_id, external_record_id) tuples.
+            client_id: Optional client_id for advisory lock (recommended).
+            integration_id: Optional integration_id for advisory lock (recommended).
+        """
+        pass
+
 
 # =============================================================================
 # Queue Interface
@@ -279,6 +373,40 @@ class MessageQueueInterface(ABC):
         visibility_timeout: int,
     ) -> None:
         """Extend message visibility for long-running jobs."""
+        pass
+
+    @abstractmethod
+    async def send_to_dlq(
+        self,
+        message: QueueMessage,
+        error: str,
+    ) -> str:
+        """
+        Send a failed message to the dead letter queue.
+
+        Args:
+            message: The original message that failed processing.
+            error: The error that caused the failure.
+
+        Returns:
+            The DLQ message ID.
+        """
+        pass
+
+    @abstractmethod
+    async def get_dlq_messages(
+        self,
+        max_messages: int = 10,
+    ) -> list[QueueMessage]:
+        """
+        Get messages from the dead letter queue for inspection.
+
+        Args:
+            max_messages: Maximum number of messages to retrieve.
+
+        Returns:
+            List of failed messages.
+        """
         pass
 
 

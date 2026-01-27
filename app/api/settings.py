@@ -9,6 +9,7 @@ from app.api.dto import (
     UserSettingsRequest,
     UserSettingsResponse,
 )
+from app.auth import get_client_id
 from app.core.exceptions import NotFoundError, ValidationError
 from app.core.logging import get_logger
 from app.domain.entities import SyncRule, UserIntegrationSettings
@@ -27,17 +28,6 @@ def get_settings_service() -> SettingsService:
     return SettingsService(
         integration_repo=container.integration_repository,
     )
-
-
-def get_client_id() -> UUID:
-    """
-    Dependency to get client ID from request context.
-
-    In production, this would extract client_id from JWT token.
-    """
-    from uuid import uuid4
-
-    return uuid4()
 
 
 def _to_settings_response(settings: UserIntegrationSettings) -> UserSettingsResponse:

@@ -23,7 +23,12 @@ from app.core.exceptions import (
     ValidationError,
 )
 from app.core.logging import get_logger, setup_logging
-from app.core.middleware import LoggingMiddleware, RequestContextMiddleware
+from app.core.middleware import (
+    LoggingMiddleware,
+    RateLimitMiddleware,
+    RequestContextMiddleware,
+    RequestSizeLimitMiddleware,
+)
 from app.infrastructure.db.database import close_db, init_db
 
 logger = get_logger(__name__)
@@ -72,9 +77,11 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Add custom middleware
+    # Add custom middleware (order matters - first added = last to execute on request)
     app.add_middleware(LoggingMiddleware)
     app.add_middleware(RequestContextMiddleware)
+    app.add_middleware(RateLimitMiddleware)  # Rate limit after context is set
+    app.add_middleware(RequestSizeLimitMiddleware)  # Check size early, before processing
 
     # Register exception handlers
     register_exception_handlers(app)

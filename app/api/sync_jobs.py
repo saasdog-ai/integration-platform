@@ -10,6 +10,7 @@ from app.api.dto import (
     SyncJobsResponse,
     TriggerSyncRequest,
 )
+from app.auth import get_client_id
 from app.core.exceptions import ConflictError, NotFoundError, SyncError
 from app.core.logging import get_logger
 from app.domain.entities import SyncJob
@@ -35,17 +36,6 @@ def get_sync_orchestrator() -> SyncOrchestrator:
         encryption_service=container.encryption_service,
         adapter_factory=get_adapter_factory(),
     )
-
-
-def get_client_id() -> UUID:
-    """
-    Dependency to get client ID from request context.
-
-    In production, this would extract client_id from JWT token.
-    """
-    from uuid import uuid4
-
-    return uuid4()
 
 
 def _to_sync_job_response(job: SyncJob) -> SyncJobResponse:

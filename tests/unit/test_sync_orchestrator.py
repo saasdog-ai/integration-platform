@@ -228,11 +228,132 @@ class TestTriggerSync:
         )
         await mock_job_repo.create_job(running_job)
 
-        with pytest.raises(ConflictError):
+        with pytest.raises(ConflictError) as exc_info:
             await orchestrator.trigger_sync(
                 client_id=sample_client_id,
                 integration_id=sample_integration.id,
             )
+        assert "already running or pending" in str(exc_info.value)
+        assert str(running_job.id) in str(exc_info.value.details)
+
+    async def test_trigger_sync_conflict_pending_job(
+        self,
+        orchestrator,
+        mock_job_repo,
+        sample_client_id,
+        sample_integration,
+        connected_user_integration,
+    ):
+        """Test error when job already pending (queued but not yet running)."""
+        # Create pending job
+        now = datetime.now(timezone.utc)
+        pending_job = SyncJob(
+            id=uuid4(),
+            client_id=sample_client_id,
+            integration_id=sample_integration.id,
+            job_type=SyncJobType.INCREMENTAL,
+            status=SyncJobStatus.PENDING,
+            triggered_by=SyncJobTrigger.SCHEDULER,
+            created_at=now,
+            updated_at=now,
+        )
+        await mock_job_repo.create_job(pending_job)
+
+        with pytest.raises(ConflictError) as exc_info:
+            await orchestrator.trigger_sync(
+                client_id=sample_client_id,
+                integration_id=sample_integration.id,
+            )
+        assert "already running or pending" in str(exc_info.value)
+        assert str(pending_job.id) in str(exc_info.value.details)
+
+    async def test_trigger_sync_allowed_after_job_completes(
+        self,
+        orchestrator,
+        mock_job_repo,
+        sample_client_id,
+        sample_integration,
+        connected_user_integration,
+    ):
+        """Test that new job can be created after previous job completes."""
+        now = datetime.now(timezone.utc)
+
+        # Create a completed job
+        completed_job = SyncJob(
+            id=uuid4(),
+            client_id=sample_client_id,
+            integration_id=sample_integration.id,
+            job_type=SyncJobType.INCREMENTAL,
+            status=SyncJobStatus.SUCCEEDED,
+            triggered_by=SyncJobTrigger.SCHEDULER,
+            started_at=now,
+            completed_at=now,
+            created_at=now,
+            updated_at=now,
+        )
+        await mock_job_repo.create_job(completed_job)
+
+        # Should be able to create a new job
+        new_job = await orchestrator.trigger_sync(
+            client_id=sample_client_id,
+            integration_id=sample_integration.id,
+        )
+        assert new_job.status == SyncJobStatus.PENDING
+        assert new_job.id != completed_job.id
+
+    async def test_trigger_sync_allowed_different_integration(
+        self,
+        orchestrator,
+        mock_integration_repo,
+        mock_job_repo,
+        sample_client_id,
+        sample_integration,
+        connected_user_integration,
+    ):
+        """Test that jobs for different integrations don't conflict."""
+        now = datetime.now(timezone.utc)
+
+        # Create another integration and connect it
+        other_integration = mock_integration_repo.seed_available_integration(
+            name="Xero",
+            type="erp",
+            supported_entities=["bill", "invoice"],
+        )
+        other_user_integration = UserIntegration(
+            id=uuid4(),
+            client_id=sample_client_id,
+            integration_id=other_integration.id,
+            status=IntegrationStatus.CONNECTED,
+            credentials_encrypted=b"encrypted_creds",
+            credentials_key_id="test-key-id",
+            external_account_id="ext-account-456",
+            last_connected_at=now,
+            created_at=now,
+            updated_at=now,
+        )
+        await mock_integration_repo.create_user_integration(other_user_integration)
+
+        # Create running job for first integration
+        running_job = SyncJob(
+            id=uuid4(),
+            client_id=sample_client_id,
+            integration_id=sample_integration.id,
+            job_type=SyncJobType.INCREMENTAL,
+            status=SyncJobStatus.RUNNING,
+            triggered_by=SyncJobTrigger.SCHEDULER,
+            started_at=now,
+            created_at=now,
+            updated_at=now,
+        )
+        await mock_job_repo.create_job(running_job)
+
+        # Should be able to create job for different integration
+        new_job = await orchestrator.trigger_sync(
+            client_id=sample_client_id,
+            integration_id=other_integration.id,
+        )
+        assert new_job.status == SyncJobStatus.PENDING
+        assert new_job.integration_id == other_integration.id
 
     async def test_trigger_sync_invalid_entity_types(
         self,

@@ -1,8 +1,9 @@
 """Integration management service."""
 
 import json
+import re
 from datetime import datetime, timezone
-from typing import Any
+from urllib.parse import urlencode
 from uuid import UUID, uuid4
 
 from app.core.exceptions import (
@@ -26,6 +27,52 @@ from app.domain.interfaces import (
 )
 
 logger = get_logger(__name__)
+
+# Transient errors that should not mark integration as permanently failed
+TRANSIENT_ERROR_PATTERNS = [
+    r"timeout",
+    r"connection.*refused",
+    r"connection.*reset",
+    r"temporary.*failure",
+    r"service.*unavailable",
+    r"too.*many.*requests",
+    r"rate.*limit",
+    r"network.*error",
+    r"dns.*error",
+    r"ssl.*error",
+]
+
+def _is_transient_error(error: Exception) -> bool:
+    """Check if an error is transient (network/temporary) vs permanent."""
+    error_msg = str(error).lower()
+    for pattern in TRANSIENT_ERROR_PATTERNS:
+        if re.search(pattern, error_msg):
+            return True
+    # Also check exception type
+    error_type = type(error).__name__.lower()
+    if any(t in error_type for t in ["timeout", "connection", "network"]):
+        return True
+    return False
+
+
+def _sanitize_error_for_log(error: Exception) -> str:
+    """Sanitize error message to remove potential credentials."""
+    error_msg = str(error)
+    # Remove potential tokens/secrets from error messages
+    # Pattern matches common token formats
+    sanitized = re.sub(
+        r'(token|bearer|key|secret|password|credential|auth)["\s:=]+[^\s"\'&]{10,}',
+        r'\1=[REDACTED]',
+        error_msg,
+        flags=re.IGNORECASE,
+    )
+    # Also redact long base64-like strings that could be tokens
+    sanitized = re.sub(
+        r'[A-Za-z0-9+/=]{40,}',
+        '[REDACTED_TOKEN]',
+        sanitized,
+    )
+    return sanitized
 
 
 class IntegrationService:
@@ -83,6 +130,7 @@ class IntegrationService:
         integration_id: UUID,
         redirect_uri: str,
         state: str | None = None,
+        allowed_redirect_uris: list[str] | None = None,
     ) -> str:
         """
         Get OAuth authorization URL for connecting an integration.
@@ -92,6 +140,7 @@ class IntegrationService:
             integration_id: The integration to connect.
             redirect_uri: OAuth redirect URI.
             state: Optional state parameter for CSRF protection.
+            allowed_redirect_uris: Whitelist of allowed redirect URIs.
 
         Returns:
             The authorization URL to redirect the user to.
@@ -103,6 +152,21 @@ class IntegrationService:
                 f"Integration {integration.name} does not support OAuth"
             )
 
+        # Validate redirect_uri against whitelist if provided
+        if allowed_redirect_uris:
+            if redirect_uri not in allowed_redirect_uris:
+                raise ValidationError(
+                    f"Invalid redirect_uri. Must be one of: {', '.join(allowed_redirect_uris)}"
+                )
+
+        # Validate state parameter format if provided (prevent injection)
+        if state:
+            # State should be alphanumeric with limited special chars
+            if not re.match(r'^[a-zA-Z0-9_\-\.]{1,128}$', state):
+                raise ValidationError(
+                    "Invalid state parameter. Must be alphanumeric with max 128 characters."
+                )
+
         # Check if already connected
         existing = await self._repo.get_user_integration(client_id, integration_id)
         if existing and existing.status == IntegrationStatus.CONNECTED:
@@ -111,18 +175,23 @@ class IntegrationService:
                 resource_type="UserIntegration",
             )
 
-        # Build authorization URL
+        # Build authorization URL with proper URL encoding
         oauth_config = integration.oauth_config
         params = {
             "response_type": "code",
             "redirect_uri": redirect_uri,
             "scope": " ".join(oauth_config.scopes),
         }
+
+        # Add OAuth client_id from config if available
+        if oauth_config.client_id:
+            params["client_id"] = oauth_config.client_id
+
         if state:
             params["state"] = state
 
-        # Note: client_id would come from environment variables in production
-        query = "&".join(f"{k}={v}" for k, v in params.items())
+        # Use urlencode for proper URL encoding (prevents injection attacks)
+        query = urlencode(params)
         auth_url = f"{oauth_config.authorization_url}?{query}"
 
         logger.info(
@@ -167,17 +236,20 @@ class IntegrationService:
             adapter = self._adapter_factory.get_adapter(integration, "", None)
             tokens = await adapter.authenticate(auth_code, redirect_uri)
         except Exception as e:
+            # Sanitize error to avoid credential exposure in logs
+            sanitized_error = _sanitize_error_for_log(e)
             logger.error(
                 "OAuth authentication failed",
                 extra={
                     "client_id": str(client_id),
                     "integration": integration.name,
-                    "error": str(e),
+                    "error": sanitized_error,
+                    "error_type": type(e).__name__,
                 },
             )
             raise IntegrationError(
                 integration.name,
-                f"OAuth authentication failed: {e}",
+                f"OAuth authentication failed: {sanitized_error}",
             )
 
         # Encrypt and store credentials
@@ -345,20 +417,29 @@ class IntegrationService:
             )
             new_tokens = await adapter.refresh_token(current_tokens.refresh_token)
         except Exception as e:
+            # Sanitize error to avoid credential exposure in logs
+            sanitized_error = _sanitize_error_for_log(e)
+            is_transient = _is_transient_error(e)
+
             logger.error(
                 "Token refresh failed",
                 extra={
                     "client_id": str(client_id),
                     "integration": integration.name,
-                    "error": str(e),
+                    "error": sanitized_error,
+                    "error_type": type(e).__name__,
+                    "is_transient": is_transient,
                 },
             )
-            # Mark integration as error state
-            user_integration.status = IntegrationStatus.ERROR
-            await self._repo.update_user_integration(user_integration)
+
+            # Only mark as ERROR for permanent failures, not transient network issues
+            if not is_transient:
+                user_integration.status = IntegrationStatus.ERROR
+                await self._repo.update_user_integration(user_integration)
+
             raise IntegrationError(
                 integration.name,
-                f"Token refresh failed: {e}",
+                f"Token refresh failed: {sanitized_error}",
             )
 
         # Encrypt and store new credentials
