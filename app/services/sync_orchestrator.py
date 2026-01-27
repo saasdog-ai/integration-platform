@@ -13,6 +13,7 @@ from app.core.exceptions import (
 )
 from app.core.logging import get_logger
 from app.domain.entities import (
+    EntitySyncRequest,
     IntegrationStateRecord,
     SyncJob,
     SyncJobMessage,
@@ -74,6 +75,7 @@ class SyncOrchestrator:
         integration_id: UUID,
         job_type: SyncJobType = SyncJobType.INCREMENTAL,
         entity_types: list[str] | None = None,
+        entity_requests: list[EntitySyncRequest] | None = None,
         triggered_by: SyncJobTrigger = SyncJobTrigger.USER,
         user_id: str | None = None,
     ) -> SyncJob:
@@ -84,7 +86,8 @@ class SyncOrchestrator:
             client_id: The tenant/client ID.
             integration_id: The integration to sync.
             job_type: Type of sync (full, incremental, entity).
-            entity_types: Specific entity types to sync (optional).
+            entity_types: Simple list of entity types to sync (optional).
+            entity_requests: Detailed requests with optional record IDs (optional).
             triggered_by: What triggered the sync.
             user_id: Optional user ID for audit.
 
@@ -130,7 +133,16 @@ class SyncOrchestrator:
                     details={"supported": list(supported)},
                 )
 
-        # Create sync job
+        # Build job_params to store in DB (for idempotent retry if queue send fails)
+        job_params: dict[str, Any] = {}
+        if entity_types:
+            job_params["entity_types"] = entity_types
+        if entity_requests:
+            job_params["entity_requests"] = [
+                req.model_dump(mode="json") for req in entity_requests
+            ]
+
+        # Create sync job with job_params
         now = datetime.now(timezone.utc)
         job = SyncJob(
             id=uuid4(),
@@ -139,19 +151,23 @@ class SyncOrchestrator:
             job_type=job_type,
             status=SyncJobStatus.PENDING,
             triggered_by=triggered_by,
+            job_params=job_params if job_params else None,
             created_at=now,
             updated_at=now,
             created_by=user_id,
         )
         job = await self._job_repo.create_job(job)
 
-        # Dispatch job to queue
+        # Dispatch job to queue (params come from job_params stored in DB)
         message = SyncJobMessage(
             job_id=job.id,
             client_id=client_id,
             integration_id=integration_id,
             job_type=job_type,
-            entity_types=entity_types,
+            entity_types=job_params.get("entity_types") if job_params else None,
+            entity_requests=[
+                EntitySyncRequest(**req) for req in job_params.get("entity_requests", [])
+            ] if job_params and job_params.get("entity_requests") else None,
         )
         await self._queue.send_message(message.model_dump(mode="json"))
 

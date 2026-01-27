@@ -235,6 +235,9 @@ class SyncJobModel(Base, TimestampMixin):
     triggered_by: Mapped[str] = mapped_column(
         String(50), nullable=False, default="user"
     )  # user, scheduler, webhook
+    job_params: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB, nullable=True
+    )  # Full job request params (entity_types, entity_requests, etc.)
 
     # Relationships
     integration: Mapped["AvailableIntegrationModel"] = relationship()

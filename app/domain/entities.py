@@ -113,6 +113,7 @@ class SyncJob(BaseEntity):
     error_message: str | None = None
     error_details: dict[str, Any] | None = None
     triggered_by: SyncJobTrigger = SyncJobTrigger.USER
+    job_params: dict[str, Any] | None = None  # Full request params for idempotent retry
 
     # Relationships (loaded separately)
     integration: AvailableIntegration | None = None
