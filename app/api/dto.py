@@ -192,10 +192,13 @@ class SyncJobResponse(BaseResponse):
 
 
 class SyncJobsResponse(BaseResponse):
-    """List of sync jobs."""
+    """Paginated list of sync jobs."""
 
     jobs: list[SyncJobResponse]
     total: int
+    page: int = 1
+    page_size: int = 20
+    total_pages: int = 1
 
 
 class SyncJobListParams(BaseModel):
@@ -204,7 +207,8 @@ class SyncJobListParams(BaseModel):
     integration_id: UUID | None = None
     status: SyncJobStatus | None = None
     since: datetime | None = None
-    limit: int = Field(default=50, ge=1, le=100)
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=20, ge=1, le=100)
 
 
 # =============================================================================

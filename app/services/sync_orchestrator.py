@@ -237,19 +237,34 @@ class SyncOrchestrator:
                 job.integration_id
             )
 
-            if not user_integration or not user_integration.credentials_encrypted:
-                raise SyncError("Integration credentials not found")
+            # Get credentials - allow mock token in development mode
+            settings = get_settings()
+            access_token = "mock_dev_token"  # Default for dev
 
-            credentials = await self._encryption.decrypt(
-                user_integration.credentials_encrypted,
-                user_integration.credentials_key_id,
-            )
-            creds_dict = json.loads(credentials.decode())
+            if user_integration and user_integration.credentials_encrypted:
+                try:
+                    credentials = await self._encryption.decrypt(
+                        user_integration.credentials_encrypted,
+                        user_integration.credentials_key_id,
+                    )
+                    creds_dict = json.loads(credentials.decode())
+                    access_token = creds_dict.get("access_token", access_token)
+                except Exception as e:
+                    if settings.app_env != "development":
+                        raise SyncError(f"Failed to decrypt credentials: {e}")
+                    logger.warning(
+                        "Using mock token - credential decryption failed in dev mode",
+                        extra={"error": str(e)},
+                    )
+            elif settings.app_env != "development":
+                raise SyncError("Integration credentials not found")
+            else:
+                logger.info("Using mock token - no credentials in dev mode")
 
             adapter = self._adapter_factory.get_adapter(
                 integration,
-                creds_dict["access_token"],
-                user_integration.external_account_id,
+                access_token,
+                user_integration.external_account_id if user_integration else None,
             )
 
             # Process each enabled entity rule
@@ -658,4 +673,23 @@ class SyncOrchestrator:
             status=status,
             since=since,
             limit=limit,
+        )
+
+    async def get_jobs_paginated(
+        self,
+        client_id: UUID,
+        integration_id: UUID | None = None,
+        status: SyncJobStatus | None = None,
+        since: datetime | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[SyncJob], int]:
+        """Get paginated sync jobs for a client. Returns (jobs, total_count)."""
+        return await self._job_repo.get_jobs_for_client_paginated(
+            client_id,
+            integration_id=integration_id,
+            status=status,
+            since=since,
+            page=page,
+            page_size=page_size,
         )

@@ -69,7 +69,11 @@ async def trigger_sync(
     client_id: UUID = Depends(get_client_id),
     orchestrator: SyncOrchestrator = Depends(get_sync_orchestrator),
 ) -> SyncJobResponse:
-    """Trigger a new sync job."""
+    """
+    Trigger a new sync job.
+
+    The job is queued for async processing by the job runner.
+    """
     try:
         job = await orchestrator.trigger_sync(
             client_id=client_id,
@@ -105,21 +109,27 @@ async def list_sync_jobs(
     integration_id: UUID | None = Query(default=None),
     job_status: SyncJobStatus | None = Query(default=None, alias="status"),
     since: datetime | None = Query(default=None),
-    limit: int = Query(default=50, ge=1, le=100),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
     client_id: UUID = Depends(get_client_id),
     orchestrator: SyncOrchestrator = Depends(get_sync_orchestrator),
 ) -> SyncJobsResponse:
-    """List sync jobs with optional filters."""
-    jobs = await orchestrator.get_jobs(
+    """List sync jobs with optional filters and pagination."""
+    jobs, total = await orchestrator.get_jobs_paginated(
         client_id=client_id,
         integration_id=integration_id,
         status=job_status,
         since=since,
-        limit=limit,
+        page=page,
+        page_size=page_size,
     )
+    total_pages = (total + page_size - 1) // page_size  # Ceiling division
     return SyncJobsResponse(
         jobs=[_to_sync_job_response(j) for j in jobs],
-        total=len(jobs),
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
     )
 
 
@@ -158,6 +168,46 @@ async def cancel_sync_job(
     try:
         job = await orchestrator.cancel_sync_job(client_id, job_id)
         return _to_sync_job_response(job)
+    except NotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Sync job not found: {job_id}",
+        )
+    except SyncError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+
+@router.post(
+    "/{job_id}/execute",
+    response_model=SyncJobResponse,
+    summary="Execute a sync job immediately (dev/demo only)",
+)
+async def execute_sync_job(
+    job_id: UUID,
+    client_id: UUID = Depends(get_client_id),
+    orchestrator: SyncOrchestrator = Depends(get_sync_orchestrator),
+) -> SyncJobResponse:
+    """
+    Execute a pending sync job immediately.
+
+    This bypasses the queue and executes the job synchronously.
+    Intended for development and demo purposes only.
+    """
+    try:
+        # Get the job
+        job = await orchestrator.get_job(client_id, job_id)
+
+        # Check if job is pending
+        if job.status != SyncJobStatus.PENDING:
+            raise SyncError(f"Job is not pending (current status: {job.status.value})")
+
+        # Execute immediately
+        result = await orchestrator.execute_sync_job(job)
+        return _to_sync_job_response(result)
+
     except NotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

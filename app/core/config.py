@@ -34,7 +34,7 @@ class Settings(BaseSettings):
 
     # API
     api_host: str = Field(default="0.0.0.0")
-    api_port: int = Field(default=8000)
+    api_port: int = Field(default=8001)  # 8001 to avoid conflict with import-export-orchestrator
     api_max_request_size: int = Field(default=10 * 1024 * 1024)  # 10 MB max request body
 
     # JWT Authentication
@@ -74,7 +74,7 @@ class Settings(BaseSettings):
     # Job Runner
     job_runner_max_workers: int = Field(default=5)
     job_runner_enabled: bool = Field(default=True)
-    job_stuck_timeout_minutes: int = Field(default=60)  # Jobs running longer than this are considered stuck
+    job_stuck_timeout_minutes: int = Field(default=360)  # 6 hours - jobs running longer are considered stuck
     job_termination_enabled: bool = Field(default=True)  # Enable automatic stuck job termination
 
     # Feature Flags - can be used to disable specific integrations or features
@@ -104,7 +104,7 @@ class Settings(BaseSettings):
 
     # CORS
     cors_allowed_origins: list[str] = Field(
-        default=["http://localhost:3000", "http://localhost:4000"]
+        default=["http://localhost:3000", "http://localhost:3001", "http://localhost:4000"]
     )
 
     @field_validator("cors_allowed_origins", mode="before")

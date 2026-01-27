@@ -6,6 +6,7 @@ from uuid import UUID
 
 from sqlalchemy import and_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.domain.entities import (
     AvailableIntegration,
@@ -246,6 +247,10 @@ class IntegrationRepository(IntegrationRepositoryInterface):
         async with get_session_context() as session:
             result = await session.execute(
                 select(UserIntegrationModel)
+                .options(
+                    selectinload(UserIntegrationModel.integration),
+                    selectinload(UserIntegrationModel.settings),
+                )
                 .where(
                     and_(
                         UserIntegrationModel.client_id == client_id,
@@ -259,9 +264,12 @@ class IntegrationRepository(IntegrationRepositoryInterface):
     async def get_user_integrations(self, client_id: UUID) -> list[UserIntegration]:
         async with get_session_context() as session:
             result = await session.execute(
-                select(UserIntegrationModel).where(
-                    UserIntegrationModel.client_id == client_id
+                select(UserIntegrationModel)
+                .options(
+                    selectinload(UserIntegrationModel.integration),
+                    selectinload(UserIntegrationModel.settings),
                 )
+                .where(UserIntegrationModel.client_id == client_id)
             )
             models = result.scalars().all()
             return [_model_to_user_integration(m) for m in models]
@@ -408,13 +416,21 @@ class SyncJobRepository(SyncJobRepositoryInterface):
             )
             session.add(model)
             await session.flush()
-            await session.refresh(model)
+            # Re-fetch with relationship loaded
+            result = await session.execute(
+                select(SyncJobModel)
+                .options(selectinload(SyncJobModel.integration))
+                .where(SyncJobModel.id == model.id)
+            )
+            model = result.scalar_one()
             return _model_to_sync_job(model)
 
     async def get_job(self, job_id: UUID) -> SyncJob | None:
         async with get_session_context() as session:
             result = await session.execute(
-                select(SyncJobModel).where(SyncJobModel.id == job_id)
+                select(SyncJobModel)
+                .options(selectinload(SyncJobModel.integration))
+                .where(SyncJobModel.id == job_id)
             )
             model = result.scalar_one_or_none()
             return _model_to_sync_job(model) if model else None
@@ -428,7 +444,11 @@ class SyncJobRepository(SyncJobRepositoryInterface):
         limit: int = 100,
     ) -> list[SyncJob]:
         async with get_session_context() as session:
-            query = select(SyncJobModel).where(SyncJobModel.client_id == client_id)
+            query = (
+                select(SyncJobModel)
+                .options(selectinload(SyncJobModel.integration))
+                .where(SyncJobModel.client_id == client_id)
+            )
 
             if integration_id:
                 query = query.where(SyncJobModel.integration_id == integration_id)
@@ -441,6 +461,48 @@ class SyncJobRepository(SyncJobRepositoryInterface):
             result = await session.execute(query)
             models = result.scalars().all()
             return [_model_to_sync_job(m) for m in models]
+
+    async def get_jobs_for_client_paginated(
+        self,
+        client_id: UUID,
+        integration_id: UUID | None = None,
+        status: SyncJobStatus | None = None,
+        since: datetime | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[SyncJob], int]:
+        """Get paginated jobs for a client. Returns (jobs, total_count)."""
+        from sqlalchemy import func
+
+        async with get_session_context() as session:
+            # Build base query conditions
+            conditions = [SyncJobModel.client_id == client_id]
+            if integration_id:
+                conditions.append(SyncJobModel.integration_id == integration_id)
+            if status:
+                conditions.append(SyncJobModel.status == status.value)
+            if since:
+                conditions.append(SyncJobModel.created_at >= since)
+
+            # Count total
+            count_query = select(func.count()).select_from(SyncJobModel).where(*conditions)
+            count_result = await session.execute(count_query)
+            total = count_result.scalar() or 0
+
+            # Get paginated results
+            offset = (page - 1) * page_size
+            query = (
+                select(SyncJobModel)
+                .options(selectinload(SyncJobModel.integration))
+                .where(*conditions)
+                .order_by(SyncJobModel.created_at.desc())
+                .offset(offset)
+                .limit(page_size)
+            )
+            result = await session.execute(query)
+            models = result.scalars().all()
+
+            return [_model_to_sync_job(m) for m in models], total
 
     async def update_job_status(
         self,
@@ -508,7 +570,9 @@ class SyncJobRepository(SyncJobRepositoryInterface):
             async with advisory_lock(session, job.client_id, job.integration_id):
                 # Check for running or pending jobs
                 result = await session.execute(
-                    select(SyncJobModel).where(
+                    select(SyncJobModel)
+                    .options(selectinload(SyncJobModel.integration))
+                    .where(
                         and_(
                             SyncJobModel.client_id == job.client_id,
                             SyncJobModel.integration_id == job.integration_id,
@@ -545,7 +609,13 @@ class SyncJobRepository(SyncJobRepositoryInterface):
                 )
                 session.add(model)
                 await session.flush()
-                await session.refresh(model)
+                # Re-fetch with relationship loaded
+                result = await session.execute(
+                    select(SyncJobModel)
+                    .options(selectinload(SyncJobModel.integration))
+                    .where(SyncJobModel.id == model.id)
+                )
+                model = result.scalar_one()
                 return _model_to_sync_job(model), None
 
     async def get_stuck_jobs(
@@ -559,7 +629,9 @@ class SyncJobRepository(SyncJobRepositoryInterface):
             cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=stuck_threshold_minutes)
 
             result = await session.execute(
-                select(SyncJobModel).where(
+                select(SyncJobModel)
+                .options(selectinload(SyncJobModel.integration))
+                .where(
                     and_(
                         SyncJobModel.status == SyncJobStatus.RUNNING.value,
                         SyncJobModel.started_at < cutoff_time,
@@ -577,7 +649,9 @@ class SyncJobRepository(SyncJobRepositoryInterface):
         """Terminate a stuck job by marking it as failed."""
         async with get_session_context() as session:
             result = await session.execute(
-                select(SyncJobModel).where(
+                select(SyncJobModel)
+                .options(selectinload(SyncJobModel.integration))
+                .where(
                     and_(
                         SyncJobModel.id == job_id,
                         SyncJobModel.status == SyncJobStatus.RUNNING.value,
@@ -601,7 +675,13 @@ class SyncJobRepository(SyncJobRepositoryInterface):
             }
 
             await session.flush()
-            await session.refresh(model)
+            # Re-fetch with relationship loaded
+            result = await session.execute(
+                select(SyncJobModel)
+                .options(selectinload(SyncJobModel.integration))
+                .where(SyncJobModel.id == model.id)
+            )
+            model = result.scalar_one()
             return _model_to_sync_job(model)
 
 

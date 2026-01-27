@@ -1,5 +1,6 @@
 """FastAPI application entry point."""
 
+import asyncio
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -33,13 +34,20 @@ from app.infrastructure.db.database import close_db, init_db
 
 logger = get_logger(__name__)
 
+# Global reference to job runner task
+_job_runner_task: asyncio.Task | None = None
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
+    global _job_runner_task
+
     # Startup
     setup_logging()
     logger.info("Starting application...")
+
+    settings = get_settings()
 
     try:
         await init_db()
@@ -48,11 +56,52 @@ async def lifespan(app: FastAPI):
         logger.error(f"Failed to initialize database: {e}")
         raise
 
+    # Start job runner as background task (shares in-memory queue with API)
+    if settings.job_runner_enabled:
+        _job_runner_task = asyncio.create_task(_run_job_runner())
+        logger.info(
+            "Job runner started as background task",
+            extra={"max_workers": settings.job_runner_max_workers},
+        )
+
     yield
 
     # Shutdown
     logger.info("Shutting down application...")
+
+    # Stop job runner
+    if _job_runner_task and not _job_runner_task.done():
+        logger.info("Stopping job runner...")
+        _job_runner_task.cancel()
+        try:
+            await _job_runner_task
+        except asyncio.CancelledError:
+            pass
+        logger.info("Job runner stopped")
+
     await close_db()
+
+
+async def _run_job_runner() -> None:
+    """Run the job runner in the same process as the API."""
+    from app.core.dependency_injection import get_container
+    from app.infrastructure.adapters.factory import get_adapter_factory
+    from app.services.sync_job_runner import SyncJobRunner
+
+    settings = get_settings()
+    container = get_container()
+
+    runner = SyncJobRunner(
+        queue=container.message_queue,
+        integration_repo=container.integration_repository,
+        job_repo=container.sync_job_repository,
+        state_repo=container.integration_state_repository,
+        encryption_service=container.encryption_service,
+        adapter_factory=get_adapter_factory(),
+        max_workers=settings.job_runner_max_workers,
+    )
+
+    await runner.start()
 
 
 def create_app() -> FastAPI:
