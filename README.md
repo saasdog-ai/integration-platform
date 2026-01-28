@@ -149,36 +149,312 @@ integration-platform/
    make run
    ```
 
-## API Endpoints
+## API Reference
 
-### Health Checks
+All endpoints require a `X-Client-ID` header for multi-tenant isolation. In production, this would be extracted from a JWT token.
 
-- `GET /health` - Basic health check with version info
+```bash
+# Set base URL and client ID for examples
+BASE_URL="http://localhost:8001"
+CLIENT_ID="550e8400-e29b-41d4-a716-446655440000"
+```
+
+### Health Check
+
+```bash
+# Check API health
+curl $BASE_URL/health
+```
+
+Response:
+```json
+{
+  "status": "healthy",
+  "version": "0.1.0",
+  "timestamp": "2024-01-15T10:30:00Z"
+}
+```
+
+---
 
 ### Integrations
 
-- `GET /integrations/available` - List available integrations
-- `GET /integrations/available/{id}` - Get integration details
-- `GET /integrations` - List user's connected integrations
-- `GET /integrations/{id}` - Get connected integration details
-- `POST /integrations/{id}/connect` - Start OAuth connection flow
-- `POST /integrations/{id}/callback` - Complete OAuth with auth code
-- `DELETE /integrations/{id}` - Disconnect an integration
+#### List Available Integrations
+
+```bash
+curl "$BASE_URL/integrations/available" \
+  -H "X-Client-ID: $CLIENT_ID"
+```
+
+Response:
+```json
+{
+  "integrations": [
+    {
+      "id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+      "name": "QuickBooks Online",
+      "type": "erp",
+      "description": "Accounting software for small businesses",
+      "supported_entities": ["invoice", "bill", "vendor", "customer"],
+      "oauth_config": {
+        "authorization_url": "https://appcenter.intuit.com/connect/oauth2",
+        "token_url": "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer",
+        "scopes": ["com.intuit.quickbooks.accounting"]
+      },
+      "is_active": true
+    }
+  ]
+}
+```
+
+#### List User's Connected Integrations
+
+```bash
+curl "$BASE_URL/integrations" \
+  -H "X-Client-ID: $CLIENT_ID"
+```
+
+Response:
+```json
+{
+  "integrations": [
+    {
+      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "client_id": "550e8400-e29b-41d4-a716-446655440000",
+      "integration_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+      "integration_name": "QuickBooks Online",
+      "integration_type": "erp",
+      "status": "connected",
+      "external_account_id": "1234567890",
+      "last_connected_at": "2024-01-15T10:00:00Z",
+      "disconnected_at": null,
+      "created_at": "2024-01-10T08:00:00Z",
+      "updated_at": "2024-01-15T10:00:00Z"
+    }
+  ]
+}
+```
+
+#### Start OAuth Connection
+
+```bash
+curl -X POST "$BASE_URL/integrations/f47ac10b-58cc-4372-a567-0e02b2c3d479/connect" \
+  -H "X-Client-ID: $CLIENT_ID" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "redirect_uri": "https://myapp.com/integrations/callback",
+    "state": "random-state-string"
+  }'
+```
+
+Response:
+```json
+{
+  "authorization_url": "https://appcenter.intuit.com/connect/oauth2?client_id=...&redirect_uri=...&state=..."
+}
+```
+
+#### Complete OAuth Callback
+
+After the user authorizes, the external system redirects back with a code:
+
+```bash
+curl -X POST "$BASE_URL/integrations/f47ac10b-58cc-4372-a567-0e02b2c3d479/callback" \
+  -H "X-Client-ID: $CLIENT_ID" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "code": "authorization-code-from-oauth",
+    "redirect_uri": "https://myapp.com/integrations/callback"
+  }'
+```
+
+Response:
+```json
+{
+  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "client_id": "550e8400-e29b-41d4-a716-446655440000",
+  "integration_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "status": "connected",
+  "external_account_id": "1234567890",
+  "last_connected_at": "2024-01-15T10:00:00Z",
+  ...
+}
+```
+
+#### Disconnect Integration
+
+```bash
+curl -X DELETE "$BASE_URL/integrations/f47ac10b-58cc-4372-a567-0e02b2c3d479" \
+  -H "X-Client-ID: $CLIENT_ID"
+```
+
+Response: `204 No Content`
+
+---
 
 ### Sync Jobs
 
-- `POST /sync-jobs` - Trigger a new sync job
-- `GET /sync-jobs` - List sync jobs (with filters and pagination)
-- `GET /sync-jobs/{id}` - Get sync job details
-- `POST /sync-jobs/{id}/cancel` - Cancel a pending/running job
-- `POST /sync-jobs/{id}/execute` - Execute job immediately (dev/demo)
+#### Trigger a Sync Job
+
+```bash
+curl -X POST "$BASE_URL/sync-jobs" \
+  -H "X-Client-ID: $CLIENT_ID" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "integration_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+    "job_type": "incremental",
+    "entity_types": ["invoice", "bill"]
+  }'
+```
+
+Job types: `full_sync`, `incremental`, `entity_sync`
+
+Response:
+```json
+{
+  "id": "job-uuid-here",
+  "client_id": "550e8400-e29b-41d4-a716-446655440000",
+  "integration_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "integration_name": "QuickBooks Online",
+  "job_type": "incremental",
+  "status": "pending",
+  "triggered_by": "user",
+  "started_at": null,
+  "completed_at": null,
+  "entities_processed": null,
+  "error_code": null,
+  "error_message": null,
+  "created_at": "2024-01-15T10:30:00Z",
+  "updated_at": "2024-01-15T10:30:00Z"
+}
+```
+
+#### List Sync Jobs
+
+```bash
+# List all jobs
+curl "$BASE_URL/sync-jobs" \
+  -H "X-Client-ID: $CLIENT_ID"
+
+# Filter by status and integration
+curl "$BASE_URL/sync-jobs?status=succeeded&integration_id=f47ac10b-58cc-4372-a567-0e02b2c3d479&page=1&page_size=10" \
+  -H "X-Client-ID: $CLIENT_ID"
+```
+
+Response:
+```json
+{
+  "jobs": [
+    {
+      "id": "job-uuid-here",
+      "status": "succeeded",
+      "job_type": "incremental",
+      "entities_processed": {
+        "invoice": {"fetched": 15, "created": 3, "updated": 12},
+        "bill": {"fetched": 8, "created": 2, "updated": 6}
+      },
+      "started_at": "2024-01-15T10:30:05Z",
+      "completed_at": "2024-01-15T10:31:22Z",
+      ...
+    }
+  ],
+  "total": 45,
+  "page": 1,
+  "page_size": 10,
+  "total_pages": 5
+}
+```
+
+#### Get Job Details
+
+```bash
+curl "$BASE_URL/sync-jobs/job-uuid-here" \
+  -H "X-Client-ID: $CLIENT_ID"
+```
+
+#### Cancel a Job
+
+```bash
+curl -X POST "$BASE_URL/sync-jobs/job-uuid-here/cancel" \
+  -H "X-Client-ID: $CLIENT_ID"
+```
+
+---
 
 ### Settings
 
-- `GET /settings/{integration_id}` - Get user's integration settings
-- `PUT /settings/{integration_id}` - Update integration settings
+#### Get Integration Settings
 
-See the interactive API documentation at `/docs` for detailed request/response schemas.
+```bash
+curl "$BASE_URL/settings/f47ac10b-58cc-4372-a567-0e02b2c3d479" \
+  -H "X-Client-ID: $CLIENT_ID"
+```
+
+Response:
+```json
+{
+  "sync_rules": [
+    {
+      "entity_type": "invoice",
+      "direction": "bidirectional",
+      "enabled": true,
+      "master_if_conflict": "external",
+      "field_mappings": null
+    }
+  ],
+  "sync_frequency": "0 */6 * * *",
+  "auto_sync_enabled": true
+}
+```
+
+#### Update Settings
+
+```bash
+curl -X PUT "$BASE_URL/settings/f47ac10b-58cc-4372-a567-0e02b2c3d479" \
+  -H "X-Client-ID: $CLIENT_ID" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sync_rules": [
+      {
+        "entity_type": "invoice",
+        "direction": "bidirectional",
+        "enabled": true,
+        "master_if_conflict": "internal"
+      },
+      {
+        "entity_type": "bill",
+        "direction": "inbound",
+        "enabled": true
+      }
+    ],
+    "sync_frequency": "0 */4 * * *",
+    "auto_sync_enabled": true
+  }'
+```
+
+---
+
+### Error Responses
+
+All errors follow this format:
+
+```json
+{
+  "error": "Integration not found",
+  "code": "NOT_FOUND",
+  "details": null
+}
+```
+
+Common HTTP status codes:
+- `400` - Validation error
+- `401` - Authentication required
+- `403` - Forbidden
+- `404` - Resource not found
+- `409` - Conflict (e.g., integration already connected)
+- `500` - Internal server error
+
+See the interactive API documentation at `/docs` for the full OpenAPI spec.
 
 ## Development
 
