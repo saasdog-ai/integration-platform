@@ -34,12 +34,13 @@ services:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@host.docker.internal:5433/integration_platform
       APP_ENV: development
       LOG_LEVEL: DEBUG
-      CLOUD_PROVIDER: aws
+      # Use local/in-memory queue for development (no SQS dependency)
+      CLOUD_PROVIDER: local
+      # AWS settings kept for KMS via localstack
       AWS_ENDPOINT_URL: http://localstack:4566
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
       AWS_DEFAULT_REGION: us-east-1
-      QUEUE_URL: http://localstack:4566/000000000000/sync-jobs
     ports:
       - "8001:8000"
     extra_hosts:

@@ -448,6 +448,7 @@ class SyncOrchestrator:
                         if state:
                             state.external_version_id += 1
                             state.sync_status = RecordSyncStatus.PENDING
+                            state.last_job_id = job.id
                             records_to_upsert.append(state)
                             batch_updated += 1
                         else:
@@ -465,6 +466,7 @@ class SyncOrchestrator:
                                 external_version_id=1,
                                 last_sync_version_id=1,
                                 last_synced_at=now,
+                                last_job_id=job.id,
                                 metadata={"data": record.data},
                                 created_at=now,
                                 updated_at=now,
@@ -690,6 +692,38 @@ class SyncOrchestrator:
             integration_id=integration_id,
             status=status,
             since=since,
+            page=page,
+            page_size=page_size,
+        )
+
+    async def get_job_records(
+        self,
+        client_id: UUID,
+        job_id: UUID,
+        entity_type: str | None = None,
+        status: RecordSyncStatus | None = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[list[IntegrationStateRecord], int]:
+        """
+        Get paginated records that were modified by a specific sync job.
+
+        Args:
+            client_id: The tenant/client ID.
+            job_id: The sync job ID.
+            entity_type: Optional filter by entity type.
+            status: Optional filter by sync status.
+            page: Page number (1-indexed).
+            page_size: Number of records per page.
+
+        Returns:
+            Tuple of (records, total_count).
+        """
+        return await self._state_repo.get_records_by_job_id(
+            client_id=client_id,
+            job_id=job_id,
+            entity_type=entity_type,
+            status=status,
             page=page,
             page_size=page_size,
         )

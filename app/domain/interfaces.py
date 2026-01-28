@@ -267,6 +267,7 @@ class IntegrationStateRepositoryInterface(ABC):
         record_id: UUID,
         client_id: UUID,
         external_record_id: str | None = None,
+        job_id: UUID | None = None,
     ) -> None:
         """Mark a record as successfully synced."""
         pass
@@ -331,6 +332,32 @@ class IntegrationStateRepositoryInterface(ABC):
             updates: List of (record_id, client_id, external_record_id) tuples.
             client_id: Optional client_id for advisory lock (recommended).
             integration_id: Optional integration_id for advisory lock (recommended).
+        """
+        pass
+
+    @abstractmethod
+    async def get_records_by_job_id(
+        self,
+        client_id: UUID,
+        job_id: UUID,
+        entity_type: str | None = None,
+        status: RecordSyncStatus | None = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[list[IntegrationStateRecord], int]:
+        """
+        Get paginated records that were modified by a specific sync job.
+
+        Args:
+            client_id: The client ID for multi-tenant isolation.
+            job_id: The sync job ID to filter by.
+            entity_type: Optional filter by entity type.
+            status: Optional filter by sync status.
+            page: Page number (1-indexed).
+            page_size: Number of records per page.
+
+        Returns:
+            Tuple of (records, total_count).
         """
         pass
 

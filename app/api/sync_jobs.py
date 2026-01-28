@@ -8,10 +8,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.api.dto import (
     SyncJobResponse,
     SyncJobsResponse,
+    SyncRecordResponse,
+    SyncRecordsResponse,
     TriggerSyncRequest,
 )
 from app.auth import get_client_id
 from app.core.exceptions import ConflictError, NotFoundError, SyncError
+from app.domain.enums import RecordSyncStatus
 from app.core.logging import get_logger
 from app.domain.entities import SyncJob
 from app.domain.enums import SyncJobStatus, SyncJobTrigger
@@ -217,4 +220,75 @@ async def execute_sync_job(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
+        )
+
+
+@router.get(
+    "/{job_id}/records",
+    response_model=SyncRecordsResponse,
+    summary="Get record-level sync details for a job",
+)
+async def get_job_records(
+    job_id: UUID,
+    entity_type: str | None = Query(default=None, description="Filter by entity type"),
+    record_status: RecordSyncStatus | None = Query(
+        default=None, alias="status", description="Filter by sync status"
+    ),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=100),
+    client_id: UUID = Depends(get_client_id),
+    orchestrator: SyncOrchestrator = Depends(get_sync_orchestrator),
+) -> SyncRecordsResponse:
+    """
+    Get paginated record-level details for a sync job.
+
+    Shows which records were synced, including:
+    - Entity type and IDs (internal and external)
+    - Sync direction (inbound/outbound)
+    - Success or failure status
+    - Error details for failed records
+    """
+    try:
+        # Verify job exists and belongs to client
+        job = await orchestrator.get_job(client_id, job_id)
+
+        # Get records for this job
+        records, total = await orchestrator.get_job_records(
+            client_id=client_id,
+            job_id=job_id,
+            entity_type=entity_type,
+            status=record_status,
+            page=page,
+            page_size=page_size,
+        )
+
+        total_pages = (total + page_size - 1) // page_size
+
+        return SyncRecordsResponse(
+            records=[
+                SyncRecordResponse(
+                    id=r.id,
+                    entity_type=r.entity_type,
+                    internal_record_id=r.internal_record_id,
+                    external_record_id=r.external_record_id,
+                    sync_direction=r.sync_direction,
+                    sync_status=r.sync_status.value,
+                    is_success=r.sync_status == RecordSyncStatus.SYNCED,
+                    updated_at=r.updated_at,
+                    error_code=r.error_code,
+                    error_message=r.error_message,
+                    error_details=r.error_details,
+                )
+                for r in records
+            ],
+            total=total,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
+        )
+
+    except NotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Sync job not found: {job_id}",
         )

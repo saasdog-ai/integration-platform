@@ -146,6 +146,7 @@ class IntegrationStateRecord(BaseEntity):
     external_version_id: int = 0
     last_sync_version_id: int = 0
     last_synced_at: datetime | None = None
+    last_job_id: UUID | None = None  # Links to the sync job that last modified this record
     error_code: str | None = None
     error_message: str | None = None
     error_details: dict[str, Any] | None = None

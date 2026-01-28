@@ -204,6 +204,27 @@ class SyncJobModel(Base, TimestampMixin):
             "status",
             postgresql_where="status IN ('pending', 'running')",
         ),
+        # For checking running/pending jobs per client/integration (create_job_if_no_running)
+        Index(
+            "ix_sync_jobs_running_check",
+            "client_id",
+            "integration_id",
+            "status",
+            postgresql_where="status IN ('pending', 'running')",
+        ),
+        # For paginated job listing with ORDER BY created_at DESC
+        Index(
+            "ix_sync_jobs_client_created",
+            "client_id",
+            "created_at",
+        ),
+        # For stuck jobs query (status = 'running' AND started_at < X)
+        Index(
+            "ix_sync_jobs_stuck",
+            "status",
+            "started_at",
+            postgresql_where="status = 'running'",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -316,6 +337,12 @@ class IntegrationStateModel(Base):
             "external_record_id",
             postgresql_where="external_record_id IS NOT NULL",
         ),
+        Index(
+            "ix_integration_state_job",
+            "client_id",
+            "last_job_id",
+            postgresql_where="last_job_id IS NOT NULL",
+        ),
     )
 
     # Composite primary key for partitioning
@@ -349,6 +376,9 @@ class IntegrationStateModel(Base):
     last_synced_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    last_job_id: Mapped[UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )  # Links record to the sync job that last modified it
     error_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_details: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)

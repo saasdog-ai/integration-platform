@@ -380,6 +380,61 @@ curl -X POST "$BASE_URL/sync-jobs/job-uuid-here/cancel" \
   -H "X-Client-ID: $CLIENT_ID"
 ```
 
+#### Get Job Record Details
+
+Get paginated record-level sync details for a specific job. Useful for seeing exactly which records were synced, failed, or encountered errors.
+
+```bash
+# Get all records for a job
+curl "$BASE_URL/sync-jobs/job-uuid-here/records" \
+  -H "X-Client-ID: $CLIENT_ID"
+
+# Filter by entity type and status, with pagination
+curl "$BASE_URL/sync-jobs/job-uuid-here/records?entity_type=invoice&status=failed&page=1&page_size=20" \
+  -H "X-Client-ID: $CLIENT_ID"
+```
+
+Response:
+```json
+{
+  "records": [
+    {
+      "id": "record-uuid",
+      "entity_type": "invoice",
+      "internal_record_id": "INV-001",
+      "external_record_id": "QB-12345",
+      "sync_direction": "outbound",
+      "sync_status": "synced",
+      "is_success": true,
+      "updated_at": "2024-01-15T10:31:00Z",
+      "error_code": null,
+      "error_message": null,
+      "error_details": null
+    },
+    {
+      "id": "record-uuid-2",
+      "entity_type": "invoice",
+      "internal_record_id": "INV-002",
+      "external_record_id": null,
+      "sync_direction": "outbound",
+      "sync_status": "failed",
+      "is_success": false,
+      "updated_at": "2024-01-15T10:31:05Z",
+      "error_code": "VALIDATION_ERROR",
+      "error_message": "Missing required field: customer_id",
+      "error_details": {
+        "field": "customer_id",
+        "validation": "required"
+      }
+    }
+  ],
+  "total": 25,
+  "page": 1,
+  "page_size": 20,
+  "total_pages": 2
+}
+```
+
 ---
 
 ### Settings

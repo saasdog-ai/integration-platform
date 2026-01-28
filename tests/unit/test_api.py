@@ -356,7 +356,7 @@ class TestSyncJobsEndpoints:
         sample_sync_job,
     ):
         """Test listing sync jobs."""
-        mock_sync_orchestrator.get_jobs.return_value = [sample_sync_job]
+        mock_sync_orchestrator.get_jobs_paginated.return_value = ([sample_sync_job], 1)
 
         response = client.get("/sync-jobs")
         assert response.status_code == 200
@@ -395,6 +395,111 @@ class TestSyncJobsEndpoints:
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "cancelled"
+
+    def test_get_job_records(
+        self,
+        client,
+        mock_sync_orchestrator,
+        sample_sync_job,
+    ):
+        """Test getting record-level sync details for a job."""
+        from app.domain.entities import IntegrationStateRecord
+        from app.domain.enums import RecordSyncStatus
+
+        now = datetime.now(timezone.utc)
+        mock_records = [
+            IntegrationStateRecord(
+                id=uuid4(),
+                client_id=sample_sync_job.client_id,
+                integration_id=sample_sync_job.integration_id,
+                entity_type="invoice",
+                internal_record_id="INV-001",
+                external_record_id="QB-12345",
+                sync_status=RecordSyncStatus.SYNCED,
+                sync_direction=SyncDirection.OUTBOUND,
+                last_job_id=sample_sync_job.id,
+                created_at=now,
+                updated_at=now,
+            ),
+            IntegrationStateRecord(
+                id=uuid4(),
+                client_id=sample_sync_job.client_id,
+                integration_id=sample_sync_job.integration_id,
+                entity_type="invoice",
+                internal_record_id="INV-002",
+                external_record_id=None,
+                sync_status=RecordSyncStatus.FAILED,
+                sync_direction=SyncDirection.OUTBOUND,
+                last_job_id=sample_sync_job.id,
+                error_code="VALIDATION_ERROR",
+                error_message="Missing required field",
+                created_at=now,
+                updated_at=now,
+            ),
+        ]
+
+        mock_sync_orchestrator.get_job.return_value = sample_sync_job
+        mock_sync_orchestrator.get_job_records.return_value = (mock_records, 2)
+
+        response = client.get(f"/sync-jobs/{sample_sync_job.id}/records")
+        assert response.status_code == 200
+        data = response.json()
+        assert "records" in data
+        assert len(data["records"]) == 2
+        assert data["total"] == 2
+        assert data["page"] == 1
+        assert data["page_size"] == 50
+        assert data["total_pages"] == 1
+
+        # Check first record (synced)
+        assert data["records"][0]["sync_status"] == "synced"
+        assert data["records"][0]["is_success"] is True
+        assert data["records"][0]["external_record_id"] == "QB-12345"
+
+        # Check second record (failed)
+        assert data["records"][1]["sync_status"] == "failed"
+        assert data["records"][1]["is_success"] is False
+        assert data["records"][1]["error_code"] == "VALIDATION_ERROR"
+
+    def test_get_job_records_with_filters(
+        self,
+        client,
+        mock_sync_orchestrator,
+        sample_sync_job,
+    ):
+        """Test getting job records with filters."""
+        mock_sync_orchestrator.get_job.return_value = sample_sync_job
+        mock_sync_orchestrator.get_job_records.return_value = ([], 0)
+
+        response = client.get(
+            f"/sync-jobs/{sample_sync_job.id}/records",
+            params={
+                "entity_type": "invoice",
+                "status": "failed",
+                "page": 2,
+                "page_size": 20,
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["records"] == []
+        assert data["total"] == 0
+        assert data["page"] == 2
+        assert data["page_size"] == 20
+
+    def test_get_job_records_not_found(
+        self,
+        client,
+        mock_sync_orchestrator,
+    ):
+        """Test getting records for non-existent job returns 404."""
+        from app.core.exceptions import NotFoundError
+
+        mock_sync_orchestrator.get_job.side_effect = NotFoundError("SyncJob", "fake-id")
+
+        fake_job_id = uuid4()
+        response = client.get(f"/sync-jobs/{fake_job_id}/records")
+        assert response.status_code == 404
 
 
 class TestSettingsEndpoints:

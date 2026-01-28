@@ -178,6 +178,7 @@ def _model_to_integration_state(
         external_version_id=model.external_version_id,
         last_sync_version_id=model.last_sync_version_id,
         last_synced_at=model.last_synced_at,
+        last_job_id=model.last_job_id,
         error_code=model.error_code,
         error_message=model.error_message,
         error_details=model.error_details,
@@ -773,6 +774,7 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
                 model.external_version_id = record.external_version_id
                 model.last_sync_version_id = record.last_sync_version_id
                 model.last_synced_at = record.last_synced_at
+                model.last_job_id = record.last_job_id
                 model.error_code = record.error_code
                 model.error_message = record.error_message
                 model.error_details = record.error_details
@@ -791,6 +793,7 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
                     external_version_id=record.external_version_id,
                     last_sync_version_id=record.last_sync_version_id,
                     last_synced_at=record.last_synced_at,
+                    last_job_id=record.last_job_id,
                     error_code=record.error_code,
                     error_message=record.error_message,
                     error_details=record.error_details,
@@ -836,6 +839,7 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
         record_id: UUID,
         client_id: UUID,
         external_record_id: str | None = None,
+        job_id: UUID | None = None,
     ) -> None:
         async with get_session_context() as session:
             result = await session.execute(
@@ -858,6 +862,8 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
                 model.error_details = None
                 if external_record_id:
                     model.external_record_id = external_record_id
+                if job_id:
+                    model.last_job_id = job_id
                 await session.flush()  # Ensure changes are queued before commit
 
     async def get_entity_sync_status(
@@ -965,6 +971,7 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
                         model.external_version_id = record.external_version_id
                         model.last_sync_version_id = record.last_sync_version_id
                         model.last_synced_at = record.last_synced_at
+                        model.last_job_id = record.last_job_id
                         model.error_code = record.error_code
                         model.error_message = record.error_message
                         model.error_details = record.error_details
@@ -984,6 +991,7 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
                             external_version_id=record.external_version_id,
                             last_sync_version_id=record.last_sync_version_id,
                             last_synced_at=record.last_synced_at,
+                            last_job_id=record.last_job_id,
                             error_code=record.error_code,
                             error_message=record.error_message,
                             error_details=record.error_details,
@@ -1073,3 +1081,62 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
 
         # Flush all changes at once (within single transaction)
         await session.flush()
+
+    async def get_records_by_job_id(
+        self,
+        client_id: UUID,
+        job_id: UUID,
+        entity_type: str | None = None,
+        status: RecordSyncStatus | None = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[list[IntegrationStateRecord], int]:
+        """
+        Get paginated records that were modified by a specific sync job.
+
+        Args:
+            client_id: The client ID for multi-tenant isolation.
+            job_id: The sync job ID to filter by.
+            entity_type: Optional filter by entity type.
+            status: Optional filter by sync status.
+            page: Page number (1-indexed).
+            page_size: Number of records per page.
+
+        Returns:
+            Tuple of (records, total_count).
+        """
+        from sqlalchemy import func
+
+        async with get_session_context() as session:
+            # Build base query conditions
+            conditions = [
+                IntegrationStateModel.client_id == client_id,
+                IntegrationStateModel.last_job_id == job_id,
+            ]
+            if entity_type:
+                conditions.append(IntegrationStateModel.entity_type == entity_type)
+            if status:
+                conditions.append(IntegrationStateModel.sync_status == status.value)
+
+            # Count total
+            count_query = (
+                select(func.count())
+                .select_from(IntegrationStateModel)
+                .where(*conditions)
+            )
+            count_result = await session.execute(count_query)
+            total = count_result.scalar() or 0
+
+            # Get paginated results
+            offset = (page - 1) * page_size
+            query = (
+                select(IntegrationStateModel)
+                .where(*conditions)
+                .order_by(IntegrationStateModel.updated_at.desc())
+                .offset(offset)
+                .limit(page_size)
+            )
+            result = await session.execute(query)
+            models = result.scalars().all()
+
+            return [_model_to_integration_state(m) for m in models], total

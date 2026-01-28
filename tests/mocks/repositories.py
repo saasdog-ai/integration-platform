@@ -380,6 +380,7 @@ class MockIntegrationStateRepository(IntegrationStateRepositoryInterface):
         record_id: UUID,
         client_id: UUID,
         external_record_id: str | None = None,
+        job_id: UUID | None = None,
     ) -> None:
         for key, record in self._records.items():
             if record.id == record_id and record.client_id == client_id:
@@ -393,6 +394,8 @@ class MockIntegrationStateRepository(IntegrationStateRepositoryInterface):
                 record.error_details = None
                 if external_record_id:
                     record.external_record_id = external_record_id
+                if job_id:
+                    record.last_job_id = job_id
                 return
 
     async def get_entity_sync_status(
@@ -476,6 +479,39 @@ class MockIntegrationStateRepository(IntegrationStateRepositoryInterface):
                     if external_record_id:
                         record.external_record_id = external_record_id
                     break
+
+    async def get_records_by_job_id(
+        self,
+        client_id: UUID,
+        job_id: UUID,
+        entity_type: str | None = None,
+        status: RecordSyncStatus | None = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[list[IntegrationStateRecord], int]:
+        """Get paginated records that were modified by a specific sync job."""
+        # Filter records by client_id and last_job_id
+        records = [
+            r
+            for r in self._records.values()
+            if r.client_id == client_id and r.last_job_id == job_id
+        ]
+
+        # Apply optional filters
+        if entity_type:
+            records = [r for r in records if r.entity_type == entity_type]
+        if status:
+            records = [r for r in records if r.sync_status == status]
+
+        # Sort by updated_at desc
+        records.sort(key=lambda r: r.updated_at, reverse=True)
+
+        # Calculate pagination
+        total = len(records)
+        offset = (page - 1) * page_size
+        paginated = records[offset : offset + page_size]
+
+        return paginated, total
 
     def clear(self) -> None:
         """Clear all data (for test isolation)."""

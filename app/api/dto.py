@@ -213,6 +213,37 @@ class SyncJobListParams(BaseModel):
 
 
 # =============================================================================
+# Sync Record Detail DTOs
+# =============================================================================
+
+
+class SyncRecordResponse(BaseResponse):
+    """Individual record sync details."""
+
+    id: UUID
+    entity_type: str
+    internal_record_id: str
+    external_record_id: str | None
+    sync_direction: SyncDirection | None
+    sync_status: str  # synced, failed, pending, conflict
+    is_success: bool  # Computed from sync_status
+    updated_at: datetime
+    error_code: str | None = None
+    error_message: str | None = None
+    error_details: dict[str, Any] | None = None
+
+
+class SyncRecordsResponse(BaseResponse):
+    """Paginated list of sync records for a job."""
+
+    records: list[SyncRecordResponse]
+    total: int
+    page: int = 1
+    page_size: int = 50
+    total_pages: int = 1
+
+
+# =============================================================================
 # Health DTOs
 # =============================================================================
 

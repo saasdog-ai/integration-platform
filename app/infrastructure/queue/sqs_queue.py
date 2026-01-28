@@ -238,3 +238,111 @@ class SQSQueue(MessageQueueInterface):
                 extra={"error": str(e), "queue_url": self._queue_url},
             )
             raise QueueError(f"Failed to change visibility: {e}")
+
+    def _get_dlq_url(self) -> str:
+        """Get the DLQ URL by convention (main queue URL + '-dlq')."""
+        # SQS queue URLs end with queue name, e.g., .../000000000000/my-queue
+        # DLQ convention: my-queue-dlq
+        return self._queue_url + "-dlq"
+
+    async def send_to_dlq(
+        self,
+        message: QueueMessage,
+        error: str,
+    ) -> str:
+        """Send a failed message to the dead letter queue."""
+        try:
+            import asyncio
+
+            client = self._get_client()
+            loop = asyncio.get_event_loop()
+            dlq_url = self._get_dlq_url()
+
+            # Include original message attributes and error info
+            message_body = {
+                **message.body,
+                "_dlq_metadata": {
+                    "original_message_id": message.message_id,
+                    "error": error,
+                    "original_attributes": message.attributes,
+                },
+            }
+
+            response = await loop.run_in_executor(
+                None,
+                lambda: client.send_message(
+                    QueueUrl=dlq_url,
+                    MessageBody=json.dumps(message_body),
+                ),
+            )
+
+            message_id = response["MessageId"]
+            logger.warning(
+                "Message sent to DLQ",
+                extra={
+                    "message_id": message.message_id,
+                    "dlq_message_id": message_id,
+                    "error": error,
+                    "dlq_url": dlq_url,
+                },
+            )
+            return message_id
+
+        except Exception as e:
+            logger.error(
+                "Failed to send message to DLQ",
+                extra={"error": str(e), "dlq_url": self._get_dlq_url()},
+            )
+            raise QueueError(f"Failed to send to DLQ: {e}")
+
+    async def get_dlq_messages(
+        self,
+        max_messages: int = 10,
+    ) -> list[QueueMessage]:
+        """Get messages from the dead letter queue for inspection."""
+        try:
+            import asyncio
+
+            client = self._get_client()
+            loop = asyncio.get_event_loop()
+            dlq_url = self._get_dlq_url()
+
+            response = await loop.run_in_executor(
+                None,
+                lambda: client.receive_message(
+                    QueueUrl=dlq_url,
+                    MaxNumberOfMessages=min(max_messages, 10),
+                    WaitTimeSeconds=1,  # Short poll for inspection
+                    AttributeNames=["All"],
+                    MessageAttributeNames=["All"],
+                ),
+            )
+
+            messages = []
+            for msg in response.get("Messages", []):
+                try:
+                    body = json.loads(msg["Body"])
+                except json.JSONDecodeError:
+                    body = {"raw": msg["Body"]}
+
+                messages.append(
+                    QueueMessage(
+                        message_id=msg["MessageId"],
+                        receipt_handle=msg["ReceiptHandle"],
+                        body=body,
+                        attributes=msg.get("Attributes", {}),
+                    )
+                )
+
+            logger.debug(
+                "Messages retrieved from DLQ",
+                extra={"count": len(messages), "dlq_url": dlq_url},
+            )
+            return messages
+
+        except Exception as e:
+            logger.error(
+                "Failed to get messages from DLQ",
+                extra={"error": str(e), "dlq_url": self._get_dlq_url()},
+            )
+            raise QueueError(f"Failed to get DLQ messages: {e}")
