@@ -16,6 +16,7 @@ Instead of paying expensive third-party integration vendors like Workato, MuleSo
 - **Async Job Processing**: Background job runner with pluggable message queues (AWS SQS, in-memory)
 - **Multi-Tenant Ready**: Full client isolation with partition-ready database design
 - **Micro-Frontend UI**: React-based UI that can be embedded in your host application
+- **OpenAPI 3.1 Spec**: Auto-generated API docs with client SDK generation support
 - **Clean Architecture**: Hexagonal architecture makes it easy for AI tools to understand and extend
 - **Cloud-Agnostic**: Designed to run on AWS, Azure, or GCP
 
@@ -454,7 +455,71 @@ Common HTTP status codes:
 - `409` - Conflict (e.g., integration already connected)
 - `500` - Internal server error
 
-See the interactive API documentation at `/docs` for the full OpenAPI spec.
+---
+
+### OpenAPI Specification
+
+The API is fully documented using **OpenAPI 3.1**. FastAPI automatically generates the spec from route definitions and Pydantic models.
+
+**Documentation URLs** (when running locally):
+- Swagger UI: http://localhost:8001/docs
+- ReDoc: http://localhost:8001/redoc
+- OpenAPI JSON: http://localhost:8001/openapi.json
+
+#### Generating Client SDKs
+
+Use the OpenAPI spec to generate type-safe client libraries in any language:
+
+**Download the spec:**
+```bash
+curl http://localhost:8001/openapi.json -o openapi.json
+```
+
+**Generate clients using OpenAPI Generator:**
+
+```bash
+# Install OpenAPI Generator
+npm install -g @openapitools/openapi-generator-cli
+
+# Generate TypeScript client
+openapi-generator-cli generate -i openapi.json -g typescript-fetch -o ./clients/typescript
+
+# Generate Python client
+openapi-generator-cli generate -i openapi.json -g python -o ./clients/python
+
+# Generate Go client
+openapi-generator-cli generate -i openapi.json -g go -o ./clients/go
+
+# Generate Java client
+openapi-generator-cli generate -i openapi.json -g java -o ./clients/java
+```
+
+**Using the generated TypeScript client:**
+```typescript
+import { IntegrationsApi, SyncJobsApi, Configuration } from './clients/typescript';
+
+const config = new Configuration({
+  basePath: 'http://localhost:8001',
+  headers: { 'X-Client-ID': 'your-client-uuid' }
+});
+
+const integrationsApi = new IntegrationsApi(config);
+const syncJobsApi = new SyncJobsApi(config);
+
+// List available integrations
+const available = await integrationsApi.listAvailableIntegrationsIntegrationsAvailableGet();
+
+// Trigger a sync job
+const job = await syncJobsApi.triggerSyncSyncJobsPost({
+  triggerSyncRequest: {
+    integrationId: 'uuid-here',
+    jobType: 'incremental',
+    entityTypes: ['invoice', 'bill']
+  }
+});
+```
+
+See [OpenAPI Generator docs](https://openapi-generator.tech/docs/generators) for all supported languages.
 
 ## Development
 
