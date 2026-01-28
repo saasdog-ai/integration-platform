@@ -35,12 +35,15 @@ export interface UserIntegration {
   id: string
   client_id: string
   integration_id: string
+  integration_name?: string | null
+  integration_type?: string | null
   status: IntegrationStatus
   external_account_id: string | null
   last_connected_at: string | null
   disconnected_at: string | null
   created_at: string
   updated_at: string
+  // Optional embedded integration for convenience (populated by some queries)
   integration?: AvailableIntegration
 }
 
@@ -137,6 +140,44 @@ export interface ApiError {
  */
 export interface PaginatedResponse<T> {
   items: T[]
+  total: number
+  page: number
+  page_size: number
+  total_pages: number
+}
+
+/**
+ * Sync record status
+ */
+export type RecordSyncStatus = 'pending' | 'synced' | 'failed' | 'conflict'
+
+/**
+ * Sync direction for a record
+ */
+export type SyncDirection = 'inbound' | 'outbound' | 'bidirectional'
+
+/**
+ * Individual sync record details
+ */
+export interface SyncRecord {
+  id: string
+  entity_type: string
+  internal_record_id: string
+  external_record_id: string | null
+  sync_direction: SyncDirection | null
+  sync_status: RecordSyncStatus
+  is_success: boolean
+  updated_at: string
+  error_code: string | null
+  error_message: string | null
+  error_details: Record<string, unknown> | null
+}
+
+/**
+ * Paginated sync records response
+ */
+export interface SyncRecordsResponse {
+  records: SyncRecord[]
   total: number
   page: number
   page_size: number

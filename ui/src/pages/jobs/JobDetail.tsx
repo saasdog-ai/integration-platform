@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useApiClient } from '@/hooks/useApiClient'
@@ -8,6 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import { Spinner } from '@/components/ui/spinner'
 import { SyncJobStatusBadge } from '@/components/StatusBadge'
 import { formatDate } from '@/lib/utils'
+import type { RecordSyncStatus, SyncRecord } from '@/types'
 
 export function JobDetail() {
   const { jobId } = useParams<{ jobId: string }>()
@@ -15,6 +17,14 @@ export function JobDetail() {
   const api = useApiClient()
   const toast = useToast()
   const queryClient = useQueryClient()
+
+  // Pagination and filter state for records
+  const [recordsPage, setRecordsPage] = useState(1)
+  const [recordsFilter, setRecordsFilter] = useState<{
+    entity_type?: string
+    status?: RecordSyncStatus
+  }>({})
+  const [expandedError, setExpandedError] = useState<string | null>(null)
 
   // Fetch job details with auto-refresh for active jobs
   const { data: job, isLoading } = useQuery({
@@ -41,6 +51,18 @@ export function JobDetail() {
     onError: (error: Error) => {
       toast.error('Failed to cancel job', error.message)
     },
+  })
+
+  // Fetch job records (only when job is completed)
+  const { data: recordsData, isLoading: recordsLoading } = useQuery({
+    queryKey: ['sync-job-records', jobId, recordsPage, recordsFilter],
+    queryFn: () =>
+      api.getSyncJobRecords(jobId!, {
+        page: recordsPage,
+        page_size: 20,
+        ...recordsFilter,
+      }),
+    enabled: !!jobId && !!job && (job.status === 'succeeded' || job.status === 'failed'),
   })
 
   if (isLoading) {
@@ -182,6 +204,204 @@ export function JobDetail() {
                   </div>
                 ))}
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Record Details Table */}
+      {(job.status === 'succeeded' || job.status === 'failed') && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Record Details</CardTitle>
+                <CardDescription>
+                  Individual records synced in this job
+                  {recordsData && ` (${recordsData.total} total)`}
+                </CardDescription>
+              </div>
+              <div className="flex gap-2">
+                <select
+                  className="text-sm border rounded px-2 py-1"
+                  value={recordsFilter.status || ''}
+                  onChange={(e) => {
+                    setRecordsFilter((f) => ({
+                      ...f,
+                      status: e.target.value as RecordSyncStatus || undefined,
+                    }))
+                    setRecordsPage(1)
+                  }}
+                >
+                  <option value="">All Statuses</option>
+                  <option value="synced">Synced</option>
+                  <option value="failed">Failed</option>
+                  <option value="pending">Pending</option>
+                </select>
+                {job.entities_processed && (
+                  <select
+                    className="text-sm border rounded px-2 py-1"
+                    value={recordsFilter.entity_type || ''}
+                    onChange={(e) => {
+                      setRecordsFilter((f) => ({
+                        ...f,
+                        entity_type: e.target.value || undefined,
+                      }))
+                      setRecordsPage(1)
+                    }}
+                  >
+                    <option value="">All Entity Types</option>
+                    {Object.keys(job.entities_processed)
+                      .filter((k) => !k.startsWith('_'))
+                      .map((entityType) => (
+                        <option key={entityType} value={entityType}>
+                          {entityType}
+                        </option>
+                      ))}
+                  </select>
+                )}
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {recordsLoading ? (
+              <div className="flex justify-center py-8">
+                <Spinner />
+              </div>
+            ) : recordsData && recordsData.records.length > 0 ? (
+              <div className="space-y-4">
+                {/* Records Table */}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b">
+                        <th className="text-left py-2 px-3 font-medium">Timestamp</th>
+                        <th className="text-left py-2 px-3 font-medium">Entity Type</th>
+                        <th className="text-left py-2 px-3 font-medium">Internal ID</th>
+                        <th className="text-left py-2 px-3 font-medium">Direction</th>
+                        <th className="text-left py-2 px-3 font-medium">Status</th>
+                        <th className="text-left py-2 px-3 font-medium">External ID</th>
+                        <th className="text-left py-2 px-3 font-medium">Error</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {recordsData.records.map((record: SyncRecord) => (
+                        <tr key={record.id} className="border-b hover:bg-muted/50">
+                          <td className="py-2 px-3 text-muted-foreground">
+                            {formatDate(record.updated_at)}
+                          </td>
+                          <td className="py-2 px-3">
+                            <Badge variant="outline" className="capitalize">
+                              {record.entity_type}
+                            </Badge>
+                          </td>
+                          <td className="py-2 px-3 font-mono text-xs">
+                            {record.internal_record_id}
+                          </td>
+                          <td className="py-2 px-3 capitalize">
+                            {record.sync_direction || '-'}
+                          </td>
+                          <td className="py-2 px-3">
+                            {record.is_success ? (
+                              <Badge variant="success">Synced</Badge>
+                            ) : (
+                              <Badge variant="error">Failed</Badge>
+                            )}
+                          </td>
+                          <td className="py-2 px-3 font-mono text-xs">
+                            {record.external_record_id || '-'}
+                          </td>
+                          <td className="py-2 px-3">
+                            {record.error_code ? (
+                              <button
+                                className="text-red-600 hover:underline text-left"
+                                onClick={() =>
+                                  setExpandedError(
+                                    expandedError === record.id ? null : record.id
+                                  )
+                                }
+                              >
+                                {record.error_code}
+                                {expandedError === record.id ? ' ▼' : ' ▶'}
+                              </button>
+                            ) : (
+                              '-'
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Expanded Error Details */}
+                {expandedError && (
+                  <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+                    {(() => {
+                      const record = recordsData.records.find(
+                        (r: SyncRecord) => r.id === expandedError
+                      )
+                      if (!record) return null
+                      return (
+                        <div className="space-y-2">
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <p className="font-medium text-red-700">
+                                Error: {record.error_code}
+                              </p>
+                              <p className="text-sm text-red-600">{record.error_message}</p>
+                            </div>
+                            <button
+                              className="text-red-500 hover:text-red-700"
+                              onClick={() => setExpandedError(null)}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                          {record.error_details && (
+                            <pre className="mt-2 p-3 bg-white rounded text-xs overflow-auto border">
+                              {JSON.stringify(record.error_details, null, 2)}
+                            </pre>
+                          )}
+                        </div>
+                      )
+                    })()}
+                  </div>
+                )}
+
+                {/* Pagination */}
+                {recordsData.total_pages > 1 && (
+                  <div className="flex items-center justify-between pt-4 border-t">
+                    <p className="text-sm text-muted-foreground">
+                      Page {recordsData.page} of {recordsData.total_pages}
+                    </p>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setRecordsPage((p) => Math.max(1, p - 1))}
+                        disabled={recordsPage === 1}
+                      >
+                        Previous
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          setRecordsPage((p) => Math.min(recordsData.total_pages, p + 1))
+                        }
+                        disabled={recordsPage === recordsData.total_pages}
+                      >
+                        Next
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="text-center py-8 text-muted-foreground">
+                No records found for this job
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

@@ -11,6 +11,8 @@ import type {
   ConnectIntegrationRequest,
   PaginatedResponse,
   SyncJobStatus,
+  SyncRecordsResponse,
+  RecordSyncStatus,
 } from '@/types'
 import type { IntegrationsConfig } from '@/providers/ConfigProvider'
 
@@ -210,6 +212,30 @@ export function createApiClient(config: IntegrationsConfig) {
         headers: getAuthHeaders(),
       })
       return handleResponse<SyncJob>(response)
+    },
+
+    async getSyncJobRecords(
+      jobId: string,
+      params?: {
+        entity_type?: string
+        status?: RecordSyncStatus
+        page?: number
+        page_size?: number
+      }
+    ): Promise<SyncRecordsResponse> {
+      const searchParams = new URLSearchParams()
+      if (params?.entity_type) searchParams.set('entity_type', params.entity_type)
+      if (params?.status) searchParams.set('status', params.status)
+      if (params?.page) searchParams.set('page', params.page.toString())
+      if (params?.page_size) searchParams.set('page_size', params.page_size.toString())
+
+      const queryString = searchParams.toString()
+      const url = `${apiBaseUrl}/sync-jobs/${jobId}/records${queryString ? `?${queryString}` : ''}`
+
+      const response = await fetch(url, {
+        headers: getAuthHeaders(),
+      })
+      return handleResponse<SyncRecordsResponse>(response)
     },
 
     // ========================
