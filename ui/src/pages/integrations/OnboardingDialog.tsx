@@ -38,22 +38,20 @@ export function OnboardingDialog({
   const [accountId, setAccountId] = useState('')
   const [companyName, setCompanyName] = useState('')
 
-  // Connect integration mutation
+  // Connect integration mutation - uses OAuth callback for mock flow
   const connectMutation = useMutation({
     mutationFn: () =>
-      api.connectIntegration(integration.id, {
-        external_account_id: accountId || `mock-${integration.name.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`,
-        mock_credentials: {
-          access_token: `mock_access_token_${Date.now()}`,
-          refresh_token: `mock_refresh_token_${Date.now()}`,
-        },
+      api.completeOAuthCallback(integration.id, {
+        code: `mock_auth_code_${Date.now()}`,
+        redirect_uri: window.location.origin + '/integrations/callback',
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['user-integrations'] })
       setStep('complete')
     },
-    onError: (error: Error) => {
-      toast.error('Connection failed', error.message)
+    onError: (error) => {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      toast.error('Connection failed', message)
     },
   })
 

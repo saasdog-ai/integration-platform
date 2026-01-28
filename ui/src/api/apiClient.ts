@@ -101,6 +101,18 @@ export function createApiClient(config: IntegrationsConfig) {
       return handleResponse<UserIntegration>(response)
     },
 
+    async completeOAuthCallback(
+      integrationId: string,
+      request: { code: string; redirect_uri: string }
+    ): Promise<UserIntegration> {
+      const response = await fetch(`${apiBaseUrl}/integrations/${integrationId}/callback`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(request),
+      })
+      return handleResponse<UserIntegration>(response)
+    },
+
     async disconnectIntegration(integrationId: string): Promise<void> {
       const response = await fetch(`${apiBaseUrl}/integrations/${integrationId}`, {
         method: 'DELETE',
