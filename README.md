@@ -1,18 +1,22 @@
 # Integration Platform
 
-A production-ready, multi-tenant integration platform for bi-directional data synchronization between SaaS applications and external providers (ERPs like QuickBooks, Xero, etc.).
+A production-ready framework for building integrations between your SaaS application and external providers (ERPs like QuickBooks, Xero, CRMs, HRIS systems, etc.).
+
+## Why This Project?
+
+Instead of paying expensive third-party integration vendors like Workato, MuleSoft, or Tray.io thousands of dollars per month, use this framework as a starting point to build your own integrations. The codebase is designed to be extended with AI coding tools like Claude Code — describe the integration you need, and let AI generate the adapter implementation.
+
+**This is a chassis, not a finished product.** The included integrations (QuickBooks, etc.) are stubbed out for demonstration. You'll implement the actual API calls and data mappings for your specific use case.
 
 ## Features
 
-- **Bi-Directional Sync**: Sync data both to and from external systems with configurable direction per entity type
-- **Version Vector Tracking**: Intelligent conflict detection using internal, external, and last-sync version IDs
+- **Framework for Integrations**: Extensible adapter pattern — add new integrations by implementing a simple interface
+- **OAuth Flow Built-In**: Complete OAuth 2.0 infrastructure for connecting external systems
 - **Encrypted Credentials**: Secure credential storage with pluggable encryption (AWS KMS, Azure Key Vault, local)
-- **OAuth Integration**: Complete OAuth 2.0 flow for connecting external systems
 - **Async Job Processing**: Background job runner with pluggable message queues (AWS SQS, in-memory)
-- **Pluggable Adapters**: Extensible adapter pattern for adding new integrations
-- **Multi-Tenant**: Full client isolation with partition-ready database design
-- **Micro-Frontend UI**: React-based UI that can be embedded in host applications
-- **Clean Architecture**: Hexagonal architecture with strict separation of concerns
+- **Multi-Tenant Ready**: Full client isolation with partition-ready database design
+- **Micro-Frontend UI**: React-based UI that can be embedded in your host application
+- **Clean Architecture**: Hexagonal architecture makes it easy for AI tools to understand and extend
 - **Cloud-Agnostic**: Designed to run on AWS, Azure, or GCP
 
 ## Technology Stack
@@ -53,28 +57,6 @@ integration-platform/
 ├── scripts/                  # Utility scripts
 └── docker-compose.yml        # Local development setup
 ```
-
-## Core Domain Entities
-
-| Entity | Description |
-|--------|-------------|
-| **AvailableIntegrations** | Master list of supported integrations (QuickBooks, Xero, etc.) |
-| **UserIntegrations** | User's connected integrations with encrypted OAuth credentials |
-| **UserIntegrationSettings** | Per-user sync configuration (rules, frequency, field mappings) |
-| **SystemIntegrationSettings** | System-wide defaults for each integration |
-| **SyncJobs** | Job execution history with status tracking and error logs |
-| **EntitySyncStatus** | Last successful sync time per entity type |
-| **IntegrationState** | Record-level sync state with version vectors (partition-ready) |
-
-## Version Vector Logic
-
-The platform uses version vectors to track sync status at the record level:
-
-- **internal_version_id**: Incremented when the record changes in our system
-- **external_version_id**: Incremented when the record changes in the external system
-- **last_sync_version_id**: Set to max(internal, external) after successful sync
-
-A record is **in sync** when: `internal_version_id == external_version_id == last_sync_version_id`
 
 ## Quick Start
 
@@ -240,6 +222,13 @@ make migrate-downgrade
 ```
 
 ## Adding New Integrations
+
+The adapter pattern makes it easy to add new integrations — either manually or with AI assistance. Use Claude Code or similar tools to generate implementations:
+
+**Example prompt for Claude Code:**
+> "Create a Xero integration adapter that implements OAuth token exchange and fetches invoices. Follow the pattern in `app/infrastructure/adapters/quickbooks/`."
+
+### Manual Steps
 
 1. **Create adapter** in `app/infrastructure/adapters/<integration_name>/`:
    ```python
