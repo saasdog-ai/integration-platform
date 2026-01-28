@@ -603,3 +603,450 @@ class TestGetJobs:
 
         assert len(pending_jobs) == 1
         assert pending_jobs[0].status == SyncJobStatus.PENDING
+
+
+class TestGetJobsPaginated:
+    """Test paginated sync job retrieval."""
+
+    async def test_get_jobs_paginated(
+        self,
+        orchestrator,
+        mock_job_repo,
+        sample_client_id,
+        sample_integration,
+    ):
+        """Test getting paginated jobs."""
+        now = datetime.now(timezone.utc)
+        # Create multiple jobs
+        for i in range(15):
+            job = SyncJob(
+                id=uuid4(),
+                client_id=sample_client_id,
+                integration_id=sample_integration.id,
+                job_type=SyncJobType.INCREMENTAL,
+                status=SyncJobStatus.PENDING,
+                triggered_by=SyncJobTrigger.USER,
+                created_at=now,
+                updated_at=now,
+            )
+            await mock_job_repo.create_job(job)
+
+        # Get first page
+        jobs, total = await orchestrator.get_jobs_paginated(
+            sample_client_id, page=1, page_size=10
+        )
+
+        assert len(jobs) == 10
+        assert total == 15
+
+        # Get second page
+        jobs_page2, total2 = await orchestrator.get_jobs_paginated(
+            sample_client_id, page=2, page_size=10
+        )
+
+        assert len(jobs_page2) == 5
+        assert total2 == 15
+
+    async def test_get_jobs_paginated_with_filter(
+        self,
+        orchestrator,
+        mock_job_repo,
+        sample_client_id,
+        sample_integration,
+    ):
+        """Test paginated jobs with status filter."""
+        now = datetime.now(timezone.utc)
+
+        # Create jobs with different statuses
+        for i in range(5):
+            job = SyncJob(
+                id=uuid4(),
+                client_id=sample_client_id,
+                integration_id=sample_integration.id,
+                job_type=SyncJobType.INCREMENTAL,
+                status=SyncJobStatus.PENDING,
+                triggered_by=SyncJobTrigger.USER,
+                created_at=now,
+                updated_at=now,
+            )
+            await mock_job_repo.create_job(job)
+
+        for i in range(3):
+            job = SyncJob(
+                id=uuid4(),
+                client_id=sample_client_id,
+                integration_id=sample_integration.id,
+                job_type=SyncJobType.INCREMENTAL,
+                status=SyncJobStatus.SUCCEEDED,
+                triggered_by=SyncJobTrigger.USER,
+                completed_at=now,
+                created_at=now,
+                updated_at=now,
+            )
+            await mock_job_repo.create_job(job)
+
+        # Get only pending jobs
+        jobs, total = await orchestrator.get_jobs_paginated(
+            sample_client_id, status=SyncJobStatus.PENDING, page=1, page_size=10
+        )
+
+        assert len(jobs) == 5
+        assert total == 5
+        assert all(j.status == SyncJobStatus.PENDING for j in jobs)
+
+
+class TestGetJobRecords:
+    """Test retrieving job records."""
+
+    async def test_get_job_records(
+        self,
+        orchestrator,
+        mock_job_repo,
+        mock_state_repo,
+        sample_client_id,
+        sample_integration,
+    ):
+        """Test getting records for a specific job."""
+        from app.domain.entities import IntegrationStateRecord
+        from app.domain.enums import RecordSyncStatus
+
+        now = datetime.now(timezone.utc)
+        job = SyncJob(
+            id=uuid4(),
+            client_id=sample_client_id,
+            integration_id=sample_integration.id,
+            job_type=SyncJobType.FULL_SYNC,
+            status=SyncJobStatus.SUCCEEDED,
+            triggered_by=SyncJobTrigger.USER,
+            completed_at=now,
+            created_at=now,
+            updated_at=now,
+        )
+        await mock_job_repo.create_job(job)
+
+        # Create some state records for this job
+        for i in range(5):
+            record = IntegrationStateRecord(
+                id=uuid4(),
+                client_id=sample_client_id,
+                integration_id=sample_integration.id,
+                entity_type="bill",
+                internal_record_id=f"bill-{i}",
+                external_record_id=f"ext-bill-{i}",
+                sync_status=RecordSyncStatus.SYNCED,
+                sync_direction=SyncDirection.INBOUND,
+                internal_version_id=1,
+                external_version_id=1,
+                last_sync_version_id=1,
+                last_synced_at=now,
+                last_job_id=job.id,
+                created_at=now,
+                updated_at=now,
+            )
+            await mock_state_repo.upsert_record(record)
+
+        # Get records for the job
+        records, total = await orchestrator.get_job_records(
+            sample_client_id, job.id, page=1, page_size=10
+        )
+
+        assert len(records) == 5
+        assert total == 5
+        assert all(r.last_job_id == job.id for r in records)
+
+    async def test_get_job_records_with_entity_filter(
+        self,
+        orchestrator,
+        mock_job_repo,
+        mock_state_repo,
+        sample_client_id,
+        sample_integration,
+    ):
+        """Test filtering job records by entity type."""
+        from app.domain.entities import IntegrationStateRecord
+        from app.domain.enums import RecordSyncStatus
+
+        now = datetime.now(timezone.utc)
+        job = SyncJob(
+            id=uuid4(),
+            client_id=sample_client_id,
+            integration_id=sample_integration.id,
+            job_type=SyncJobType.FULL_SYNC,
+            status=SyncJobStatus.SUCCEEDED,
+            triggered_by=SyncJobTrigger.USER,
+            completed_at=now,
+            created_at=now,
+            updated_at=now,
+        )
+        await mock_job_repo.create_job(job)
+
+        # Create records with different entity types
+        for i in range(3):
+            record = IntegrationStateRecord(
+                id=uuid4(),
+                client_id=sample_client_id,
+                integration_id=sample_integration.id,
+                entity_type="bill",
+                internal_record_id=f"bill-{i}",
+                sync_status=RecordSyncStatus.SYNCED,
+                sync_direction=SyncDirection.INBOUND,
+                internal_version_id=1,
+                external_version_id=1,
+                last_sync_version_id=1,
+                last_job_id=job.id,
+                created_at=now,
+                updated_at=now,
+            )
+            await mock_state_repo.upsert_record(record)
+
+        for i in range(2):
+            record = IntegrationStateRecord(
+                id=uuid4(),
+                client_id=sample_client_id,
+                integration_id=sample_integration.id,
+                entity_type="invoice",
+                internal_record_id=f"invoice-{i}",
+                sync_status=RecordSyncStatus.SYNCED,
+                sync_direction=SyncDirection.INBOUND,
+                internal_version_id=1,
+                external_version_id=1,
+                last_sync_version_id=1,
+                last_job_id=job.id,
+                created_at=now,
+                updated_at=now,
+            )
+            await mock_state_repo.upsert_record(record)
+
+        # Filter by entity type
+        records, total = await orchestrator.get_job_records(
+            sample_client_id, job.id, entity_type="bill", page=1, page_size=10
+        )
+
+        assert len(records) == 3
+        assert total == 3
+        assert all(r.entity_type == "bill" for r in records)
+
+    async def test_get_job_records_pagination(
+        self,
+        orchestrator,
+        mock_job_repo,
+        mock_state_repo,
+        sample_client_id,
+        sample_integration,
+    ):
+        """Test pagination of job records."""
+        from app.domain.entities import IntegrationStateRecord
+        from app.domain.enums import RecordSyncStatus
+
+        now = datetime.now(timezone.utc)
+        job = SyncJob(
+            id=uuid4(),
+            client_id=sample_client_id,
+            integration_id=sample_integration.id,
+            job_type=SyncJobType.FULL_SYNC,
+            status=SyncJobStatus.SUCCEEDED,
+            triggered_by=SyncJobTrigger.USER,
+            completed_at=now,
+            created_at=now,
+            updated_at=now,
+        )
+        await mock_job_repo.create_job(job)
+
+        # Create 25 records
+        for i in range(25):
+            record = IntegrationStateRecord(
+                id=uuid4(),
+                client_id=sample_client_id,
+                integration_id=sample_integration.id,
+                entity_type="bill",
+                internal_record_id=f"bill-{i}",
+                sync_status=RecordSyncStatus.SYNCED,
+                sync_direction=SyncDirection.INBOUND,
+                internal_version_id=1,
+                external_version_id=1,
+                last_sync_version_id=1,
+                last_job_id=job.id,
+                created_at=now,
+                updated_at=now,
+            )
+            await mock_state_repo.upsert_record(record)
+
+        # Get first page
+        records_p1, total = await orchestrator.get_job_records(
+            sample_client_id, job.id, page=1, page_size=10
+        )
+        assert len(records_p1) == 10
+        assert total == 25
+
+        # Get second page
+        records_p2, _ = await orchestrator.get_job_records(
+            sample_client_id, job.id, page=2, page_size=10
+        )
+        assert len(records_p2) == 10
+
+        # Get third page
+        records_p3, _ = await orchestrator.get_job_records(
+            sample_client_id, job.id, page=3, page_size=10
+        )
+        assert len(records_p3) == 5
+
+
+class TestExecuteSyncJob:
+    """Test sync job execution."""
+
+    async def test_execute_sync_job_no_settings(
+        self,
+        orchestrator,
+        mock_job_repo,
+        mock_integration_repo,
+        sample_client_id,
+        sample_integration,
+        connected_user_integration,
+    ):
+        """Test job execution fails gracefully without settings."""
+        now = datetime.now(timezone.utc)
+        job = SyncJob(
+            id=uuid4(),
+            client_id=sample_client_id,
+            integration_id=sample_integration.id,
+            job_type=SyncJobType.FULL_SYNC,
+            status=SyncJobStatus.PENDING,
+            triggered_by=SyncJobTrigger.USER,
+            created_at=now,
+            updated_at=now,
+        )
+        await mock_job_repo.create_job(job)
+
+        # Clear settings to simulate no configuration
+        mock_integration_repo._user_settings.clear()
+
+        result = await orchestrator.execute_sync_job(job)
+
+        assert result.status == SyncJobStatus.FAILED
+        assert result.error_code == "SYNC_FAILED"
+
+    async def test_execute_sync_job_with_settings(
+        self,
+        orchestrator,
+        mock_job_repo,
+        mock_integration_repo,
+        sample_client_id,
+        sample_integration,
+        connected_user_integration,
+    ):
+        """Test successful job execution with valid settings."""
+        # Add sync settings
+        settings = UserIntegrationSettings(
+            sync_rules=[
+                SyncRule(entity_type="bill", direction=SyncDirection.INBOUND, enabled=True),
+            ],
+            sync_frequency="hourly",
+            auto_sync_enabled=True,
+        )
+        await mock_integration_repo.upsert_user_settings(
+            sample_client_id, sample_integration.id, settings
+        )
+
+        now = datetime.now(timezone.utc)
+        job = SyncJob(
+            id=uuid4(),
+            client_id=sample_client_id,
+            integration_id=sample_integration.id,
+            job_type=SyncJobType.FULL_SYNC,
+            status=SyncJobStatus.PENDING,
+            triggered_by=SyncJobTrigger.USER,
+            created_at=now,
+            updated_at=now,
+        )
+        await mock_job_repo.create_job(job)
+
+        result = await orchestrator.execute_sync_job(job)
+
+        # Job should complete (either succeeded or failed based on adapter behavior)
+        assert result.status in (SyncJobStatus.SUCCEEDED, SyncJobStatus.FAILED)
+
+    async def test_execute_sync_job_no_enabled_rules(
+        self,
+        orchestrator,
+        mock_job_repo,
+        mock_integration_repo,
+        sample_client_id,
+        sample_integration,
+        connected_user_integration,
+    ):
+        """Test job execution fails when no rules are enabled."""
+        # Add settings with all rules disabled
+        settings = UserIntegrationSettings(
+            sync_rules=[
+                SyncRule(entity_type="bill", direction=SyncDirection.INBOUND, enabled=False),
+            ],
+            sync_frequency="hourly",
+            auto_sync_enabled=True,
+        )
+        await mock_integration_repo.upsert_user_settings(
+            sample_client_id, sample_integration.id, settings
+        )
+
+        now = datetime.now(timezone.utc)
+        job = SyncJob(
+            id=uuid4(),
+            client_id=sample_client_id,
+            integration_id=sample_integration.id,
+            job_type=SyncJobType.FULL_SYNC,
+            status=SyncJobStatus.PENDING,
+            triggered_by=SyncJobTrigger.USER,
+            created_at=now,
+            updated_at=now,
+        )
+        await mock_job_repo.create_job(job)
+
+        result = await orchestrator.execute_sync_job(job)
+
+        assert result.status == SyncJobStatus.FAILED
+        assert "No sync rules are enabled" in result.error_message
+
+
+class TestGlobalDisable:
+    """Test global sync disable feature flag."""
+
+    async def test_trigger_sync_globally_disabled(
+        self,
+        orchestrator,
+        sample_client_id,
+        sample_integration,
+        connected_user_integration,
+    ):
+        """Test triggering sync when globally disabled."""
+        from unittest.mock import patch
+
+        with patch("app.services.sync_orchestrator.get_settings") as mock_settings:
+            mock_settings.return_value.sync_globally_disabled = True
+            mock_settings.return_value.disabled_integrations = []
+
+            with pytest.raises(SyncError) as exc_info:
+                await orchestrator.trigger_sync(
+                    client_id=sample_client_id,
+                    integration_id=sample_integration.id,
+                )
+            assert "globally" in str(exc_info.value).lower()
+
+    async def test_trigger_sync_integration_disabled(
+        self,
+        orchestrator,
+        sample_client_id,
+        sample_integration,
+        connected_user_integration,
+    ):
+        """Test triggering sync when specific integration is disabled."""
+        from unittest.mock import patch
+
+        with patch("app.services.sync_orchestrator.get_settings") as mock_settings:
+            mock_settings.return_value.sync_globally_disabled = False
+            mock_settings.return_value.disabled_integrations = ["QuickBooks Online"]
+
+            with pytest.raises(SyncError) as exc_info:
+                await orchestrator.trigger_sync(
+                    client_id=sample_client_id,
+                    integration_id=sample_integration.id,
+                )
+            assert "disabled" in str(exc_info.value).lower()

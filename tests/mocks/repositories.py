@@ -174,6 +174,31 @@ class MockSyncJobRepository(SyncJobRepositoryInterface):
         jobs.sort(key=lambda j: j.created_at, reverse=True)
         return jobs[:limit]
 
+    async def get_jobs_for_client_paginated(
+        self,
+        client_id: UUID,
+        integration_id: UUID | None = None,
+        status: SyncJobStatus | None = None,
+        since: datetime | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[SyncJob], int]:
+        """Get paginated jobs for a client."""
+        jobs = [j for j in self._jobs.values() if j.client_id == client_id]
+
+        if integration_id:
+            jobs = [j for j in jobs if j.integration_id == integration_id]
+        if status:
+            jobs = [j for j in jobs if j.status == status]
+        if since:
+            jobs = [j for j in jobs if j.created_at >= since]
+
+        jobs.sort(key=lambda j: j.created_at, reverse=True)
+        total = len(jobs)
+        offset = (page - 1) * page_size
+        paginated = jobs[offset : offset + page_size]
+        return paginated, total
+
     async def update_job_status(
         self,
         job_id: UUID,
