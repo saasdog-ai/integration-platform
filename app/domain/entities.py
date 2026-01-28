@@ -94,6 +94,7 @@ class UserIntegration(BaseEntity):
     credentials_key_id: str | None = None
     external_account_id: str | None = None
     last_connected_at: datetime | None = None
+    disconnected_at: datetime | None = None
 
     # Relationships (loaded separately)
     integration: AvailableIntegration | None = None

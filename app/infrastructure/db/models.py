@@ -101,6 +101,9 @@ class UserIntegrationModel(Base, TimestampMixin):
     last_connected_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    disconnected_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     # Relationships
     integration: Mapped["AvailableIntegrationModel"] = relationship(

@@ -83,6 +83,7 @@ def _to_user_integration_response(
         status=user_integration.status,
         external_account_id=user_integration.external_account_id,
         last_connected_at=user_integration.last_connected_at,
+        disconnected_at=user_integration.disconnected_at,
         created_at=user_integration.created_at,
         updated_at=user_integration.updated_at,
     )

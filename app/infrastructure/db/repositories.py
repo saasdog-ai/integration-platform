@@ -85,6 +85,7 @@ def _model_to_user_integration(model: UserIntegrationModel) -> UserIntegration:
         credentials_key_id=model.credentials_key_id,
         external_account_id=model.external_account_id,
         last_connected_at=model.last_connected_at,
+        disconnected_at=model.disconnected_at,
         created_at=model.created_at,
         updated_at=model.updated_at,
         created_by=model.created_by,
@@ -308,12 +309,16 @@ class IntegrationRepository(IntegrationRepositoryInterface):
                     credentials_key_id=integration.credentials_key_id,
                     external_account_id=integration.external_account_id,
                     last_connected_at=integration.last_connected_at,
+                    disconnected_at=integration.disconnected_at,
                     updated_by=integration.updated_by,
                 )
             )
-            return await self.get_user_integration(
-                integration.client_id, integration.integration_id
-            )
+            # Commit before reading back so new session can see changes
+            await session.commit()
+        # Read from a new session after commit
+        return await self.get_user_integration(
+            integration.client_id, integration.integration_id
+        )
 
     async def delete_user_integration(
         self, client_id: UUID, integration_id: UUID

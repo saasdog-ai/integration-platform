@@ -87,6 +87,7 @@ class UserIntegrationResponse(BaseResponse):
     status: IntegrationStatus
     external_account_id: str | None
     last_connected_at: datetime | None
+    disconnected_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

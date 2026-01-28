@@ -38,6 +38,7 @@ export interface UserIntegration {
   status: IntegrationStatus
   external_account_id: string | null
   last_connected_at: string | null
+  disconnected_at: string | null
   created_at: string
   updated_at: string
   integration?: AvailableIntegration
