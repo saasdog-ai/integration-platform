@@ -76,6 +76,7 @@ class Settings(BaseSettings):
     job_runner_enabled: bool = Field(default=True)
     job_stuck_timeout_minutes: int = Field(default=360)  # 6 hours - jobs running longer are considered stuck
     job_termination_enabled: bool = Field(default=True)  # Enable automatic stuck job termination
+    integration_history_retention_days: int = Field(default=90)
 
     # Feature Flags - can be used to disable specific integrations or features
     # Format: comma-separated list of integration names to disable

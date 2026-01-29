@@ -9,6 +9,7 @@ from app.domain.entities import (
     AvailableIntegration,
     EntitySyncStatus,
     ExternalRecord,
+    IntegrationHistoryRecord,
     IntegrationStateRecord,
     OAuthTokens,
     QueueMessage,
@@ -213,9 +214,20 @@ class IntegrationStateRepositoryInterface(ABC):
         client_id: UUID,
         integration_id: UUID,
         entity_type: str,
-        internal_record_id: str,
+        internal_record_id: str | None = None,
     ) -> IntegrationStateRecord | None:
-        """Get a specific record's sync state."""
+        """Get a specific record's sync state by internal record ID."""
+        pass
+
+    @abstractmethod
+    async def get_record_by_external_id(
+        self,
+        client_id: UUID,
+        integration_id: UUID,
+        entity_type: str,
+        external_record_id: str,
+    ) -> IntegrationStateRecord | None:
+        """Get a specific record's sync state by external record ID."""
         pass
 
     @abstractmethod
@@ -358,6 +370,66 @@ class IntegrationStateRepositoryInterface(ABC):
 
         Returns:
             Tuple of (records, total_count).
+        """
+        pass
+
+    @abstractmethod
+    async def create_history_entry(
+        self, entry: IntegrationHistoryRecord
+    ) -> IntegrationHistoryRecord:
+        """Create a single history entry."""
+        pass
+
+    @abstractmethod
+    async def batch_create_history(
+        self, entries: list[IntegrationHistoryRecord]
+    ) -> None:
+        """Create multiple history entries in a single transaction."""
+        pass
+
+    @abstractmethod
+    async def get_history_by_job_id(
+        self,
+        client_id: UUID,
+        job_id: UUID,
+        entity_type: str | None = None,
+        status: RecordSyncStatus | None = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[list[IntegrationHistoryRecord], int]:
+        """
+        Get paginated history entries for a specific sync job.
+
+        Args:
+            client_id: The client ID for multi-tenant isolation.
+            job_id: The sync job ID to filter by.
+            entity_type: Optional filter by entity type.
+            status: Optional filter by sync status.
+            page: Page number (1-indexed).
+            page_size: Number of records per page.
+
+        Returns:
+            Tuple of (history_records, total_count).
+        """
+        pass
+
+    @abstractmethod
+    async def cleanup_old_history(
+        self,
+        retention_days: int,
+        batch_size: int = 10000,
+    ) -> int:
+        """
+        Delete history entries older than retention_days.
+
+        Uses batched deletes to avoid lock contention.
+
+        Args:
+            retention_days: Delete entries older than this many days.
+            batch_size: Maximum rows to delete per transaction.
+
+        Returns:
+            Total number of rows deleted.
         """
         pass
 

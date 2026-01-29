@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 from app.domain.entities import (
     AvailableIntegration,
     EntitySyncStatus,
+    IntegrationHistoryRecord,
     IntegrationStateRecord,
     SyncJob,
     SyncRule,
@@ -323,19 +324,46 @@ class MockIntegrationStateRepository(IntegrationStateRepositoryInterface):
     """In-memory mock implementation of IntegrationStateRepositoryInterface."""
 
     def __init__(self) -> None:
-        self._records: dict[tuple[UUID, UUID, str, str], IntegrationStateRecord] = {}
+        # Keyed by (client_id, record.id) matching the DB composite PK
+        self._records: dict[tuple[UUID, UUID], IntegrationStateRecord] = {}
         self._entity_sync_status: dict[tuple[UUID, UUID, str], EntitySyncStatus] = {}
+        self._history: dict[tuple[UUID, UUID], IntegrationHistoryRecord] = {}
 
     async def get_record(
         self,
         client_id: UUID,
         integration_id: UUID,
         entity_type: str,
-        internal_record_id: str,
+        internal_record_id: str | None = None,
     ) -> IntegrationStateRecord | None:
-        return self._records.get(
-            (client_id, integration_id, entity_type, internal_record_id)
-        )
+        if internal_record_id is None:
+            return None
+        for record in self._records.values():
+            if (
+                record.client_id == client_id
+                and record.integration_id == integration_id
+                and record.entity_type == entity_type
+                and record.internal_record_id == internal_record_id
+            ):
+                return record
+        return None
+
+    async def get_record_by_external_id(
+        self,
+        client_id: UUID,
+        integration_id: UUID,
+        entity_type: str,
+        external_record_id: str,
+    ) -> IntegrationStateRecord | None:
+        for record in self._records.values():
+            if (
+                record.client_id == client_id
+                and record.integration_id == integration_id
+                and record.entity_type == entity_type
+                and record.external_record_id == external_record_id
+            ):
+                return record
+        return None
 
     async def get_records_by_status(
         self,
@@ -347,10 +375,10 @@ class MockIntegrationStateRepository(IntegrationStateRepositoryInterface):
     ) -> list[IntegrationStateRecord]:
         records = [
             r
-            for (cid, iid, et, _), r in self._records.items()
-            if cid == client_id
-            and iid == integration_id
-            and et == entity_type
+            for r in self._records.values()
+            if r.client_id == client_id
+            and r.integration_id == integration_id
+            and r.entity_type == entity_type
             and r.sync_status == status
         ]
         return records[:limit]
@@ -369,14 +397,44 @@ class MockIntegrationStateRepository(IntegrationStateRepositoryInterface):
     async def upsert_record(
         self, record: IntegrationStateRecord
     ) -> IntegrationStateRecord:
-        key = (
-            record.client_id,
-            record.integration_id,
-            record.entity_type,
-            record.internal_record_id,
-        )
+        # Dual-path lookup: try internal ID first, then external ID
+        existing = None
+        if record.internal_record_id is not None:
+            existing = await self.get_record(
+                record.client_id,
+                record.integration_id,
+                record.entity_type,
+                record.internal_record_id,
+            )
+        if existing is None and record.external_record_id is not None:
+            existing = await self.get_record_by_external_id(
+                record.client_id,
+                record.integration_id,
+                record.entity_type,
+                record.external_record_id,
+            )
+
+        if existing is not None:
+            # Update existing record in place
+            if record.internal_record_id is not None:
+                existing.internal_record_id = record.internal_record_id
+            existing.external_record_id = record.external_record_id
+            existing.sync_status = record.sync_status
+            existing.sync_direction = record.sync_direction
+            existing.internal_version_id = record.internal_version_id
+            existing.external_version_id = record.external_version_id
+            existing.last_sync_version_id = record.last_sync_version_id
+            existing.last_synced_at = record.last_synced_at
+            existing.last_job_id = record.last_job_id
+            existing.error_code = record.error_code
+            existing.error_message = record.error_message
+            existing.error_details = record.error_details
+            existing.metadata = record.metadata
+            existing.updated_at = datetime.now(timezone.utc)
+            return existing
+
         record.updated_at = datetime.now(timezone.utc)
-        self._records[key] = record
+        self._records[(record.client_id, record.id)] = record
         return record
 
     async def update_sync_status(
@@ -388,17 +446,16 @@ class MockIntegrationStateRepository(IntegrationStateRepositoryInterface):
         error_message: str | None = None,
         error_details: dict[str, Any] | None = None,
     ) -> None:
-        for key, record in self._records.items():
-            if record.id == record_id and record.client_id == client_id:
-                record.sync_status = status
-                record.updated_at = datetime.now(timezone.utc)
-                if error_code is not None:
-                    record.error_code = error_code
-                if error_message is not None:
-                    record.error_message = error_message
-                if error_details is not None:
-                    record.error_details = error_details
-                return
+        record = self._records.get((client_id, record_id))
+        if record:
+            record.sync_status = status
+            record.updated_at = datetime.now(timezone.utc)
+            if error_code is not None:
+                record.error_code = error_code
+            if error_message is not None:
+                record.error_message = error_message
+            if error_details is not None:
+                record.error_details = error_details
 
     async def mark_synced(
         self,
@@ -407,21 +464,20 @@ class MockIntegrationStateRepository(IntegrationStateRepositoryInterface):
         external_record_id: str | None = None,
         job_id: UUID | None = None,
     ) -> None:
-        for key, record in self._records.items():
-            if record.id == record_id and record.client_id == client_id:
-                record.sync_status = RecordSyncStatus.SYNCED
-                record.last_synced_at = datetime.now(timezone.utc)
-                record.last_sync_version_id = max(
-                    record.internal_version_id, record.external_version_id
-                )
-                record.error_code = None
-                record.error_message = None
-                record.error_details = None
-                if external_record_id:
-                    record.external_record_id = external_record_id
-                if job_id:
-                    record.last_job_id = job_id
-                return
+        record = self._records.get((client_id, record_id))
+        if record:
+            record.sync_status = RecordSyncStatus.SYNCED
+            record.last_synced_at = datetime.now(timezone.utc)
+            record.last_sync_version_id = max(
+                record.internal_version_id, record.external_version_id
+            )
+            record.error_code = None
+            record.error_message = None
+            record.error_details = None
+            if external_record_id:
+                record.external_record_id = external_record_id
+            if job_id:
+                record.last_job_id = job_id
 
     async def get_entity_sync_status(
         self,
@@ -468,18 +524,11 @@ class MockIntegrationStateRepository(IntegrationStateRepositoryInterface):
         self,
         records: list[IntegrationStateRecord],
     ) -> list[IntegrationStateRecord]:
-        """Upsert multiple records (mock - all operations succeed or none)."""
+        """Upsert multiple records (mock - delegates to upsert_record)."""
         results: list[IntegrationStateRecord] = []
         for record in records:
-            key = (
-                record.client_id,
-                record.integration_id,
-                record.entity_type,
-                record.internal_record_id,
-            )
-            record.updated_at = datetime.now(timezone.utc)
-            self._records[key] = record
-            results.append(record)
+            result = await self.upsert_record(record)
+            results.append(result)
         return results
 
     async def batch_mark_synced(
@@ -489,21 +538,19 @@ class MockIntegrationStateRepository(IntegrationStateRepositoryInterface):
         integration_id: UUID | None = None,
     ) -> None:
         """Mark multiple records as synced (mock - atomic operation)."""
-        # In mock, we don't need advisory locks - just process the updates
         for record_id, record_client_id, external_record_id in updates:
-            for key, record in self._records.items():
-                if record.id == record_id and record.client_id == record_client_id:
-                    record.sync_status = RecordSyncStatus.SYNCED
-                    record.last_synced_at = datetime.now(timezone.utc)
-                    record.last_sync_version_id = max(
-                        record.internal_version_id, record.external_version_id
-                    )
-                    record.error_code = None
-                    record.error_message = None
-                    record.error_details = None
-                    if external_record_id:
-                        record.external_record_id = external_record_id
-                    break
+            record = self._records.get((record_client_id, record_id))
+            if record:
+                record.sync_status = RecordSyncStatus.SYNCED
+                record.last_synced_at = datetime.now(timezone.utc)
+                record.last_sync_version_id = max(
+                    record.internal_version_id, record.external_version_id
+                )
+                record.error_code = None
+                record.error_message = None
+                record.error_details = None
+                if external_record_id:
+                    record.external_record_id = external_record_id
 
     async def get_records_by_job_id(
         self,
@@ -515,30 +562,83 @@ class MockIntegrationStateRepository(IntegrationStateRepositoryInterface):
         page_size: int = 50,
     ) -> tuple[list[IntegrationStateRecord], int]:
         """Get paginated records that were modified by a specific sync job."""
-        # Filter records by client_id and last_job_id
         records = [
             r
             for r in self._records.values()
             if r.client_id == client_id and r.last_job_id == job_id
         ]
 
-        # Apply optional filters
         if entity_type:
             records = [r for r in records if r.entity_type == entity_type]
         if status:
             records = [r for r in records if r.sync_status == status]
 
-        # Sort by updated_at desc
         records.sort(key=lambda r: r.updated_at, reverse=True)
 
-        # Calculate pagination
         total = len(records)
         offset = (page - 1) * page_size
         paginated = records[offset : offset + page_size]
 
         return paginated, total
 
+    async def create_history_entry(
+        self, entry: IntegrationHistoryRecord
+    ) -> IntegrationHistoryRecord:
+        self._history[(entry.client_id, entry.id)] = entry
+        return entry
+
+    async def batch_create_history(
+        self, entries: list[IntegrationHistoryRecord]
+    ) -> None:
+        for entry in entries:
+            self._history[(entry.client_id, entry.id)] = entry
+
+    async def get_history_by_job_id(
+        self,
+        client_id: UUID,
+        job_id: UUID,
+        entity_type: str | None = None,
+        status: RecordSyncStatus | None = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[list[IntegrationHistoryRecord], int]:
+        records = [
+            r
+            for r in self._history.values()
+            if r.client_id == client_id and r.job_id == job_id
+        ]
+
+        if entity_type:
+            records = [r for r in records if r.entity_type == entity_type]
+        if status:
+            records = [r for r in records if r.sync_status == status]
+
+        records.sort(key=lambda r: r.created_at, reverse=True)
+
+        total = len(records)
+        offset = (page - 1) * page_size
+        paginated = records[offset : offset + page_size]
+
+        return paginated, total
+
+    async def cleanup_old_history(
+        self,
+        retention_days: int,
+        batch_size: int = 10000,
+    ) -> int:
+        from datetime import timedelta
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+        to_delete = [
+            key for key, entry in self._history.items()
+            if entry.created_at < cutoff
+        ]
+        for key in to_delete:
+            del self._history[key]
+        return len(to_delete)
+
     def clear(self) -> None:
         """Clear all data (for test isolation)."""
         self._records.clear()
         self._entity_sync_status.clear()
+        self._history.clear()

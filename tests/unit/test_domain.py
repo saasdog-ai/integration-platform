@@ -7,6 +7,7 @@ import pytest
 
 from app.domain.entities import (
     AvailableIntegration,
+    IntegrationHistoryRecord,
     IntegrationStateRecord,
     SyncJob,
     SyncRule,
@@ -129,6 +130,43 @@ class TestIntegrationStateRecord:
         )
         assert record.needs_inbound_sync is True
 
+    def test_nullable_internal_record_id(self):
+        """Test IntegrationStateRecord accepts internal_record_id=None for inbound records."""
+        now = datetime.now(timezone.utc)
+        record = IntegrationStateRecord(
+            id=uuid4(),
+            client_id=uuid4(),
+            integration_id=uuid4(),
+            entity_type="bill",
+            internal_record_id=None,
+            external_record_id="ext-456",
+            sync_status=RecordSyncStatus.SYNCED,
+            sync_direction=SyncDirection.INBOUND,
+            internal_version_id=1,
+            external_version_id=1,
+            last_sync_version_id=1,
+            created_at=now,
+            updated_at=now,
+        )
+        assert record.internal_record_id is None
+        assert record.external_record_id == "ext-456"
+        assert record.is_in_sync is True
+
+    def test_default_internal_record_id_is_none(self):
+        """Test IntegrationStateRecord defaults internal_record_id to None."""
+        now = datetime.now(timezone.utc)
+        record = IntegrationStateRecord(
+            id=uuid4(),
+            client_id=uuid4(),
+            integration_id=uuid4(),
+            entity_type="bill",
+            external_record_id="ext-789",
+            sync_status=RecordSyncStatus.PENDING,
+            created_at=now,
+            updated_at=now,
+        )
+        assert record.internal_record_id is None
+
 
 class TestSyncRule:
     """Tests for SyncRule entity."""
@@ -202,3 +240,52 @@ class TestSyncJob:
         assert job.triggered_by == SyncJobTrigger.USER
         assert job.started_at is None
         assert job.completed_at is None
+
+
+class TestIntegrationHistoryRecord:
+    """Tests for IntegrationHistoryRecord entity."""
+
+    def test_creation(self):
+        """Test IntegrationHistoryRecord creation with required fields."""
+        now = datetime.now(timezone.utc)
+        record = IntegrationHistoryRecord(
+            id=uuid4(),
+            client_id=uuid4(),
+            state_record_id=uuid4(),
+            integration_id=uuid4(),
+            entity_type="bill",
+            internal_record_id="int-123",
+            external_record_id="ext-456",
+            sync_status=RecordSyncStatus.SYNCED,
+            sync_direction=SyncDirection.INBOUND,
+            job_id=uuid4(),
+            created_at=now,
+        )
+        assert record.entity_type == "bill"
+        assert record.internal_record_id == "int-123"
+        assert record.external_record_id == "ext-456"
+        assert record.sync_status == RecordSyncStatus.SYNCED
+        assert record.sync_direction == SyncDirection.INBOUND
+        assert record.error_code is None
+        assert record.error_message is None
+        assert record.error_details is None
+
+    def test_nullable_fields(self):
+        """Test IntegrationHistoryRecord with nullable fields set to None."""
+        now = datetime.now(timezone.utc)
+        record = IntegrationHistoryRecord(
+            id=uuid4(),
+            client_id=uuid4(),
+            state_record_id=uuid4(),
+            integration_id=uuid4(),
+            entity_type="vendor",
+            internal_record_id=None,
+            external_record_id=None,
+            sync_status=RecordSyncStatus.PENDING,
+            sync_direction=None,
+            job_id=uuid4(),
+            created_at=now,
+        )
+        assert record.internal_record_id is None
+        assert record.external_record_id is None
+        assert record.sync_direction is None

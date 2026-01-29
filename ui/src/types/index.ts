@@ -169,7 +169,7 @@ export type SyncDirection = 'inbound' | 'outbound' | 'bidirectional'
 export interface SyncRecord {
   id: string
   entity_type: string
-  internal_record_id: string
+  internal_record_id: string | null
   external_record_id: string | null
   sync_direction: SyncDirection | null
   sync_status: RecordSyncStatus

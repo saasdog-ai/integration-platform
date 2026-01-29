@@ -138,7 +138,7 @@ class IntegrationStateRecord(BaseEntity):
     client_id: UUID
     integration_id: UUID
     entity_type: str  # NOT an enum - configurable string
-    internal_record_id: str  # ID in our system
+    internal_record_id: str | None = None  # None for inbound records not yet written internally
     external_record_id: str | None = None  # ID in external system
     sync_status: RecordSyncStatus = RecordSyncStatus.PENDING
     sync_direction: SyncDirection | None = None
@@ -170,6 +170,27 @@ class IntegrationStateRecord(BaseEntity):
     def needs_inbound_sync(self) -> bool:
         """Check if external changes need to be synced to internal."""
         return self.external_version_id > self.last_sync_version_id
+
+
+class IntegrationHistoryRecord(BaseModel):
+    """Snapshot of a record's sync state for a specific job."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    client_id: UUID
+    state_record_id: UUID
+    integration_id: UUID
+    entity_type: str
+    internal_record_id: str | None = None
+    external_record_id: str | None = None
+    sync_status: RecordSyncStatus
+    sync_direction: SyncDirection | None = None
+    job_id: UUID
+    error_code: str | None = None
+    error_message: str | None = None
+    error_details: dict[str, Any] | None = None
+    created_at: datetime
 
 
 class ExternalRecord(BaseModel):

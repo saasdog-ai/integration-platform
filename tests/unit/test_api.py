@@ -403,38 +403,38 @@ class TestSyncJobsEndpoints:
         sample_sync_job,
     ):
         """Test getting record-level sync details for a job."""
-        from app.domain.entities import IntegrationStateRecord
+        from app.domain.entities import IntegrationHistoryRecord
         from app.domain.enums import RecordSyncStatus
 
         now = datetime.now(timezone.utc)
         mock_records = [
-            IntegrationStateRecord(
+            IntegrationHistoryRecord(
                 id=uuid4(),
                 client_id=sample_sync_job.client_id,
+                state_record_id=uuid4(),
                 integration_id=sample_sync_job.integration_id,
                 entity_type="invoice",
                 internal_record_id="INV-001",
                 external_record_id="QB-12345",
                 sync_status=RecordSyncStatus.SYNCED,
                 sync_direction=SyncDirection.OUTBOUND,
-                last_job_id=sample_sync_job.id,
+                job_id=sample_sync_job.id,
                 created_at=now,
-                updated_at=now,
             ),
-            IntegrationStateRecord(
+            IntegrationHistoryRecord(
                 id=uuid4(),
                 client_id=sample_sync_job.client_id,
+                state_record_id=uuid4(),
                 integration_id=sample_sync_job.integration_id,
                 entity_type="invoice",
                 internal_record_id="INV-002",
                 external_record_id=None,
                 sync_status=RecordSyncStatus.FAILED,
                 sync_direction=SyncDirection.OUTBOUND,
-                last_job_id=sample_sync_job.id,
+                job_id=sample_sync_job.id,
                 error_code="VALIDATION_ERROR",
                 error_message="Missing required field",
                 created_at=now,
-                updated_at=now,
             ),
         ]
 

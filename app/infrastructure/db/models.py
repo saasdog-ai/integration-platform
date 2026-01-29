@@ -318,11 +318,13 @@ class IntegrationStateModel(Base):
     __tablename__ = "integration_state"
     __table_args__ = (
         Index(
-            "ix_integration_state_lookup",
+            "uq_integration_state_internal",
             "client_id",
             "integration_id",
             "entity_type",
             "internal_record_id",
+            unique=True,
+            postgresql_where="internal_record_id IS NOT NULL",
         ),
         Index(
             "ix_integration_state_pending",
@@ -331,10 +333,12 @@ class IntegrationStateModel(Base):
             postgresql_where="sync_status IN ('pending', 'failed')",
         ),
         Index(
-            "ix_integration_state_external",
+            "uq_integration_state_external",
             "client_id",
             "integration_id",
+            "entity_type",
             "external_record_id",
+            unique=True,
             postgresql_where="external_record_id IS NOT NULL",
         ),
         Index(
@@ -360,7 +364,7 @@ class IntegrationStateModel(Base):
     entity_type: Mapped[str] = mapped_column(
         String(50), nullable=False
     )  # Configurable string, not enum
-    internal_record_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    internal_record_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     external_record_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     sync_status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="pending"
@@ -395,4 +399,59 @@ class IntegrationStateModel(Base):
         nullable=False,
         server_default=func.now(),
         onupdate=func.now(),
+    )
+
+
+class IntegrationHistoryModel(Base):
+    """
+    Append-only log of per-record sync snapshots.
+
+    Each row captures the state of a record at the time a specific job processed it.
+    This allows records to remain associated with the correct job even after later
+    jobs overwrite integration_state.last_job_id.
+    """
+
+    __tablename__ = "integration_history"
+    __table_args__ = (
+        Index(
+            "ix_integration_history_job_entity",
+            "client_id",
+            "job_id",
+            "entity_type",
+        ),
+        Index(
+            "ix_integration_history_created",
+            "created_at",
+        ),
+    )
+
+    # Composite primary key (same pattern as integration_state)
+    id: Mapped[UUID] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=False,
+        default=uuid4,
+    )
+    client_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+
+    __mapper_args__ = {"primary_key": [client_id, id]}
+
+    state_record_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    integration_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    entity_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    internal_record_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    external_record_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    sync_status: Mapped[str] = mapped_column(
+        String(20), nullable=False
+    )
+    sync_direction: Mapped[str | None] = mapped_column(
+        String(10), nullable=True
+    )
+    job_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    error_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_details: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
     )

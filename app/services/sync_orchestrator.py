@@ -15,6 +15,7 @@ from app.core.exceptions import (
 from app.core.logging import get_logger
 from app.domain.entities import (
     EntitySyncRequest,
+    IntegrationHistoryRecord,
     IntegrationStateRecord,
     SyncJob,
     SyncJobMessage,
@@ -69,6 +70,42 @@ class SyncOrchestrator:
         self._queue = queue
         self._encryption = encryption_service
         self._adapter_factory = adapter_factory
+
+    async def _write_history_entries(
+        self, records: list[IntegrationStateRecord], job_id: UUID
+    ) -> None:
+        """Write history snapshots for a batch of state records."""
+        try:
+            now = datetime.now(timezone.utc)
+            entries = [
+                IntegrationHistoryRecord(
+                    id=uuid4(),
+                    client_id=r.client_id,
+                    state_record_id=r.id,
+                    integration_id=r.integration_id,
+                    entity_type=r.entity_type,
+                    internal_record_id=r.internal_record_id,
+                    external_record_id=r.external_record_id,
+                    sync_status=r.sync_status,
+                    sync_direction=r.sync_direction,
+                    job_id=job_id,
+                    error_code=r.error_code,
+                    error_message=r.error_message,
+                    error_details=r.error_details,
+                    created_at=now,
+                )
+                for r in records
+            ]
+            await self._state_repo.batch_create_history(entries)
+        except Exception as e:
+            logger.error(
+                "Failed to write history entries",
+                extra={
+                    "job_id": str(job_id),
+                    "records_count": len(records),
+                    "error": str(e),
+                },
+            )
 
     async def trigger_sync(
         self,
@@ -400,7 +437,8 @@ class SyncOrchestrator:
                 created = batch_created
                 updated = batch_updated
                 try:
-                    await self._state_repo.batch_upsert_records(records_to_upsert)
+                    upserted = await self._state_repo.batch_upsert_records(records_to_upsert)
+                    await self._write_history_entries(upserted, job.id)
                     logger.debug(
                         "Flushed inbound batch",
                         extra={
@@ -437,12 +475,12 @@ class SyncOrchestrator:
 
                 for record in records:
                     try:
-                        # Check if record exists
-                        state = await self._state_repo.get_record(
+                        # Check if record exists by external ID
+                        state = await self._state_repo.get_record_by_external_id(
                             job.client_id,
                             job.integration_id,
                             entity_type,
-                            record.id,  # Using external ID as internal for demo
+                            record.id,
                         )
 
                         if state:
@@ -458,7 +496,7 @@ class SyncOrchestrator:
                                 client_id=job.client_id,
                                 integration_id=job.integration_id,
                                 entity_type=entity_type,
-                                internal_record_id=record.id,
+                                internal_record_id=None,
                                 external_record_id=record.id,
                                 sync_status=RecordSyncStatus.SYNCED,
                                 sync_direction=SyncDirection.INBOUND,
@@ -511,6 +549,7 @@ class SyncOrchestrator:
 
             # Collect successful syncs for batch update
             successful_syncs: list[tuple[UUID, UUID, str | None]] = []
+            successful_records: list[IntegrationStateRecord] = []
 
             for state in pending_records:
                 try:
@@ -549,6 +588,7 @@ class SyncOrchestrator:
                     successful_syncs.append(
                         (state.id, job.client_id, state.external_record_id)
                     )
+                    successful_records.append(state)
 
                 except Exception as e:
                     logger.warning(
@@ -566,6 +606,10 @@ class SyncOrchestrator:
                         RecordSyncStatus.FAILED,
                         error_message=str(e),
                     )
+                    # Write history for failed record
+                    state.sync_status = RecordSyncStatus.FAILED
+                    state.error_message = str(e)
+                    await self._write_history_entries([state], job.id)
                     result["records_failed"] += 1
 
             # Batch mark all successful syncs in a single transaction with advisory lock
@@ -576,6 +620,10 @@ class SyncOrchestrator:
                         client_id=job.client_id,
                         integration_id=job.integration_id,
                     )
+                    # Write history for successful outbound records
+                    for sr in successful_records:
+                        sr.sync_status = RecordSyncStatus.SYNCED
+                    await self._write_history_entries(successful_records, job.id)
                     result["records_updated"] += len(successful_syncs)
                 except Exception as e:
                     logger.error(
@@ -704,7 +752,7 @@ class SyncOrchestrator:
         status: RecordSyncStatus | None = None,
         page: int = 1,
         page_size: int = 50,
-    ) -> tuple[list[IntegrationStateRecord], int]:
+    ) -> tuple[list[IntegrationHistoryRecord], int]:
         """
         Get paginated records that were modified by a specific sync job.
 
@@ -717,9 +765,9 @@ class SyncOrchestrator:
             page_size: Number of records per page.
 
         Returns:
-            Tuple of (records, total_count).
+            Tuple of (history_records, total_count).
         """
-        return await self._state_repo.get_records_by_job_id(
+        return await self._state_repo.get_history_by_job_id(
             client_id=client_id,
             job_id=job_id,
             entity_type=entity_type,

@@ -356,3 +356,337 @@ class TestMockIntegrationStateRepository:
         assert updated.sync_status == RecordSyncStatus.SYNCED
         assert updated.external_record_id == "ext-123"
         assert updated.last_sync_version_id == 1
+
+    @pytest.mark.asyncio
+    async def test_get_record_by_external_id(self):
+        """Test retrieving a record by external ID."""
+        from app.domain.entities import IntegrationStateRecord
+        from app.domain.enums import RecordSyncStatus, SyncDirection
+
+        repo = MockIntegrationStateRepository()
+        now = datetime.now(timezone.utc)
+        client_id = uuid4()
+        integration_id = uuid4()
+
+        record = IntegrationStateRecord(
+            id=uuid4(),
+            client_id=client_id,
+            integration_id=integration_id,
+            entity_type="bill",
+            internal_record_id=None,
+            external_record_id="ext-100",
+            sync_status=RecordSyncStatus.SYNCED,
+            sync_direction=SyncDirection.INBOUND,
+            internal_version_id=1,
+            external_version_id=1,
+            last_sync_version_id=1,
+            created_at=now,
+            updated_at=now,
+        )
+
+        await repo.upsert_record(record)
+
+        retrieved = await repo.get_record_by_external_id(
+            client_id, integration_id, "bill", "ext-100"
+        )
+        assert retrieved is not None
+        assert retrieved.external_record_id == "ext-100"
+        assert retrieved.internal_record_id is None
+
+        # get_record with None internal_record_id returns None
+        not_found = await repo.get_record(
+            client_id, integration_id, "bill", None
+        )
+        assert not_found is None
+
+    @pytest.mark.asyncio
+    async def test_upsert_dedup_by_external_id(self):
+        """Test that upsert deduplicates by external ID when internal ID is None."""
+        from app.domain.entities import IntegrationStateRecord
+        from app.domain.enums import RecordSyncStatus, SyncDirection
+
+        repo = MockIntegrationStateRepository()
+        now = datetime.now(timezone.utc)
+        client_id = uuid4()
+        integration_id = uuid4()
+        record_id = uuid4()
+
+        # Insert initial record with no internal ID
+        record = IntegrationStateRecord(
+            id=record_id,
+            client_id=client_id,
+            integration_id=integration_id,
+            entity_type="vendor",
+            internal_record_id=None,
+            external_record_id="ext-vendor-1",
+            sync_status=RecordSyncStatus.SYNCED,
+            sync_direction=SyncDirection.INBOUND,
+            internal_version_id=1,
+            external_version_id=1,
+            last_sync_version_id=1,
+            created_at=now,
+            updated_at=now,
+        )
+        await repo.upsert_record(record)
+
+        # Upsert again with same external ID — should update, not duplicate
+        updated_record = IntegrationStateRecord(
+            id=uuid4(),  # Different ID, but same external_record_id
+            client_id=client_id,
+            integration_id=integration_id,
+            entity_type="vendor",
+            internal_record_id=None,
+            external_record_id="ext-vendor-1",
+            sync_status=RecordSyncStatus.PENDING,
+            sync_direction=SyncDirection.INBOUND,
+            internal_version_id=1,
+            external_version_id=2,
+            last_sync_version_id=1,
+            created_at=now,
+            updated_at=now,
+        )
+        result = await repo.upsert_record(updated_record)
+
+        assert result.id == record_id  # Should update the original record
+        assert result.external_version_id == 2
+        assert result.sync_status == RecordSyncStatus.PENDING
+
+        # Should still be only one record
+        all_records = [
+            r for r in repo._records.values()
+            if r.client_id == client_id and r.entity_type == "vendor"
+        ]
+        assert len(all_records) == 1
+
+    @pytest.mark.asyncio
+    async def test_upsert_backfill_internal_record_id(self):
+        """Test that upsert backfills internal_record_id when newly known."""
+        from app.domain.entities import IntegrationStateRecord
+        from app.domain.enums import RecordSyncStatus, SyncDirection
+
+        repo = MockIntegrationStateRepository()
+        now = datetime.now(timezone.utc)
+        client_id = uuid4()
+        integration_id = uuid4()
+
+        # Insert with no internal ID (inbound record not yet written internally)
+        record = IntegrationStateRecord(
+            id=uuid4(),
+            client_id=client_id,
+            integration_id=integration_id,
+            entity_type="bill",
+            internal_record_id=None,
+            external_record_id="ext-bill-1",
+            sync_status=RecordSyncStatus.SYNCED,
+            sync_direction=SyncDirection.INBOUND,
+            internal_version_id=1,
+            external_version_id=1,
+            last_sync_version_id=1,
+            created_at=now,
+            updated_at=now,
+        )
+        await repo.upsert_record(record)
+
+        # Now backfill with the internal ID after internal write succeeds
+        backfill_record = IntegrationStateRecord(
+            id=uuid4(),
+            client_id=client_id,
+            integration_id=integration_id,
+            entity_type="bill",
+            internal_record_id="internal-bill-1",
+            external_record_id="ext-bill-1",
+            sync_status=RecordSyncStatus.SYNCED,
+            sync_direction=SyncDirection.INBOUND,
+            internal_version_id=1,
+            external_version_id=1,
+            last_sync_version_id=1,
+            created_at=now,
+            updated_at=now,
+        )
+        result = await repo.upsert_record(backfill_record)
+
+        assert result.internal_record_id == "internal-bill-1"
+        assert result.external_record_id == "ext-bill-1"
+
+        # Should be retrievable by internal ID now
+        by_internal = await repo.get_record(
+            client_id, integration_id, "bill", "internal-bill-1"
+        )
+        assert by_internal is not None
+        assert by_internal.external_record_id == "ext-bill-1"
+
+
+class TestUpsertGuard:
+    """Tests for upsert guard — internal_record_id must not be nulled out."""
+
+    @pytest.mark.asyncio
+    async def test_upsert_does_not_clear_internal_record_id(self):
+        """Re-syncing with internal_record_id=None must preserve the original."""
+        from app.domain.entities import IntegrationStateRecord
+        from app.domain.enums import RecordSyncStatus, SyncDirection
+
+        repo = MockIntegrationStateRepository()
+        now = datetime.now(timezone.utc)
+        client_id = uuid4()
+        integration_id = uuid4()
+
+        # Create record with both IDs set
+        record = IntegrationStateRecord(
+            id=uuid4(),
+            client_id=client_id,
+            integration_id=integration_id,
+            entity_type="bill",
+            internal_record_id="int-100",
+            external_record_id="ext-200",
+            sync_status=RecordSyncStatus.SYNCED,
+            sync_direction=SyncDirection.INBOUND,
+            internal_version_id=1,
+            external_version_id=1,
+            last_sync_version_id=1,
+            created_at=now,
+            updated_at=now,
+        )
+        await repo.upsert_record(record)
+
+        # Re-sync: same external_record_id but internal_record_id=None
+        resync_record = IntegrationStateRecord(
+            id=uuid4(),
+            client_id=client_id,
+            integration_id=integration_id,
+            entity_type="bill",
+            internal_record_id=None,
+            external_record_id="ext-200",
+            sync_status=RecordSyncStatus.PENDING,
+            sync_direction=SyncDirection.INBOUND,
+            internal_version_id=1,
+            external_version_id=2,
+            last_sync_version_id=1,
+            created_at=now,
+            updated_at=now,
+        )
+        result = await repo.upsert_record(resync_record)
+
+        # internal_record_id must NOT be nulled out
+        assert result.internal_record_id == "int-100"
+        assert result.external_record_id == "ext-200"
+        assert result.external_version_id == 2
+
+
+class TestIntegrationHistory:
+    """Tests for integration history methods."""
+
+    @pytest.mark.asyncio
+    async def test_batch_create_and_get_history(self):
+        """Create multiple history entries and retrieve by job ID."""
+        from app.domain.entities import IntegrationHistoryRecord
+        from app.domain.enums import RecordSyncStatus, SyncDirection
+
+        repo = MockIntegrationStateRepository()
+        now = datetime.now(timezone.utc)
+        client_id = uuid4()
+        job_id = uuid4()
+
+        entries = [
+            IntegrationHistoryRecord(
+                id=uuid4(),
+                client_id=client_id,
+                state_record_id=uuid4(),
+                integration_id=uuid4(),
+                entity_type="bill",
+                internal_record_id=f"int-{i}",
+                external_record_id=f"ext-{i}",
+                sync_status=RecordSyncStatus.SYNCED,
+                sync_direction=SyncDirection.INBOUND,
+                job_id=job_id,
+                created_at=now,
+            )
+            for i in range(5)
+        ]
+
+        await repo.batch_create_history(entries)
+
+        records, total = await repo.get_history_by_job_id(client_id, job_id)
+        assert total == 5
+        assert len(records) == 5
+
+    @pytest.mark.asyncio
+    async def test_history_entries_survive_state_overwrite(self):
+        """
+        Job A creates state + history. Job B overwrites state.
+        Job A's history should still be intact.
+        """
+        from app.domain.entities import IntegrationHistoryRecord, IntegrationStateRecord
+        from app.domain.enums import RecordSyncStatus, SyncDirection
+
+        repo = MockIntegrationStateRepository()
+        now = datetime.now(timezone.utc)
+        client_id = uuid4()
+        integration_id = uuid4()
+        job_a_id = uuid4()
+        job_b_id = uuid4()
+
+        # Job A: create state record + history
+        state = IntegrationStateRecord(
+            id=uuid4(),
+            client_id=client_id,
+            integration_id=integration_id,
+            entity_type="vendor",
+            internal_record_id=None,
+            external_record_id="ext-v1",
+            sync_status=RecordSyncStatus.SYNCED,
+            sync_direction=SyncDirection.INBOUND,
+            internal_version_id=1,
+            external_version_id=1,
+            last_sync_version_id=1,
+            last_job_id=job_a_id,
+            created_at=now,
+            updated_at=now,
+        )
+        await repo.upsert_record(state)
+
+        history_a = IntegrationHistoryRecord(
+            id=uuid4(),
+            client_id=client_id,
+            state_record_id=state.id,
+            integration_id=integration_id,
+            entity_type="vendor",
+            external_record_id="ext-v1",
+            sync_status=RecordSyncStatus.SYNCED,
+            sync_direction=SyncDirection.INBOUND,
+            job_id=job_a_id,
+            created_at=now,
+        )
+        await repo.create_history_entry(history_a)
+
+        # Job B: overwrite state record's last_job_id
+        state_update = IntegrationStateRecord(
+            id=uuid4(),
+            client_id=client_id,
+            integration_id=integration_id,
+            entity_type="vendor",
+            internal_record_id=None,
+            external_record_id="ext-v1",
+            sync_status=RecordSyncStatus.PENDING,
+            sync_direction=SyncDirection.INBOUND,
+            internal_version_id=1,
+            external_version_id=2,
+            last_sync_version_id=1,
+            last_job_id=job_b_id,
+            created_at=now,
+            updated_at=now,
+        )
+        await repo.upsert_record(state_update)
+
+        # State table now points to job B
+        state_records, state_total = await repo.get_records_by_job_id(
+            client_id, job_a_id
+        )
+        assert state_total == 0  # State overwritten by job B
+
+        # But history for job A is still there
+        history_records, history_total = await repo.get_history_by_job_id(
+            client_id, job_a_id
+        )
+        assert history_total == 1
+        assert history_records[0].job_id == job_a_id
+        assert history_records[0].sync_status == RecordSyncStatus.SYNCED

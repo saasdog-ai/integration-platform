@@ -696,7 +696,7 @@ class TestGetJobsPaginated:
 
 
 class TestGetJobRecords:
-    """Test retrieving job records."""
+    """Test retrieving job records from history table."""
 
     async def test_get_job_records(
         self,
@@ -707,7 +707,7 @@ class TestGetJobRecords:
         sample_integration,
     ):
         """Test getting records for a specific job."""
-        from app.domain.entities import IntegrationStateRecord
+        from app.domain.entities import IntegrationHistoryRecord
         from app.domain.enums import RecordSyncStatus
 
         now = datetime.now(timezone.utc)
@@ -724,26 +724,22 @@ class TestGetJobRecords:
         )
         await mock_job_repo.create_job(job)
 
-        # Create some state records for this job
+        # Create history entries for this job
         for i in range(5):
-            record = IntegrationStateRecord(
+            entry = IntegrationHistoryRecord(
                 id=uuid4(),
                 client_id=sample_client_id,
+                state_record_id=uuid4(),
                 integration_id=sample_integration.id,
                 entity_type="bill",
                 internal_record_id=f"bill-{i}",
                 external_record_id=f"ext-bill-{i}",
                 sync_status=RecordSyncStatus.SYNCED,
                 sync_direction=SyncDirection.INBOUND,
-                internal_version_id=1,
-                external_version_id=1,
-                last_sync_version_id=1,
-                last_synced_at=now,
-                last_job_id=job.id,
+                job_id=job.id,
                 created_at=now,
-                updated_at=now,
             )
-            await mock_state_repo.upsert_record(record)
+            await mock_state_repo.create_history_entry(entry)
 
         # Get records for the job
         records, total = await orchestrator.get_job_records(
@@ -752,7 +748,7 @@ class TestGetJobRecords:
 
         assert len(records) == 5
         assert total == 5
-        assert all(r.last_job_id == job.id for r in records)
+        assert all(r.job_id == job.id for r in records)
 
     async def test_get_job_records_with_entity_filter(
         self,
@@ -763,7 +759,7 @@ class TestGetJobRecords:
         sample_integration,
     ):
         """Test filtering job records by entity type."""
-        from app.domain.entities import IntegrationStateRecord
+        from app.domain.entities import IntegrationHistoryRecord
         from app.domain.enums import RecordSyncStatus
 
         now = datetime.now(timezone.utc)
@@ -780,42 +776,36 @@ class TestGetJobRecords:
         )
         await mock_job_repo.create_job(job)
 
-        # Create records with different entity types
+        # Create history entries with different entity types
         for i in range(3):
-            record = IntegrationStateRecord(
+            entry = IntegrationHistoryRecord(
                 id=uuid4(),
                 client_id=sample_client_id,
+                state_record_id=uuid4(),
                 integration_id=sample_integration.id,
                 entity_type="bill",
                 internal_record_id=f"bill-{i}",
                 sync_status=RecordSyncStatus.SYNCED,
                 sync_direction=SyncDirection.INBOUND,
-                internal_version_id=1,
-                external_version_id=1,
-                last_sync_version_id=1,
-                last_job_id=job.id,
+                job_id=job.id,
                 created_at=now,
-                updated_at=now,
             )
-            await mock_state_repo.upsert_record(record)
+            await mock_state_repo.create_history_entry(entry)
 
         for i in range(2):
-            record = IntegrationStateRecord(
+            entry = IntegrationHistoryRecord(
                 id=uuid4(),
                 client_id=sample_client_id,
+                state_record_id=uuid4(),
                 integration_id=sample_integration.id,
                 entity_type="invoice",
                 internal_record_id=f"invoice-{i}",
                 sync_status=RecordSyncStatus.SYNCED,
                 sync_direction=SyncDirection.INBOUND,
-                internal_version_id=1,
-                external_version_id=1,
-                last_sync_version_id=1,
-                last_job_id=job.id,
+                job_id=job.id,
                 created_at=now,
-                updated_at=now,
             )
-            await mock_state_repo.upsert_record(record)
+            await mock_state_repo.create_history_entry(entry)
 
         # Filter by entity type
         records, total = await orchestrator.get_job_records(
@@ -835,7 +825,7 @@ class TestGetJobRecords:
         sample_integration,
     ):
         """Test pagination of job records."""
-        from app.domain.entities import IntegrationStateRecord
+        from app.domain.entities import IntegrationHistoryRecord
         from app.domain.enums import RecordSyncStatus
 
         now = datetime.now(timezone.utc)
@@ -852,24 +842,21 @@ class TestGetJobRecords:
         )
         await mock_job_repo.create_job(job)
 
-        # Create 25 records
+        # Create 25 history entries
         for i in range(25):
-            record = IntegrationStateRecord(
+            entry = IntegrationHistoryRecord(
                 id=uuid4(),
                 client_id=sample_client_id,
+                state_record_id=uuid4(),
                 integration_id=sample_integration.id,
                 entity_type="bill",
                 internal_record_id=f"bill-{i}",
                 sync_status=RecordSyncStatus.SYNCED,
                 sync_direction=SyncDirection.INBOUND,
-                internal_version_id=1,
-                external_version_id=1,
-                last_sync_version_id=1,
-                last_job_id=job.id,
+                job_id=job.id,
                 created_at=now,
-                updated_at=now,
             )
-            await mock_state_repo.upsert_record(record)
+            await mock_state_repo.create_history_entry(entry)
 
         # Get first page
         records_p1, total = await orchestrator.get_job_records(

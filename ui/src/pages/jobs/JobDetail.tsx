@@ -199,7 +199,7 @@ function RecordsTable({
                   </Badge>
                 </td>
                 <td className="py-2 px-3 font-mono text-xs">
-                  {record.internal_record_id}
+                  {record.internal_record_id || '-'}
                 </td>
                 <td className="py-2 px-3 capitalize">
                   {record.sync_direction || '-'}

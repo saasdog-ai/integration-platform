@@ -222,7 +222,7 @@ class SyncRecordResponse(BaseResponse):
 
     id: UUID
     entity_type: str
-    internal_record_id: str
+    internal_record_id: str | None
     external_record_id: str | None
     sync_direction: SyncDirection | None
     sync_status: str  # synced, failed, pending, conflict

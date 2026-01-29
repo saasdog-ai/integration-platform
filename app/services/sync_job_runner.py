@@ -30,6 +30,9 @@ BACKPRESSURE_BASE_DELAY = 2  # Base delay for exponential backoff
 # Stuck job check interval (in seconds)
 STUCK_JOB_CHECK_INTERVAL = 300  # Check every 5 minutes
 
+# History cleanup interval (in seconds)
+HISTORY_CLEANUP_INTERVAL = 3600  # Check every 1 hour
+
 
 class SyncJobRunner:
     """
@@ -75,6 +78,9 @@ class SyncJobRunner:
         # Stuck job monitoring
         self._last_stuck_job_check: float = 0
 
+        # History cleanup
+        self._last_history_cleanup: float = 0
+
         # Create orchestrator
         self._orchestrator = SyncOrchestrator(
             integration_repo=integration_repo,
@@ -85,6 +91,7 @@ class SyncJobRunner:
             adapter_factory=adapter_factory,
         )
         self._job_repo = job_repo
+        self._state_repo = state_repo
         self._integration_repo = integration_repo
 
     async def start(self) -> None:
@@ -118,6 +125,9 @@ class SyncJobRunner:
             try:
                 # Check for stuck jobs periodically
                 await self._check_stuck_jobs()
+
+                # Cleanup old history entries periodically
+                await self._cleanup_old_history()
 
                 # Apply backpressure if needed
                 if self._backpressure_until > time.time():
@@ -209,6 +219,33 @@ class SyncJobRunner:
         except Exception as e:
             logger.error(
                 "Failed to check/terminate stuck jobs",
+                extra={"error": str(e)},
+            )
+
+    async def _cleanup_old_history(self) -> None:
+        """Periodically delete old integration history entries."""
+        now = time.time()
+        if now - self._last_history_cleanup < HISTORY_CLEANUP_INTERVAL:
+            return
+
+        self._last_history_cleanup = now
+
+        try:
+            settings = get_settings()
+            deleted = await self._state_repo.cleanup_old_history(
+                retention_days=settings.integration_history_retention_days,
+            )
+            if deleted > 0:
+                logger.info(
+                    "Cleaned up old history entries",
+                    extra={
+                        "deleted": deleted,
+                        "retention_days": settings.integration_history_retention_days,
+                    },
+                )
+        except Exception as e:
+            logger.error(
+                "Failed to cleanup old history",
                 extra={"error": str(e)},
             )
 

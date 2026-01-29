@@ -1,16 +1,17 @@
 """Repository implementations for database access."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, select, update
+from sqlalchemy import and_, delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.domain.entities import (
     AvailableIntegration,
     EntitySyncStatus,
+    IntegrationHistoryRecord,
     IntegrationStateRecord,
     OAuthConfig,
     SyncJob,
@@ -35,6 +36,7 @@ from app.infrastructure.db.database import advisory_lock, get_session_context
 from app.infrastructure.db.models import (
     AvailableIntegrationModel,
     EntitySyncStatusModel,
+    IntegrationHistoryModel,
     IntegrationStateModel,
     SyncJobModel,
     SystemIntegrationSettingsModel,
@@ -202,6 +204,28 @@ def _model_to_entity_sync_status(model: EntitySyncStatusModel) -> EntitySyncStat
         updated_at=model.updated_at,
         created_by=model.created_by,
         updated_by=model.updated_by,
+    )
+
+
+def _model_to_integration_history(
+    model: IntegrationHistoryModel,
+) -> IntegrationHistoryRecord:
+    """Convert model to domain entity."""
+    return IntegrationHistoryRecord(
+        id=model.id,
+        client_id=model.client_id,
+        state_record_id=model.state_record_id,
+        integration_id=model.integration_id,
+        entity_type=model.entity_type,
+        internal_record_id=model.internal_record_id,
+        external_record_id=model.external_record_id,
+        sync_status=RecordSyncStatus(model.sync_status),
+        sync_direction=SyncDirection(model.sync_direction) if model.sync_direction else None,
+        job_id=model.job_id,
+        error_code=model.error_code,
+        error_message=model.error_message,
+        error_details=model.error_details,
+        created_at=model.created_at,
     )
 
 
@@ -699,8 +723,10 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
         client_id: UUID,
         integration_id: UUID,
         entity_type: str,
-        internal_record_id: str,
+        internal_record_id: str | None = None,
     ) -> IntegrationStateRecord | None:
+        if internal_record_id is None:
+            return None
         async with get_session_context() as session:
             result = await session.execute(
                 select(IntegrationStateModel).where(
@@ -709,6 +735,27 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
                         IntegrationStateModel.integration_id == integration_id,
                         IntegrationStateModel.entity_type == entity_type,
                         IntegrationStateModel.internal_record_id == internal_record_id,
+                    )
+                )
+            )
+            model = result.scalar_one_or_none()
+            return _model_to_integration_state(model) if model else None
+
+    async def get_record_by_external_id(
+        self,
+        client_id: UUID,
+        integration_id: UUID,
+        entity_type: str,
+        external_record_id: str,
+    ) -> IntegrationStateRecord | None:
+        async with get_session_context() as session:
+            result = await session.execute(
+                select(IntegrationStateModel).where(
+                    and_(
+                        IntegrationStateModel.client_id == client_id,
+                        IntegrationStateModel.integration_id == integration_id,
+                        IntegrationStateModel.entity_type == entity_type,
+                        IntegrationStateModel.external_record_id == external_record_id,
                     )
                 )
             )
@@ -754,19 +801,39 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
         self, record: IntegrationStateRecord
     ) -> IntegrationStateRecord:
         async with get_session_context() as session:
-            result = await session.execute(
-                select(IntegrationStateModel).where(
-                    and_(
-                        IntegrationStateModel.client_id == record.client_id,
-                        IntegrationStateModel.integration_id == record.integration_id,
-                        IntegrationStateModel.entity_type == record.entity_type,
-                        IntegrationStateModel.internal_record_id == record.internal_record_id,
+            model = None
+
+            # Dual-path lookup: try internal ID first, then external ID
+            if record.internal_record_id is not None:
+                result = await session.execute(
+                    select(IntegrationStateModel).where(
+                        and_(
+                            IntegrationStateModel.client_id == record.client_id,
+                            IntegrationStateModel.integration_id == record.integration_id,
+                            IntegrationStateModel.entity_type == record.entity_type,
+                            IntegrationStateModel.internal_record_id == record.internal_record_id,
+                        )
                     )
                 )
-            )
-            model = result.scalar_one_or_none()
+                model = result.scalar_one_or_none()
+
+            if model is None and record.external_record_id is not None:
+                result = await session.execute(
+                    select(IntegrationStateModel).where(
+                        and_(
+                            IntegrationStateModel.client_id == record.client_id,
+                            IntegrationStateModel.integration_id == record.integration_id,
+                            IntegrationStateModel.entity_type == record.entity_type,
+                            IntegrationStateModel.external_record_id == record.external_record_id,
+                        )
+                    )
+                )
+                model = result.scalar_one_or_none()
 
             if model:
+                # Backfill internal_record_id if newly known
+                if record.internal_record_id is not None:
+                    model.internal_record_id = record.internal_record_id
                 model.external_record_id = record.external_record_id
                 model.sync_status = record.sync_status.value
                 model.sync_direction = record.sync_direction.value if record.sync_direction else None
@@ -943,27 +1010,48 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
             return []
 
         results: list[IntegrationStateRecord] = []
+        # Track (client_id, id) pairs for post-flush re-fetch
+        record_pks: list[tuple[UUID, UUID]] = []
+
         async with get_session_context() as session:
             # All records in a batch should be for the same client/integration
             # Use advisory lock to prevent concurrent batch operations racing
             first_record = records[0]
             async with advisory_lock(session, first_record.client_id, first_record.integration_id):
                 for record in records:
-                    # Check if record exists
-                    existing = await session.execute(
-                        select(IntegrationStateModel).where(
-                            and_(
-                                IntegrationStateModel.client_id == record.client_id,
-                                IntegrationStateModel.integration_id == record.integration_id,
-                                IntegrationStateModel.entity_type == record.entity_type,
-                                IntegrationStateModel.internal_record_id == record.internal_record_id,
+                    model = None
+
+                    # Dual-path lookup: try internal ID first, then external ID
+                    if record.internal_record_id is not None:
+                        existing = await session.execute(
+                            select(IntegrationStateModel).where(
+                                and_(
+                                    IntegrationStateModel.client_id == record.client_id,
+                                    IntegrationStateModel.integration_id == record.integration_id,
+                                    IntegrationStateModel.entity_type == record.entity_type,
+                                    IntegrationStateModel.internal_record_id == record.internal_record_id,
+                                )
                             )
                         )
-                    )
-                    model = existing.scalar_one_or_none()
+                        model = existing.scalar_one_or_none()
+
+                    if model is None and record.external_record_id is not None:
+                        existing = await session.execute(
+                            select(IntegrationStateModel).where(
+                                and_(
+                                    IntegrationStateModel.client_id == record.client_id,
+                                    IntegrationStateModel.integration_id == record.integration_id,
+                                    IntegrationStateModel.entity_type == record.entity_type,
+                                    IntegrationStateModel.external_record_id == record.external_record_id,
+                                )
+                            )
+                        )
+                        model = existing.scalar_one_or_none()
 
                     if model:
-                        # Update existing
+                        # Update existing, backfill internal_record_id if newly known
+                        if record.internal_record_id is not None:
+                            model.internal_record_id = record.internal_record_id
                         model.external_record_id = record.external_record_id
                         model.sync_status = record.sync_status.value
                         model.sync_direction = record.sync_direction.value if record.sync_direction else None
@@ -976,6 +1064,7 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
                         model.error_message = record.error_message
                         model.error_details = record.error_details
                         model.metadata_ = record.metadata
+                        record_pks.append((model.client_id, model.id))
                     else:
                         # Insert new
                         model = IntegrationStateModel(
@@ -998,19 +1087,18 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
                             metadata_=record.metadata,
                         )
                         session.add(model)
+                        record_pks.append((record.client_id, record.id))
 
                 # Flush all changes at once (still within transaction)
                 await session.flush()
 
-                # Refresh all models and convert to entities
-                for record in records:
+                # Re-fetch all models by composite PK (client_id, id)
+                for client_id, record_id in record_pks:
                     result = await session.execute(
                         select(IntegrationStateModel).where(
                             and_(
-                                IntegrationStateModel.client_id == record.client_id,
-                                IntegrationStateModel.integration_id == record.integration_id,
-                                IntegrationStateModel.entity_type == record.entity_type,
-                                IntegrationStateModel.internal_record_id == record.internal_record_id,
+                                IntegrationStateModel.client_id == client_id,
+                                IntegrationStateModel.id == record_id,
                             )
                         )
                     )
@@ -1140,3 +1228,130 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
             models = result.scalars().all()
 
             return [_model_to_integration_state(m) for m in models], total
+
+    async def create_history_entry(
+        self, entry: IntegrationHistoryRecord
+    ) -> IntegrationHistoryRecord:
+        async with get_session_context() as session:
+            model = IntegrationHistoryModel(
+                id=entry.id,
+                client_id=entry.client_id,
+                state_record_id=entry.state_record_id,
+                integration_id=entry.integration_id,
+                entity_type=entry.entity_type,
+                internal_record_id=entry.internal_record_id,
+                external_record_id=entry.external_record_id,
+                sync_status=entry.sync_status.value,
+                sync_direction=entry.sync_direction.value if entry.sync_direction else None,
+                job_id=entry.job_id,
+                error_code=entry.error_code,
+                error_message=entry.error_message,
+                error_details=entry.error_details,
+            )
+            session.add(model)
+            await session.flush()
+            await session.refresh(model)
+            return _model_to_integration_history(model)
+
+    async def batch_create_history(
+        self, entries: list[IntegrationHistoryRecord]
+    ) -> None:
+        if not entries:
+            return
+
+        async with get_session_context() as session:
+            for entry in entries:
+                model = IntegrationHistoryModel(
+                    id=entry.id,
+                    client_id=entry.client_id,
+                    state_record_id=entry.state_record_id,
+                    integration_id=entry.integration_id,
+                    entity_type=entry.entity_type,
+                    internal_record_id=entry.internal_record_id,
+                    external_record_id=entry.external_record_id,
+                    sync_status=entry.sync_status.value,
+                    sync_direction=entry.sync_direction.value if entry.sync_direction else None,
+                    job_id=entry.job_id,
+                    error_code=entry.error_code,
+                    error_message=entry.error_message,
+                    error_details=entry.error_details,
+                )
+                session.add(model)
+            await session.flush()
+
+    async def get_history_by_job_id(
+        self,
+        client_id: UUID,
+        job_id: UUID,
+        entity_type: str | None = None,
+        status: RecordSyncStatus | None = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[list[IntegrationHistoryRecord], int]:
+        from sqlalchemy import func
+
+        async with get_session_context() as session:
+            conditions = [
+                IntegrationHistoryModel.client_id == client_id,
+                IntegrationHistoryModel.job_id == job_id,
+            ]
+            if entity_type:
+                conditions.append(IntegrationHistoryModel.entity_type == entity_type)
+            if status:
+                conditions.append(IntegrationHistoryModel.sync_status == status.value)
+
+            count_query = (
+                select(func.count())
+                .select_from(IntegrationHistoryModel)
+                .where(*conditions)
+            )
+            count_result = await session.execute(count_query)
+            total = count_result.scalar() or 0
+
+            offset = (page - 1) * page_size
+            query = (
+                select(IntegrationHistoryModel)
+                .where(*conditions)
+                .order_by(IntegrationHistoryModel.created_at.desc())
+                .offset(offset)
+                .limit(page_size)
+            )
+            result = await session.execute(query)
+            models = result.scalars().all()
+
+            return [_model_to_integration_history(m) for m in models], total
+
+    async def cleanup_old_history(
+        self,
+        retention_days: int,
+        batch_size: int = 10000,
+    ) -> int:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+        total_deleted = 0
+
+        while True:
+            async with get_session_context() as session:
+                # Find IDs to delete in batches to avoid long-held locks
+                subq = (
+                    select(IntegrationHistoryModel.client_id, IntegrationHistoryModel.id)
+                    .where(IntegrationHistoryModel.created_at < cutoff)
+                    .limit(batch_size)
+                ).subquery()
+
+                stmt = (
+                    delete(IntegrationHistoryModel)
+                    .where(
+                        and_(
+                            IntegrationHistoryModel.client_id == subq.c.client_id,
+                            IntegrationHistoryModel.id == subq.c.id,
+                        )
+                    )
+                )
+                result = await session.execute(stmt)
+                deleted = result.rowcount
+
+            total_deleted += deleted
+            if deleted < batch_size:
+                break
+
+        return total_deleted
