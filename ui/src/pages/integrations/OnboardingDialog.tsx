@@ -80,15 +80,14 @@ export function OnboardingDialog({
           direction: 'inbound' as const,
           enabled: true,
         })),
+        sync_frequency: null,
         auto_sync_enabled: false,
       }),
     onSuccess: () => {
       onComplete()
     },
     onError: (error: Error) => {
-      toast.error('Failed to save settings', error.message)
-      // Still complete since connection worked
-      onComplete()
+      toast.warning('Connected, but failed to save default settings', error.message)
     },
   })
 

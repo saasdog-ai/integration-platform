@@ -29,6 +29,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import {
   IntegrationList,
   IntegrationDetail,
+  IntegrationSettings,
   SyncJobs,
   JobDetail,
 } from "@/pages"
@@ -75,6 +76,9 @@ export function IntegrationsMicroFrontend({ queryClient }: MicroFrontendProps) {
               {/* Sync jobs routes */}
               <Route path="jobs" element={<SyncJobs />} />
               <Route path="jobs/:jobId" element={<JobDetail />} />
+
+              {/* Integration settings route */}
+              <Route path=":integrationId/settings" element={<IntegrationSettings />} />
 
               {/* Integration detail route */}
               <Route path=":integrationId" element={<IntegrationDetail />} />

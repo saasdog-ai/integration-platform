@@ -6,6 +6,11 @@ import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
 import { SyncJobStatusBadge } from '@/components/StatusBadge'
 import { formatRelativeTime } from '@/lib/utils'
+import {
+  DEFAULT_PAGE_SIZE,
+  SYNC_JOBS_REFETCH_INTERVAL_MS,
+  REFRESH_GRACE_PERIOD_MS,
+} from '@/lib/constants'
 import type { SyncJobStatus } from '@/types'
 
 const STATUS_FILTERS: { value: SyncJobStatus | 'all'; label: string }[] = [
@@ -37,9 +42,9 @@ export function SyncJobs() {
       api.getSyncJobs({
         status: statusFilter === 'all' ? undefined : statusFilter,
         page,
-        page_size: 20,
+        page_size: DEFAULT_PAGE_SIZE,
       }),
-    refetchInterval: autoRefresh ? 3000 : false, // Refresh every 3 seconds when enabled
+    refetchInterval: autoRefresh ? SYNC_JOBS_REFETCH_INTERVAL_MS : false,
   })
 
   // Auto-disable refresh when no pending/running jobs
@@ -49,8 +54,7 @@ export function SyncJobs() {
         (job) => job.status === 'pending' || job.status === 'running'
       )
       if (!hasActiveJobs && autoRefresh) {
-        // Keep refreshing for a bit after jobs complete
-        const timer = setTimeout(() => setAutoRefresh(false), 10000)
+        const timer = setTimeout(() => setAutoRefresh(false), REFRESH_GRACE_PERIOD_MS)
         return () => clearTimeout(timer)
       }
     }
@@ -95,6 +99,7 @@ export function SyncJobs() {
               variant={statusFilter === value ? 'default' : 'ghost'}
               size="sm"
               onClick={() => handleStatusChange(value)}
+              aria-pressed={statusFilter === value}
             >
               {label}
             </Button>
@@ -133,6 +138,7 @@ export function SyncJobs() {
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
+                    aria-hidden="true"
                   >
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                   </svg>

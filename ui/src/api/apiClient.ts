@@ -16,6 +16,9 @@ import type {
 } from '@/types'
 import type { IntegrationsConfig } from '@/providers/ConfigProvider'
 
+/** Default request timeout in milliseconds */
+const DEFAULT_TIMEOUT_MS = 30_000
+
 export class AuthenticationError extends Error {
   constructor(message: string = 'Authentication required') {
     super(message)
@@ -52,13 +55,38 @@ export function createApiClient(config: IntegrationsConfig) {
     return response.json()
   }
 
+  /**
+   * Wrapper around fetch that adds an AbortController with a timeout.
+   * Throws a descriptive error on timeout or network failure.
+   */
+  async function fetchWithTimeout(
+    url: string,
+    options: RequestInit = {},
+    timeoutMs: number = DEFAULT_TIMEOUT_MS
+  ): Promise<Response> {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
+    try {
+      return await fetch(url, { ...options, signal: controller.signal })
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        throw new Error(`Request timed out after ${timeoutMs}ms`)
+      }
+      throw new Error(
+        err instanceof Error ? err.message : 'Network request failed'
+      )
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
   return {
     // ========================
     // Available Integrations
     // ========================
 
     async getAvailableIntegrations(): Promise<AvailableIntegration[]> {
-      const response = await fetch(`${apiBaseUrl}/integrations/available`, {
+      const response = await fetchWithTimeout(`${apiBaseUrl}/integrations/available`, {
         headers: getAuthHeaders(),
       })
       const data = await handleResponse<{ integrations: AvailableIntegration[] }>(response)
@@ -66,7 +94,7 @@ export function createApiClient(config: IntegrationsConfig) {
     },
 
     async getAvailableIntegration(integrationId: string): Promise<AvailableIntegration> {
-      const response = await fetch(`${apiBaseUrl}/integrations/available/${integrationId}`, {
+      const response = await fetchWithTimeout(`${apiBaseUrl}/integrations/available/${integrationId}`, {
         headers: getAuthHeaders(),
       })
       return handleResponse<AvailableIntegration>(response)
@@ -77,7 +105,7 @@ export function createApiClient(config: IntegrationsConfig) {
     // ========================
 
     async getUserIntegrations(): Promise<UserIntegration[]> {
-      const response = await fetch(`${apiBaseUrl}/integrations`, {
+      const response = await fetchWithTimeout(`${apiBaseUrl}/integrations`, {
         headers: getAuthHeaders(),
       })
       const data = await handleResponse<{ integrations: UserIntegration[] }>(response)
@@ -85,7 +113,7 @@ export function createApiClient(config: IntegrationsConfig) {
     },
 
     async getUserIntegration(integrationId: string): Promise<UserIntegration> {
-      const response = await fetch(`${apiBaseUrl}/integrations/${integrationId}`, {
+      const response = await fetchWithTimeout(`${apiBaseUrl}/integrations/${integrationId}`, {
         headers: getAuthHeaders(),
       })
       return handleResponse<UserIntegration>(response)
@@ -95,7 +123,7 @@ export function createApiClient(config: IntegrationsConfig) {
       integrationId: string,
       request: ConnectIntegrationRequest
     ): Promise<UserIntegration> {
-      const response = await fetch(`${apiBaseUrl}/integrations/${integrationId}/connect`, {
+      const response = await fetchWithTimeout(`${apiBaseUrl}/integrations/${integrationId}/connect`, {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify(request),
@@ -107,7 +135,7 @@ export function createApiClient(config: IntegrationsConfig) {
       integrationId: string,
       request: { code: string; redirect_uri: string }
     ): Promise<UserIntegration> {
-      const response = await fetch(`${apiBaseUrl}/integrations/${integrationId}/callback`, {
+      const response = await fetchWithTimeout(`${apiBaseUrl}/integrations/${integrationId}/callback`, {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify(request),
@@ -116,14 +144,12 @@ export function createApiClient(config: IntegrationsConfig) {
     },
 
     async disconnectIntegration(integrationId: string): Promise<void> {
-      const response = await fetch(`${apiBaseUrl}/integrations/${integrationId}`, {
+      const response = await fetchWithTimeout(`${apiBaseUrl}/integrations/${integrationId}`, {
         method: 'DELETE',
         headers: getAuthHeaders(),
       })
-      if (!response.ok && response.status !== 204) {
-        const error = await response.json().catch(() => ({ error: 'Unknown error' }))
-        throw new Error(error.error || `HTTP ${response.status}`)
-      }
+      if (response.status === 204) return
+      await handleResponse<void>(response)
     },
 
     // ========================
@@ -131,7 +157,7 @@ export function createApiClient(config: IntegrationsConfig) {
     // ========================
 
     async getIntegrationSettings(integrationId: string): Promise<UserIntegrationSettings> {
-      const response = await fetch(`${apiBaseUrl}/integrations/${integrationId}/settings`, {
+      const response = await fetchWithTimeout(`${apiBaseUrl}/integrations/${integrationId}/settings`, {
         headers: getAuthHeaders(),
       })
       return handleResponse<UserIntegrationSettings>(response)
@@ -139,9 +165,9 @@ export function createApiClient(config: IntegrationsConfig) {
 
     async updateIntegrationSettings(
       integrationId: string,
-      settings: Partial<UserIntegrationSettings>
+      settings: UserIntegrationSettings
     ): Promise<UserIntegrationSettings> {
-      const response = await fetch(`${apiBaseUrl}/integrations/${integrationId}/settings`, {
+      const response = await fetchWithTimeout(`${apiBaseUrl}/integrations/${integrationId}/settings`, {
         method: 'PUT',
         headers: getAuthHeaders(),
         body: JSON.stringify(settings),
@@ -157,7 +183,7 @@ export function createApiClient(config: IntegrationsConfig) {
       integrationId: string,
       request?: TriggerSyncRequest
     ): Promise<SyncJob> {
-      const response = await fetch(`${apiBaseUrl}/sync-jobs`, {
+      const response = await fetchWithTimeout(`${apiBaseUrl}/sync-jobs`, {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({
@@ -183,13 +209,13 @@ export function createApiClient(config: IntegrationsConfig) {
       const queryString = searchParams.toString()
       const url = `${apiBaseUrl}/sync-jobs${queryString ? `?${queryString}` : ''}`
 
-      const response = await fetch(url, {
+      const response = await fetchWithTimeout(url, {
         headers: getAuthHeaders(),
       })
       // Backend returns { jobs: [...], total: N }, transform to PaginatedResponse
       const data = await handleResponse<{ jobs: SyncJob[]; total: number }>(response)
-      const page = params?.page || 1
-      const page_size = params?.page_size || 20
+      const page = params?.page ?? 1
+      const page_size = params?.page_size ?? 20
       return {
         items: data.jobs,
         total: data.total,
@@ -200,14 +226,14 @@ export function createApiClient(config: IntegrationsConfig) {
     },
 
     async getSyncJob(jobId: string): Promise<SyncJob> {
-      const response = await fetch(`${apiBaseUrl}/sync-jobs/${jobId}`, {
+      const response = await fetchWithTimeout(`${apiBaseUrl}/sync-jobs/${jobId}`, {
         headers: getAuthHeaders(),
       })
       return handleResponse<SyncJob>(response)
     },
 
     async cancelSyncJob(jobId: string): Promise<SyncJob> {
-      const response = await fetch(`${apiBaseUrl}/sync-jobs/${jobId}/cancel`, {
+      const response = await fetchWithTimeout(`${apiBaseUrl}/sync-jobs/${jobId}/cancel`, {
         method: 'POST',
         headers: getAuthHeaders(),
       })
@@ -232,7 +258,7 @@ export function createApiClient(config: IntegrationsConfig) {
       const queryString = searchParams.toString()
       const url = `${apiBaseUrl}/sync-jobs/${jobId}/records${queryString ? `?${queryString}` : ''}`
 
-      const response = await fetch(url, {
+      const response = await fetchWithTimeout(url, {
         headers: getAuthHeaders(),
       })
       return handleResponse<SyncRecordsResponse>(response)
@@ -243,7 +269,7 @@ export function createApiClient(config: IntegrationsConfig) {
     // ========================
 
     async checkHealth(): Promise<{ status: string }> {
-      const response = await fetch(`${apiBaseUrl}/health`)
+      const response = await fetchWithTimeout(`${apiBaseUrl}/health`)
       return handleResponse<{ status: string }>(response)
     },
   }

@@ -10,6 +10,7 @@ import { Spinner } from '@/components/ui/spinner'
 import { IntegrationStatusBadge, SyncJobStatusBadge } from '@/components/StatusBadge'
 import { OnboardingDialog } from './OnboardingDialog'
 import { formatDate } from '@/lib/utils'
+import { RECENT_JOBS_LIMIT } from '@/lib/constants'
 
 export function IntegrationDetail() {
   const { integrationId } = useParams<{ integrationId: string }>()
@@ -34,8 +35,8 @@ export function IntegrationDetail() {
 
   // Fetch recent sync jobs
   const { data: jobsData } = useQuery({
-    queryKey: ['sync-jobs', { integration_id: integrationId, page_size: 5 }],
-    queryFn: () => api.getSyncJobs({ integration_id: integrationId, page_size: 5 }),
+    queryKey: ['sync-jobs', { integration_id: integrationId, page_size: RECENT_JOBS_LIMIT }],
+    queryFn: () => api.getSyncJobs({ integration_id: integrationId, page_size: RECENT_JOBS_LIMIT }),
     enabled: !!integrationId,
   })
 
@@ -152,9 +153,14 @@ export function IntegrationDetail() {
 
       {/* Sync Settings */}
       <Card>
-        <CardHeader>
-          <CardTitle>Sync Settings</CardTitle>
-          <CardDescription>Configure which entities to sync and their direction</CardDescription>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle>Sync Settings</CardTitle>
+            <CardDescription>Configure which entities to sync and their direction</CardDescription>
+          </div>
+          <Button variant="outline" onClick={() => navigate('settings')}>
+            Edit Settings
+          </Button>
         </CardHeader>
         <CardContent>
           {settings?.sync_rules && settings.sync_rules.length > 0 ? (

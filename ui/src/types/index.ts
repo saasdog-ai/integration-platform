@@ -48,12 +48,19 @@ export interface UserIntegration {
 }
 
 /**
+ * Conflict resolution strategy
+ */
+export type ConflictResolution = 'external' | 'our_system' | 'most_recent'
+
+/**
  * Sync Rule - configuration for syncing an entity type
  */
 export interface SyncRule {
   entity_type: string
   direction: 'inbound' | 'outbound' | 'bidirectional'
   enabled: boolean
+  master_if_conflict?: ConflictResolution
+  field_mappings?: Record<string, string> | null
 }
 
 /**
