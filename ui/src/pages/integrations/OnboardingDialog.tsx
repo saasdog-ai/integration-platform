@@ -11,7 +11,6 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/spinner'
 import type { AvailableIntegration } from '@/types'
 
@@ -22,7 +21,7 @@ interface OnboardingDialogProps {
   onComplete: () => void
 }
 
-type OnboardingStep = 'intro' | 'credentials' | 'settings' | 'complete'
+type OnboardingStep = 'intro' | 'connecting' | 'complete'
 
 export function OnboardingDialog({
   open,
@@ -35,22 +34,39 @@ export function OnboardingDialog({
   const queryClient = useQueryClient()
 
   const [step, setStep] = useState<OnboardingStep>('intro')
-  const [accountId, setAccountId] = useState('')
-  const [companyName, setCompanyName] = useState('')
 
   // Connect integration mutation - uses OAuth callback for mock flow
   const connectMutation = useMutation({
-    mutationFn: () =>
-      api.completeOAuthCallback(integration.id, {
+    mutationFn: async () => {
+      // For mock mode, we skip the OAuth redirect and directly call the callback
+      // with a mock authorization code. The backend adapter handles this.
+      const result = await api.completeOAuthCallback(integration.id, {
         code: `mock_auth_code_${Date.now()}`,
         redirect_uri: window.location.origin + '/integrations/callback',
-      }),
+      })
+      return result
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['user-integrations'] })
       setStep('complete')
     },
-    onError: (error) => {
-      const message = error instanceof Error ? error.message : 'Unknown error'
+    onError: (error: unknown) => {
+      console.error('Connection error:', error)
+      setStep('intro') // Go back to intro on error
+      let message = 'Unknown error'
+      if (error instanceof Error) {
+        message = error.message
+      } else if (typeof error === 'object' && error !== null && 'message' in error) {
+        message = String((error as { message: unknown }).message)
+      } else if (typeof error === 'object' && error !== null) {
+        try {
+          message = JSON.stringify(error)
+        } catch {
+          message = 'Connection failed'
+        }
+      } else if (typeof error === 'string') {
+        message = error
+      }
       toast.error('Connection failed', message)
     },
   })
@@ -77,13 +93,13 @@ export function OnboardingDialog({
   })
 
   const handleClose = () => {
+    if (connectMutation.isPending) return // Don't close while connecting
     setStep('intro')
-    setAccountId('')
-    setCompanyName('')
     onOpenChange(false)
   }
 
   const handleConnect = () => {
+    setStep('connecting')
     connectMutation.mutate()
   }
 
@@ -120,85 +136,41 @@ export function OnboardingDialog({
                 </ul>
               </div>
 
-              <p className="text-sm text-muted-foreground">
-                In a real integration, you would be redirected to {integration.name} to authorize access.
-                For this demo, we'll simulate the connection.
-              </p>
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                <p className="text-sm text-blue-800">
+                  <strong>Demo Mode:</strong> In production, you would be redirected to {integration.name} to authorize.
+                  For testing, mock credentials will be stored automatically.
+                </p>
+              </div>
             </div>
 
             <DialogFooter>
               <Button variant="outline" onClick={handleClose}>
                 Cancel
               </Button>
-              <Button onClick={() => setStep('credentials')}>
-                Continue
+              <Button onClick={handleConnect}>
+                Connect {integration.name}
               </Button>
             </DialogFooter>
           </>
         )
 
-      case 'credentials':
+      case 'connecting':
         return (
           <>
             <DialogHeader>
-              <DialogTitle>Enter Account Details</DialogTitle>
+              <DialogTitle>Connecting to {integration.name}</DialogTitle>
               <DialogDescription>
-                Enter your {integration.name} account information (mock data for demo).
+                Please wait while we establish the connection...
               </DialogDescription>
             </DialogHeader>
 
-            <div className="py-6 space-y-4">
-              <div>
-                <label className="text-sm font-medium mb-1.5 block">
-                  Company Name
-                </label>
-                <Input
-                  placeholder="Acme Corporation"
-                  value={companyName}
-                  onChange={(e) => setCompanyName(e.target.value)}
-                />
-              </div>
-
-              <div>
-                <label className="text-sm font-medium mb-1.5 block">
-                  Account ID / Realm ID
-                </label>
-                <Input
-                  placeholder="123456789"
-                  value={accountId}
-                  onChange={(e) => setAccountId(e.target.value)}
-                />
-                <p className="text-xs text-muted-foreground mt-1">
-                  Leave blank to generate a mock ID
-                </p>
-              </div>
-
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                <p className="text-sm text-blue-800">
-                  <strong>Demo Mode:</strong> In production, this would be an OAuth flow.
-                  For testing, mock credentials will be stored.
-                </p>
-              </div>
+            <div className="py-12 flex flex-col items-center justify-center space-y-4">
+              <Spinner size="lg" />
+              <p className="text-sm text-muted-foreground">
+                Setting up mock credentials...
+              </p>
             </div>
-
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setStep('intro')}>
-                Back
-              </Button>
-              <Button
-                onClick={handleConnect}
-                disabled={connectMutation.isPending}
-              >
-                {connectMutation.isPending ? (
-                  <>
-                    <Spinner size="sm" className="mr-2" />
-                    Connecting...
-                  </>
-                ) : (
-                  'Connect Account'
-                )}
-              </Button>
-            </DialogFooter>
           </>
         )
 
