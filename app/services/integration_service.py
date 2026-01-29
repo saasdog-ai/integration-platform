@@ -330,6 +330,7 @@ class IntegrationService:
         existing.status = IntegrationStatus.REVOKED
         existing.credentials_encrypted = None
         existing.credentials_key_id = None
+        existing.external_account_id = None
         existing.disconnected_at = datetime.now(timezone.utc)
         existing.updated_by = user_id
         await self._repo.update_user_integration(existing)

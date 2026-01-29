@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Spinner } from '@/components/ui/spinner'
 import { IntegrationStatusBadge } from '@/components/StatusBadge'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { OnboardingDialog } from './OnboardingDialog'
 import type { AvailableIntegration, UserIntegration } from '@/types'
 
@@ -37,6 +38,7 @@ export function IntegrationList() {
 
   const [selectedIntegration, setSelectedIntegration] = useState<AvailableIntegration | null>(null)
   const [showOnboarding, setShowOnboarding] = useState(false)
+  const [disconnectTarget, setDisconnectTarget] = useState<{ integrationId: string; name: string; accountId?: string } | null>(null)
 
   // Fetch available integrations
   const { data: availableIntegrations, isLoading: loadingAvailable } = useQuery({
@@ -60,6 +62,19 @@ export function IntegrationList() {
     },
     onError: (error: Error) => {
       toast.error('Failed to start sync', error.message)
+    },
+  })
+
+  // Disconnect mutation
+  const disconnectMutation = useMutation({
+    mutationFn: (integrationId: string) => api.disconnectIntegration(integrationId),
+    onSuccess: () => {
+      toast.success('Integration disconnected')
+      queryClient.invalidateQueries({ queryKey: ['user-integrations'] })
+      setDisconnectTarget(null)
+    },
+    onError: (error: Error) => {
+      toast.error('Failed to disconnect', error.message)
     },
   })
 
@@ -176,6 +191,7 @@ export function IntegrationList() {
                   <>
                     <Button
                       className="flex-1"
+                      size="sm"
                       onClick={() => handleSync(integration.id)}
                       disabled={syncMutation.isPending}
                     >
@@ -185,14 +201,28 @@ export function IntegrationList() {
                           Syncing...
                         </>
                       ) : (
-                        '🔄 Sync Now'
+                        'Sync Now'
                       )}
                     </Button>
                     <Button
                       variant="outline"
+                      size="sm"
                       onClick={() => navigate(`${integration.id}`)}
                     >
                       Settings
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => {
+                        setDisconnectTarget({
+                          integrationId: integration.id,
+                          name: integration.name,
+                          accountId: userIntegration?.external_account_id ?? undefined,
+                        })
+                      }}
+                    >
+                      Disconnect
                     </Button>
                   </>
                 ) : (
@@ -219,6 +249,40 @@ export function IntegrationList() {
           </p>
         </Card>
       )}
+
+      {/* Disconnect Confirmation Dialog */}
+      <Dialog open={!!disconnectTarget} onOpenChange={(open) => { if (!open) setDisconnectTarget(null) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Disconnect {disconnectTarget?.name}?</DialogTitle>
+            <DialogDescription>
+              This will remove your credentials for this integration. Any data already synced will remain in the system.
+            </DialogDescription>
+          </DialogHeader>
+          {disconnectTarget?.accountId && (
+            <div className="px-6 text-sm text-muted-foreground">
+              Account: <span className="font-medium text-foreground">{disconnectTarget.accountId}</span>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDisconnectTarget(null)} autoFocus>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (disconnectTarget) {
+                  disconnectMutation.mutate(disconnectTarget.integrationId)
+                }
+              }}
+              disabled={disconnectMutation.isPending}
+            >
+              {disconnectMutation.isPending ? <Spinner size="sm" className="mr-2" /> : null}
+              Disconnect
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Onboarding Dialog */}
       {selectedIntegration && (

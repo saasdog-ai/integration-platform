@@ -53,19 +53,6 @@ export function IntegrationDetail() {
     },
   })
 
-  // Disconnect mutation
-  const disconnectMutation = useMutation({
-    mutationFn: () => api.disconnectIntegration(integrationId!),
-    onSuccess: () => {
-      toast.success('Integration disconnected')
-      queryClient.invalidateQueries({ queryKey: ['user-integrations'] })
-      queryClient.invalidateQueries({ queryKey: ['user-integration', integrationId] })
-    },
-    onError: (error: Error) => {
-      toast.error('Failed to disconnect', error.message)
-    },
-  })
-
   // Reconnect dialog state
   const [showReconnect, setShowReconnect] = useState(false)
 
@@ -123,26 +110,13 @@ export function IntegrationDetail() {
         </div>
         <div className="flex gap-2">
           {isConnected ? (
-            <>
-              <Button
-                onClick={() => syncMutation.mutate()}
-                disabled={syncMutation.isPending}
-              >
-                {syncMutation.isPending ? <Spinner size="sm" className="mr-2" /> : null}
-                🔄 Sync Now
-              </Button>
-              <Button
-                variant="destructive"
-                onClick={() => {
-                  if (confirm('Are you sure you want to disconnect this integration?')) {
-                    disconnectMutation.mutate()
-                  }
-                }}
-                disabled={disconnectMutation.isPending}
-              >
-                Disconnect
-              </Button>
-            </>
+            <Button
+              onClick={() => syncMutation.mutate()}
+              disabled={syncMutation.isPending}
+            >
+              {syncMutation.isPending ? <Spinner size="sm" className="mr-2" /> : null}
+              🔄 Sync Now
+            </Button>
           ) : (
             <Button onClick={() => setShowReconnect(true)}>
               🔄 Reconnect
