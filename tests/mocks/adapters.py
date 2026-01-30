@@ -1,6 +1,6 @@
 """Mock adapters for external system testing."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -87,10 +87,10 @@ class MockIntegrationAdapter(IntegrationAdapterInterface):
             refresh_token=f"mock_refresh_token_{uuid4().hex[:8]}",
             token_type="Bearer",
             expires_in=3600,
-            expires_at=datetime.now(timezone.utc),
+            expires_at=datetime.now(timezone.utc) + timedelta(seconds=3600),
         )
 
-    async def refresh_token(self, refresh_token: str) -> OAuthTokens:
+    async def refresh_token(self, refresh_token: str, oauth_config=None) -> OAuthTokens:
         """Mock token refresh."""
         self.refresh_token_calls.append(refresh_token)
 
@@ -102,7 +102,7 @@ class MockIntegrationAdapter(IntegrationAdapterInterface):
             refresh_token=f"mock_refresh_token_{uuid4().hex[:8]}",
             token_type="Bearer",
             expires_in=3600,
-            expires_at=datetime.now(timezone.utc),
+            expires_at=datetime.now(timezone.utc) + timedelta(seconds=3600),
         )
 
     async def fetch_records(

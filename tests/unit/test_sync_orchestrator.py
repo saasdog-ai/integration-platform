@@ -1,7 +1,7 @@
 """Tests for sync orchestrator service."""
 
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock
+from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -1310,3 +1310,171 @@ class TestEntityTypeFiltering:
         # job may fail in strategy path but the key point is no inbound fetch
         fetched_types = {call[0] for call in adapter.fetch_records_calls}
         assert "vendor" not in fetched_types
+
+
+class TestEnsureValidToken:
+    """Test _ensure_valid_token automatic OAuth token refresh."""
+
+    def _make_orchestrator(
+        self,
+        mock_integration_repo,
+        mock_job_repo,
+        mock_state_repo,
+        mock_queue,
+        mock_encryption,
+        mock_adapter_factory,
+    ):
+        return SyncOrchestrator(
+            integration_repo=mock_integration_repo,
+            job_repo=mock_job_repo,
+            state_repo=mock_state_repo,
+            queue=mock_queue,
+            encryption_service=mock_encryption,
+            adapter_factory=mock_adapter_factory,
+        )
+
+    async def test_token_still_valid(
+        self,
+        orchestrator,
+        sample_client_id,
+        sample_integration,
+    ):
+        """Token with >5 min remaining is returned as-is without refresh."""
+        creds = {
+            "access_token": "valid_token",
+            "refresh_token": "rt",
+            "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+        }
+
+        result = await orchestrator._ensure_valid_token(
+            sample_client_id, sample_integration.id, creds,
+        )
+
+        assert result == "valid_token"
+
+    async def test_no_expires_at(
+        self,
+        orchestrator,
+        sample_client_id,
+        sample_integration,
+    ):
+        """Missing expires_at returns existing token with a warning."""
+        creds = {
+            "access_token": "legacy_token",
+            "refresh_token": "rt",
+        }
+
+        result = await orchestrator._ensure_valid_token(
+            sample_client_id, sample_integration.id, creds,
+        )
+
+        assert result == "legacy_token"
+
+    async def test_invalid_expires_at_format(
+        self,
+        orchestrator,
+        sample_client_id,
+        sample_integration,
+    ):
+        """Malformed expires_at returns existing token with a warning."""
+        creds = {
+            "access_token": "old_token",
+            "refresh_token": "rt",
+            "expires_at": "not-a-date",
+        }
+
+        result = await orchestrator._ensure_valid_token(
+            sample_client_id, sample_integration.id, creds,
+        )
+
+        assert result == "old_token"
+
+    async def test_token_expired_triggers_refresh(
+        self,
+        orchestrator,
+        sample_client_id,
+        sample_integration,
+    ):
+        """Expired token triggers IntegrationService.refresh_integration_token."""
+        creds = {
+            "access_token": "expired_token",
+            "refresh_token": "rt",
+            "expires_at": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+        }
+
+        mock_tokens = MagicMock()
+        mock_tokens.access_token = "refreshed_token"
+
+        with patch(
+            "app.services.sync_orchestrator.IntegrationService"
+        ) as MockSvc:
+            instance = MockSvc.return_value
+            instance.refresh_integration_token = AsyncMock(return_value=mock_tokens)
+
+            result = await orchestrator._ensure_valid_token(
+                sample_client_id, sample_integration.id, creds,
+            )
+
+        assert result == "refreshed_token"
+        instance.refresh_integration_token.assert_awaited_once_with(
+            sample_client_id, sample_integration.id,
+        )
+
+    async def test_token_expiring_within_buffer(
+        self,
+        orchestrator,
+        sample_client_id,
+        sample_integration,
+    ):
+        """Token expiring within 5-minute buffer triggers refresh."""
+        creds = {
+            "access_token": "almost_expired",
+            "refresh_token": "rt",
+            "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=3)).isoformat(),
+        }
+
+        mock_tokens = MagicMock()
+        mock_tokens.access_token = "new_token"
+
+        with patch(
+            "app.services.sync_orchestrator.IntegrationService"
+        ) as MockSvc:
+            instance = MockSvc.return_value
+            instance.refresh_integration_token = AsyncMock(return_value=mock_tokens)
+
+            result = await orchestrator._ensure_valid_token(
+                sample_client_id, sample_integration.id, creds,
+            )
+
+        assert result == "new_token"
+        instance.refresh_integration_token.assert_awaited_once()
+
+    async def test_refresh_fails_permanently(
+        self,
+        orchestrator,
+        sample_client_id,
+        sample_integration,
+    ):
+        """Exhausting retry attempts raises SyncError."""
+        from app.core.exceptions import IntegrationError
+
+        creds = {
+            "access_token": "expired_token",
+            "refresh_token": "rt",
+            "expires_at": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+        }
+
+        with patch(
+            "app.services.sync_orchestrator.IntegrationService"
+        ) as MockSvc:
+            instance = MockSvc.return_value
+            instance.refresh_integration_token = AsyncMock(
+                side_effect=IntegrationError("QBO", "No refresh token"),
+            )
+
+            with pytest.raises(SyncError, match="Token refresh failed after 2 attempts"):
+                await orchestrator._ensure_valid_token(
+                    sample_client_id, sample_integration.id, creds,
+                )
+
+        assert instance.refresh_integration_token.await_count == 2

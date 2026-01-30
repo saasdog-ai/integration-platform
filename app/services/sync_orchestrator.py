@@ -1,7 +1,7 @@
 """Sync orchestration service."""
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -12,6 +12,7 @@ from app.core.exceptions import (
     NotFoundError,
     SyncError,
 )
+from app.services.integration_service import IntegrationService
 from app.core.logging import get_logger
 from app.domain.entities import (
     EntitySyncRequest,
@@ -382,6 +383,78 @@ class SyncOrchestrator:
 
         return None
 
+    async def _ensure_valid_token(
+        self, client_id: UUID, integration_id: UUID, creds_dict: dict,
+    ) -> str:
+        """Return a valid access token, refreshing if expired or about to expire.
+
+        If ``expires_at`` is missing or malformed the existing token is returned
+        as-is (graceful degradation for legacy credentials).
+        """
+        access_token = creds_dict.get("access_token", "")
+        expires_at_raw = creds_dict.get("expires_at")
+
+        if expires_at_raw is None:
+            logger.warning(
+                "No expires_at in credentials — skipping token refresh check",
+                extra={"client_id": str(client_id), "integration_id": str(integration_id)},
+            )
+            return access_token
+
+        try:
+            expires_at = datetime.fromisoformat(expires_at_raw)
+        except (TypeError, ValueError):
+            logger.warning(
+                "Invalid expires_at format — skipping token refresh check",
+                extra={
+                    "client_id": str(client_id),
+                    "integration_id": str(integration_id),
+                    "expires_at": str(expires_at_raw),
+                },
+            )
+            return access_token
+
+        buffer = timedelta(minutes=5)
+        if datetime.now(timezone.utc) < expires_at - buffer:
+            return access_token
+
+        # Token expired or about to expire — refresh
+        integration_service = IntegrationService(
+            integration_repo=self._integration_repo,
+            encryption_service=self._encryption,
+            adapter_factory=self._adapter_factory,
+        )
+
+        max_attempts = 2
+        last_error: Exception | None = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                new_tokens = await integration_service.refresh_integration_token(
+                    client_id, integration_id,
+                )
+                logger.info(
+                    "Token refreshed successfully",
+                    extra={
+                        "client_id": str(client_id),
+                        "integration_id": str(integration_id),
+                        "attempt": attempt,
+                    },
+                )
+                return new_tokens.access_token
+            except IntegrationError as exc:
+                last_error = exc
+                logger.warning(
+                    "Token refresh attempt failed",
+                    extra={
+                        "client_id": str(client_id),
+                        "integration_id": str(integration_id),
+                        "attempt": attempt,
+                        "error": str(exc),
+                    },
+                )
+
+        raise SyncError(f"Token refresh failed after {max_attempts} attempts: {last_error}")
+
     async def execute_sync_job(self, job: SyncJob) -> SyncJob:
         """
         Execute a sync job (called by job runner).
@@ -441,7 +514,9 @@ class SyncOrchestrator:
                         user_integration.credentials_key_id,
                     )
                     creds_dict = json.loads(credentials.decode())
-                    access_token = creds_dict.get("access_token", access_token)
+                    access_token = await self._ensure_valid_token(
+                        job.client_id, job.integration_id, creds_dict,
+                    )
                 except Exception as e:
                     if settings.app_env != "development":
                         raise SyncError(f"Failed to decrypt credentials: {e}")
