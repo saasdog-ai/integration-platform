@@ -9,11 +9,14 @@ from app.api.dto import (
     AvailableIntegrationsResponse,
     ConnectIntegrationRequest,
     ConnectIntegrationResponse,
+    EntitySyncStatusResponse,
     OAuthCallbackRequest,
     OAuthConfigResponse,
+    ResetSyncCursorRequest,
     UserIntegrationResponse,
     UserIntegrationsResponse,
 )
+from app.domain.interfaces import IntegrationStateRepositoryInterface
 from app.auth import get_client_id
 from app.core.exceptions import (
     ConflictError,
@@ -41,6 +44,13 @@ def get_integration_service() -> IntegrationService:
         encryption_service=container.encryption_service,
         adapter_factory=get_adapter_factory(),
     )
+
+
+def get_state_repository() -> IntegrationStateRepositoryInterface:
+    """Dependency to get the integration state repository."""
+    from app.core.dependency_injection import get_container
+
+    return get_container().integration_state_repository
 
 
 def _to_available_integration_response(
@@ -217,6 +227,7 @@ async def oauth_callback(
             integration_id=integration_id,
             auth_code=request.code,
             redirect_uri=request.redirect_uri,
+            realm_id=request.realm_id,
         )
         return _to_user_integration_response(user_integration)
     except NotFoundError:
@@ -249,3 +260,57 @@ async def disconnect_integration(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Integration not found: {integration_id}",
         )
+
+
+@router.post(
+    "/{integration_id}/sync-status/{entity_type}/reset",
+    response_model=EntitySyncStatusResponse,
+    summary="Reset entity sync cursor",
+)
+async def reset_entity_sync_cursor(
+    integration_id: UUID,
+    entity_type: str,
+    request: ResetSyncCursorRequest,
+    client_id: UUID = Depends(get_client_id),
+    service: IntegrationService = Depends(get_integration_service),
+    state_repo: IntegrationStateRepositoryInterface = Depends(get_state_repository),
+) -> EntitySyncStatusResponse:
+    """Reset sync cursors for an entity type to allow full re-sync."""
+    # Verify the integration belongs to this client
+    try:
+        await service.get_user_integration(client_id, integration_id)
+    except NotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Integration not found: {integration_id}",
+        )
+
+    result = await state_repo.reset_entity_sync_status(
+        client_id=client_id,
+        integration_id=integration_id,
+        entity_type=entity_type,
+        reset_inbound_cursor=request.reset_inbound_cursor,
+        reset_sync_cursor=request.reset_sync_cursor,
+    )
+
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No sync status found for entity type: {entity_type}",
+        )
+
+    parts = []
+    if request.reset_inbound_cursor:
+        parts.append("inbound cursor")
+    if request.reset_sync_cursor:
+        parts.append("sync cursor")
+    message = f"Successfully reset {' and '.join(parts)} for {entity_type}"
+
+    return EntitySyncStatusResponse(
+        entity_type=result.entity_type,
+        last_successful_sync_at=result.last_successful_sync_at,
+        last_inbound_sync_at=result.last_inbound_sync_at,
+        last_sync_job_id=result.last_sync_job_id,
+        records_synced_count=result.records_synced_count,
+        message=message,
+    )

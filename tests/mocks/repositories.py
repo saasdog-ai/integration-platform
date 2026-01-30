@@ -540,6 +540,26 @@ class MockIntegrationStateRepository(IntegrationStateRepositoryInterface):
             self._entity_sync_status[key] = status
             return status
 
+    async def reset_entity_sync_status(
+        self,
+        client_id: UUID,
+        integration_id: UUID,
+        entity_type: str,
+        reset_inbound_cursor: bool = True,
+        reset_sync_cursor: bool = True,
+    ) -> EntitySyncStatus | None:
+        key = (client_id, integration_id, entity_type)
+        existing = self._entity_sync_status.get(key)
+        if not existing:
+            return None
+        if reset_inbound_cursor:
+            existing.last_inbound_sync_at = None
+        if reset_sync_cursor:
+            existing.last_successful_sync_at = None
+        existing.records_synced_count = 0
+        existing.updated_at = datetime.now(timezone.utc)
+        return existing
+
     async def batch_upsert_records(
         self,
         records: list[IntegrationStateRecord],

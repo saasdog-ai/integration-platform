@@ -321,6 +321,18 @@ class IntegrationStateRepositoryInterface(ABC):
         pass
 
     @abstractmethod
+    async def reset_entity_sync_status(
+        self,
+        client_id: UUID,
+        integration_id: UUID,
+        entity_type: str,
+        reset_inbound_cursor: bool = True,
+        reset_sync_cursor: bool = True,
+    ) -> EntitySyncStatus | None:
+        """Reset sync cursors for an entity type to allow full re-sync."""
+        pass
+
+    @abstractmethod
     async def batch_upsert_records(
         self,
         records: list[IntegrationStateRecord],

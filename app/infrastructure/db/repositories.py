@@ -1021,6 +1021,38 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
             await session.refresh(model)
             return _model_to_entity_sync_status(model)
 
+    async def reset_entity_sync_status(
+        self,
+        client_id: UUID,
+        integration_id: UUID,
+        entity_type: str,
+        reset_inbound_cursor: bool = True,
+        reset_sync_cursor: bool = True,
+    ) -> EntitySyncStatus | None:
+        async with get_session_context() as session:
+            result = await session.execute(
+                select(EntitySyncStatusModel).where(
+                    and_(
+                        EntitySyncStatusModel.client_id == client_id,
+                        EntitySyncStatusModel.integration_id == integration_id,
+                        EntitySyncStatusModel.entity_type == entity_type,
+                    )
+                )
+            )
+            model = result.scalar_one_or_none()
+            if not model:
+                return None
+
+            if reset_inbound_cursor:
+                model.last_inbound_sync_at = None
+            if reset_sync_cursor:
+                model.last_successful_sync_at = None
+            model.records_synced_count = 0
+
+            await session.flush()
+            await session.refresh(model)
+            return _model_to_entity_sync_status(model)
+
     async def batch_upsert_records(
         self,
         records: list[IntegrationStateRecord],

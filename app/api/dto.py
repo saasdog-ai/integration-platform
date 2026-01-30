@@ -117,6 +117,7 @@ class OAuthCallbackRequest(BaseModel):
     code: str
     redirect_uri: str
     state: str | None = None
+    realm_id: str | None = None
 
 
 # =============================================================================
@@ -188,6 +189,7 @@ class SyncJobResponse(BaseResponse):
     entities_processed: dict[str, Any] | None
     error_code: str | None
     error_message: str | None
+    error_details: dict[str, Any] | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -241,6 +243,29 @@ class SyncRecordsResponse(BaseResponse):
     page: int = 1
     page_size: int = 50
     total_pages: int = 1
+
+
+# =============================================================================
+# Sync Cursor Reset DTOs
+# =============================================================================
+
+
+class ResetSyncCursorRequest(BaseModel):
+    """Request to reset sync cursors for an entity type."""
+
+    reset_inbound_cursor: bool = True
+    reset_sync_cursor: bool = True
+
+
+class EntitySyncStatusResponse(BaseResponse):
+    """Entity sync status after reset."""
+
+    entity_type: str
+    last_successful_sync_at: datetime | None
+    last_inbound_sync_at: datetime | None
+    last_sync_job_id: UUID | None
+    records_synced_count: int
+    message: str
 
 
 # =============================================================================
