@@ -463,6 +463,172 @@ class SyncOrchestrator:
 
         raise SyncError(f"Token refresh failed after {max_attempts} attempts: {last_error}")
 
+    async def _get_enabled_rules_for_job(self, job: SyncJob) -> list[SyncRule]:
+        """Load user settings and return enabled sync rules, filtered by job_params."""
+        settings = await self._integration_repo.get_user_settings(
+            job.client_id, job.integration_id
+        )
+
+        if not settings or not settings.sync_rules:
+            raise SyncError("No sync rules configured")
+
+        enabled_rules = [r for r in settings.sync_rules if r.enabled]
+        if not enabled_rules:
+            raise SyncError("No sync rules are enabled")
+
+        requested_entity_types = self._resolve_requested_entity_types(job.job_params)
+        if requested_entity_types is not None:
+            enabled_rules = [
+                r for r in enabled_rules
+                if r.entity_type in requested_entity_types
+            ]
+            if not enabled_rules:
+                raise SyncError(
+                    f"Requested entity types are not enabled in sync settings: "
+                    f"{', '.join(sorted(requested_entity_types))}",
+                )
+
+        return enabled_rules
+
+    async def _resolve_adapter_for_job(
+        self, job: SyncJob,
+    ) -> tuple[Any, type | None, dict[str, list[str]]]:
+        """Resolve adapter, strategy class, and record_ids_by_entity for a job."""
+        user_integration = await self._integration_repo.get_user_integration(
+            job.client_id, job.integration_id
+        )
+        integration = await self._integration_repo.get_available_integration(
+            job.integration_id
+        )
+
+        # Get credentials - allow mock token in development mode
+        settings = get_settings()
+        access_token = "mock_dev_token"  # Default for dev
+
+        if user_integration and user_integration.credentials_encrypted:
+            try:
+                credentials = await self._encryption.decrypt(
+                    user_integration.credentials_encrypted,
+                    user_integration.credentials_key_id,
+                )
+                creds_dict = json.loads(credentials.decode())
+                access_token = await self._ensure_valid_token(
+                    job.client_id, job.integration_id, creds_dict,
+                )
+            except Exception as e:
+                if settings.app_env != "development":
+                    raise SyncError(f"Failed to decrypt credentials: {e}")
+                logger.warning(
+                    "Using mock token - credential decryption failed in dev mode",
+                    extra={"error": str(e)},
+                )
+        elif settings.app_env != "development":
+            raise SyncError("Integration credentials not found")
+        else:
+            logger.info("Using mock token - no credentials in dev mode")
+
+        adapter = self._adapter_factory.get_adapter(
+            integration,
+            access_token,
+            user_integration.external_account_id if user_integration else None,
+        )
+
+        strategy_class = _SYNC_STRATEGIES.get(integration.name) if integration else None
+
+        record_ids_by_entity: dict[str, list[str]] = {}
+        if job.job_params and job.job_params.get("entity_requests"):
+            for req in job.job_params["entity_requests"]:
+                if req.get("record_ids"):
+                    record_ids_by_entity[req["entity_type"]] = req["record_ids"]
+
+        return adapter, strategy_class, record_ids_by_entity
+
+    async def _execute_entity_sync_loop(
+        self,
+        job: SyncJob,
+        enabled_rules: list[SyncRule],
+        adapter: Any,
+        strategy_class: type | None,
+        record_ids_by_entity: dict[str, list[str]],
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        """Run entity syncs via strategy or generic per-rule loop."""
+        entities_processed: dict[str, Any] = {}
+        errors: list[dict[str, Any]] = []
+
+        if strategy_class:
+            entities_processed, errors = await self._execute_with_strategy(
+                strategy_class, job, enabled_rules, adapter,
+                record_ids_by_entity,
+            )
+        else:
+            for rule in enabled_rules:
+                try:
+                    result = await self._sync_entity(
+                        job, rule, adapter, job.job_type == SyncJobType.FULL_SYNC
+                    )
+                    entities_processed[rule.entity_type] = result
+                except Exception as e:
+                    logger.error(
+                        "Entity sync failed",
+                        extra={
+                            "job_id": str(job.id),
+                            "entity_type": rule.entity_type,
+                            "error": str(e),
+                        },
+                    )
+                    errors.append(
+                        {"entity_type": rule.entity_type, "error": str(e)}
+                    )
+
+        return entities_processed, errors
+
+    async def _finalize_job_status(
+        self,
+        job: SyncJob,
+        entities_processed: dict[str, Any],
+        errors: list[dict[str, Any]],
+        enabled_rules_count: int,
+    ) -> SyncJob:
+        """Update job status based on sync results."""
+        if errors and len(errors) == enabled_rules_count:
+            # All entities failed
+            job = await self._job_repo.update_job_status(
+                job.id,
+                SyncJobStatus.FAILED,
+                error_code="ALL_ENTITIES_FAILED",
+                error_message="All entity syncs failed",
+                error_details={"errors": errors},
+                entities_processed=entities_processed,
+            )
+        elif errors:
+            # Partial failure - still mark as succeeded but with errors
+            job = await self._job_repo.update_job_status(
+                job.id,
+                SyncJobStatus.SUCCEEDED,
+                entities_processed={
+                    **entities_processed,
+                    "_errors": errors,
+                },
+            )
+        else:
+            job = await self._job_repo.update_job_status(
+                job.id,
+                SyncJobStatus.SUCCEEDED,
+                entities_processed=entities_processed,
+            )
+
+        logger.info(
+            "Sync job completed",
+            extra={
+                "job_id": str(job.id),
+                "status": job.status.value,
+                "entities_count": len(entities_processed),
+                "errors_count": len(errors),
+            },
+        )
+
+        return job
+
     async def execute_sync_job(self, job: SyncJob) -> SyncJob:
         """
         Execute a sync job (called by job runner).
@@ -477,149 +643,14 @@ class SyncOrchestrator:
         job = await self._job_repo.update_job_status(job.id, SyncJobStatus.RUNNING)
 
         try:
-            # Get user settings to determine which entities to sync
-            settings = await self._integration_repo.get_user_settings(
-                job.client_id, job.integration_id
+            enabled_rules = await self._get_enabled_rules_for_job(job)
+            adapter, strategy_class, record_ids_by_entity = await self._resolve_adapter_for_job(job)
+            entities_processed, errors = await self._execute_entity_sync_loop(
+                job, enabled_rules, adapter, strategy_class, record_ids_by_entity,
             )
-
-            if not settings or not settings.sync_rules:
-                raise SyncError("No sync rules configured")
-
-            # Get enabled rules
-            enabled_rules = [r for r in settings.sync_rules if r.enabled]
-            if not enabled_rules:
-                raise SyncError("No sync rules are enabled")
-
-            # Filter enabled rules by requested entity types (from job_params)
-            requested_entity_types = self._resolve_requested_entity_types(job.job_params)
-            if requested_entity_types is not None:
-                enabled_rules = [
-                    r for r in enabled_rules
-                    if r.entity_type in requested_entity_types
-                ]
-                if not enabled_rules:
-                    raise SyncError(
-                        f"Requested entity types are not enabled in sync settings: "
-                        f"{', '.join(sorted(requested_entity_types))}",
-                    )
-
-            # Get credentials and create adapter
-            user_integration = await self._integration_repo.get_user_integration(
-                job.client_id, job.integration_id
+            job = await self._finalize_job_status(
+                job, entities_processed, errors, len(enabled_rules),
             )
-            integration = await self._integration_repo.get_available_integration(
-                job.integration_id
-            )
-
-            # Get credentials - allow mock token in development mode
-            settings = get_settings()
-            access_token = "mock_dev_token"  # Default for dev
-
-            if user_integration and user_integration.credentials_encrypted:
-                try:
-                    credentials = await self._encryption.decrypt(
-                        user_integration.credentials_encrypted,
-                        user_integration.credentials_key_id,
-                    )
-                    creds_dict = json.loads(credentials.decode())
-                    access_token = await self._ensure_valid_token(
-                        job.client_id, job.integration_id, creds_dict,
-                    )
-                except Exception as e:
-                    if settings.app_env != "development":
-                        raise SyncError(f"Failed to decrypt credentials: {e}")
-                    logger.warning(
-                        "Using mock token - credential decryption failed in dev mode",
-                        extra={"error": str(e)},
-                    )
-            elif settings.app_env != "development":
-                raise SyncError("Integration credentials not found")
-            else:
-                logger.info("Using mock token - no credentials in dev mode")
-
-            adapter = self._adapter_factory.get_adapter(
-                integration,
-                access_token,
-                user_integration.external_account_id if user_integration else None,
-            )
-
-            # Check for integration-specific sync strategy
-            strategy_class = _SYNC_STRATEGIES.get(integration.name) if integration else None
-
-            # Parse entity_requests from job_params for record-level filtering
-            record_ids_by_entity: dict[str, list[str]] = {}
-            if job.job_params and job.job_params.get("entity_requests"):
-                for req in job.job_params["entity_requests"]:
-                    if req.get("record_ids"):
-                        record_ids_by_entity[req["entity_type"]] = req["record_ids"]
-
-            # Process each enabled entity rule
-            entities_processed: dict[str, Any] = {}
-            errors: list[dict[str, Any]] = []
-
-            if strategy_class:
-                entities_processed, errors = await self._execute_with_strategy(
-                    strategy_class, job, enabled_rules, adapter,
-                    record_ids_by_entity,
-                )
-            else:
-                for rule in enabled_rules:
-                    try:
-                        result = await self._sync_entity(
-                            job, rule, adapter, job.job_type == SyncJobType.FULL_SYNC
-                        )
-                        entities_processed[rule.entity_type] = result
-                    except Exception as e:
-                        logger.error(
-                            "Entity sync failed",
-                            extra={
-                                "job_id": str(job.id),
-                                "entity_type": rule.entity_type,
-                                "error": str(e),
-                            },
-                        )
-                        errors.append(
-                            {"entity_type": rule.entity_type, "error": str(e)}
-                        )
-
-            # Update job status
-            if errors and len(errors) == len(enabled_rules):
-                # All entities failed
-                job = await self._job_repo.update_job_status(
-                    job.id,
-                    SyncJobStatus.FAILED,
-                    error_code="ALL_ENTITIES_FAILED",
-                    error_message="All entity syncs failed",
-                    error_details={"errors": errors},
-                    entities_processed=entities_processed,
-                )
-            elif errors:
-                # Partial failure - still mark as succeeded but with errors
-                job = await self._job_repo.update_job_status(
-                    job.id,
-                    SyncJobStatus.SUCCEEDED,
-                    entities_processed={
-                        **entities_processed,
-                        "_errors": errors,
-                    },
-                )
-            else:
-                job = await self._job_repo.update_job_status(
-                    job.id,
-                    SyncJobStatus.SUCCEEDED,
-                    entities_processed=entities_processed,
-                )
-
-            logger.info(
-                "Sync job completed",
-                extra={
-                    "job_id": str(job.id),
-                    "status": job.status.value,
-                    "entities_count": len(entities_processed),
-                    "errors_count": len(errors),
-                },
-            )
-
         except Exception as e:
             logger.error(
                 "Sync job failed",
@@ -633,6 +664,326 @@ class SyncOrchestrator:
             )
 
         return job
+
+    async def _resolve_sync_cursors(
+        self,
+        job: SyncJob,
+        entity_type: str,
+        full_sync: bool,
+    ) -> tuple[datetime | None, datetime | None]:
+        """Return (inbound_since, outbound_since) cursors for incremental sync."""
+        if full_sync:
+            return None, None
+
+        entity_status = await self._state_repo.get_entity_sync_status(
+            job.client_id, job.integration_id, entity_type
+        )
+        if not entity_status:
+            return None, None
+
+        # Inbound: prefer QBO-clock cursor, fall back to our clock for pre-migration rows
+        inbound_since = (
+            entity_status.last_inbound_sync_at
+            or entity_status.last_successful_sync_at
+        )
+        # Outbound: always our clock
+        outbound_since = entity_status.last_successful_sync_at
+        return inbound_since, outbound_since
+
+    async def _prepare_inbound_state_record(
+        self,
+        job: SyncJob,
+        entity_type: str,
+        record: Any,
+    ) -> tuple[IntegrationStateRecord, bool]:
+        """Look up or create a state record for an inbound external record.
+
+        Returns (state_record, is_new).
+        """
+        state = await self._state_repo.get_record_by_external_id(
+            job.client_id,
+            job.integration_id,
+            entity_type,
+            record.id,
+        )
+
+        if state:
+            state.external_version_id += 1
+            state.sync_status = RecordSyncStatus.PENDING
+            state.last_job_id = job.id
+            return state, False
+
+        now = datetime.now(timezone.utc)
+        state = IntegrationStateRecord(
+            id=uuid4(),
+            client_id=job.client_id,
+            integration_id=job.integration_id,
+            entity_type=entity_type,
+            internal_record_id=None,
+            external_record_id=record.id,
+            sync_status=RecordSyncStatus.SYNCED,
+            sync_direction=SyncDirection.INBOUND,
+            internal_version_id=1,
+            external_version_id=1,
+            last_sync_version_id=1,
+            last_synced_at=now,
+            last_job_id=job.id,
+            metadata={"data": record.data},
+            created_at=now,
+            updated_at=now,
+        )
+        return state, True
+
+    async def _flush_inbound_batch(
+        self,
+        records_to_upsert: list[IntegrationStateRecord],
+        batch_created: int,
+        batch_updated: int,
+        result: dict[str, Any],
+        job: SyncJob,
+        entity_type: str,
+    ) -> tuple[int, int]:
+        """Flush accumulated records to DB and return (created, updated) counts."""
+        if not records_to_upsert:
+            return 0, 0
+
+        created = batch_created
+        updated = batch_updated
+        try:
+            upserted = await self._state_repo.batch_upsert_records(records_to_upsert)
+            await self._write_history_entries(upserted, job.id)
+            logger.debug(
+                "Flushed inbound batch",
+                extra={
+                    "job_id": str(job.id),
+                    "entity_type": entity_type,
+                    "batch_size": len(records_to_upsert),
+                },
+            )
+        except Exception as e:
+            logger.error(
+                "Batch upsert failed",
+                extra={
+                    "job_id": str(job.id),
+                    "entity_type": entity_type,
+                    "batch_size": len(records_to_upsert),
+                    "error": str(e),
+                },
+            )
+            # Count these as failed
+            result["records_failed"] += created + updated
+            created, updated = 0, 0
+
+        return created, updated
+
+    async def _sync_entity_inbound(
+        self,
+        job: SyncJob,
+        entity_type: str,
+        adapter: Any,
+        inbound_since: datetime | None,
+        result: dict[str, Any],
+    ) -> datetime | None:
+        """Run paginated inbound sync and return max_external_updated_at."""
+        BATCH_SIZE = 1000
+        max_external_updated_at: datetime | None = None
+        page_token = None
+        records_to_upsert: list[IntegrationStateRecord] = []
+        batch_created = 0
+        batch_updated = 0
+
+        while True:
+            records, next_token = await adapter.fetch_records(
+                entity_type, since=inbound_since, page_token=page_token
+            )
+            result["records_fetched"] += len(records)
+
+            for record in records:
+                # Track max external updated_at for inbound cursor
+                if record.updated_at and (
+                    max_external_updated_at is None
+                    or record.updated_at > max_external_updated_at
+                ):
+                    max_external_updated_at = record.updated_at
+
+                try:
+                    state, is_new = await self._prepare_inbound_state_record(
+                        job, entity_type, record,
+                    )
+                    records_to_upsert.append(state)
+                    if is_new:
+                        batch_created += 1
+                    else:
+                        batch_updated += 1
+
+                    # Flush batch when it reaches size limit
+                    if len(records_to_upsert) >= BATCH_SIZE:
+                        created, updated = await self._flush_inbound_batch(
+                            records_to_upsert, batch_created, batch_updated,
+                            result, job, entity_type,
+                        )
+                        result["records_created"] += created
+                        result["records_updated"] += updated
+                        records_to_upsert = []
+                        batch_created = 0
+                        batch_updated = 0
+
+                except Exception as e:
+                    logger.warning(
+                        "Failed to process inbound record",
+                        extra={
+                            "job_id": str(job.id),
+                            "entity_type": entity_type,
+                            "external_id": record.id,
+                            "error": str(e),
+                        },
+                    )
+                    result["records_failed"] += 1
+
+            if not next_token:
+                break
+            page_token = next_token
+
+        # Flush any remaining records
+        created, updated = await self._flush_inbound_batch(
+            records_to_upsert, batch_created, batch_updated,
+            result, job, entity_type,
+        )
+        result["records_created"] += created
+        result["records_updated"] += updated
+
+        return max_external_updated_at
+
+    async def _batch_mark_synced_with_fallback(
+        self,
+        successful_syncs: list[tuple[UUID, UUID, str | None]],
+        successful_records: list[IntegrationStateRecord],
+        job: SyncJob,
+        entity_type: str,
+        result: dict[str, Any],
+    ) -> None:
+        """Batch mark synced with individual-update fallback on failure."""
+        try:
+            await self._state_repo.batch_mark_synced(
+                successful_syncs,
+                client_id=job.client_id,
+                integration_id=job.integration_id,
+            )
+            # Write history for successful outbound records
+            for sr in successful_records:
+                sr.sync_status = RecordSyncStatus.SYNCED
+            await self._write_history_entries(successful_records, job.id)
+            result["records_updated"] += len(successful_syncs)
+        except Exception as e:
+            logger.error(
+                "Batch mark_synced failed - attempting individual updates",
+                extra={
+                    "job_id": str(job.id),
+                    "entity_type": entity_type,
+                    "records_count": len(successful_syncs),
+                    "error": str(e),
+                },
+            )
+            # Fallback: try individual updates to salvage what we can
+            for record_id, client_id_param, external_id in successful_syncs:
+                try:
+                    await self._state_repo.mark_synced(
+                        record_id, client_id_param, external_id
+                    )
+                    result["records_updated"] += 1
+                except Exception as individual_err:
+                    logger.error(
+                        "Individual mark_synced failed",
+                        extra={
+                            "record_id": str(record_id),
+                            "external_id": external_id,
+                            "error": str(individual_err),
+                        },
+                    )
+                    result["records_failed"] += 1
+
+    async def _sync_entity_outbound(
+        self,
+        job: SyncJob,
+        entity_type: str,
+        adapter: Any,
+        result: dict[str, Any],
+    ) -> None:
+        """Push pending internal records to external system."""
+        pending_records = await self._state_repo.get_pending_records(
+            job.client_id, job.integration_id, entity_type
+        )
+
+        # Collect successful syncs for batch update
+        successful_syncs: list[tuple[UUID, UUID, str | None]] = []
+        successful_records: list[IntegrationStateRecord] = []
+
+        for state in pending_records:
+            try:
+                # Get record data from metadata (simplified - real impl would fetch from internal system)
+                data = state.metadata.get("data", {}) if state.metadata else {}
+
+                if state.external_record_id:
+                    # Update existing external record
+                    await adapter.update_record(
+                        entity_type, state.external_record_id, data
+                    )
+                else:
+                    # Create new external record
+                    external_record = await adapter.create_record(entity_type, data)
+                    state.external_record_id = external_record.id
+
+                    # CRITICAL: Immediately persist external_record_id to prevent duplicates
+                    # If this fails but external create succeeded, we'll have a duplicate on retry
+                    # But this is better than losing track of the external_record_id
+                    try:
+                        await self._state_repo.upsert_record(state)
+                    except Exception as persist_err:
+                        logger.error(
+                            "Failed to persist external_record_id - duplicate risk on retry",
+                            extra={
+                                "job_id": str(job.id),
+                                "entity_type": entity_type,
+                                "internal_id": state.internal_record_id,
+                                "external_id": state.external_record_id,
+                                "error": str(persist_err),
+                            },
+                        )
+                        # Continue - we'll try to mark as synced in batch
+
+                # Collect for batch update
+                successful_syncs.append(
+                    (state.id, job.client_id, state.external_record_id)
+                )
+                successful_records.append(state)
+
+            except Exception as e:
+                logger.warning(
+                    "Failed to process outbound record",
+                    extra={
+                        "job_id": str(job.id),
+                        "entity_type": entity_type,
+                        "internal_id": state.internal_record_id,
+                        "error": str(e),
+                    },
+                )
+                await self._state_repo.update_sync_status(
+                    state.id,
+                    job.client_id,
+                    RecordSyncStatus.FAILED,
+                    error_message=str(e),
+                )
+                # Write history for failed record
+                state.sync_status = RecordSyncStatus.FAILED
+                state.error_message = str(e)
+                await self._write_history_entries([state], job.id)
+                result["records_failed"] += 1
+
+        # Batch mark all successful syncs in a single transaction with advisory lock
+        if successful_syncs:
+            await self._batch_mark_synced_with_fallback(
+                successful_syncs, successful_records, job, entity_type, result,
+            )
 
     async def _sync_entity(
         self,
@@ -664,264 +1015,19 @@ class SyncOrchestrator:
             "records_failed": 0,
         }
 
-        # Get last sync time for incremental sync — use direction-appropriate cursor
-        inbound_since = None
-        outbound_since = None
-        if not full_sync:
-            entity_status = await self._state_repo.get_entity_sync_status(
-                job.client_id, job.integration_id, entity_type
-            )
-            if entity_status:
-                # Inbound: prefer QBO-clock cursor, fall back to our clock for pre-migration rows
-                inbound_since = (
-                    entity_status.last_inbound_sync_at
-                    or entity_status.last_successful_sync_at
-                )
-                # Outbound: always our clock
-                outbound_since = entity_status.last_successful_sync_at
+        inbound_since, outbound_since = await self._resolve_sync_cursors(
+            job, entity_type, full_sync,
+        )
 
-        # Inbound sync: fetch from external, update internal
-        # Process in batches to prevent memory exhaustion with large datasets
-        BATCH_SIZE = 1000  # Max records to hold in memory before flushing
         max_external_updated_at: datetime | None = None
 
         if direction in (SyncDirection.INBOUND, SyncDirection.BIDIRECTIONAL):
-            page_token = None
-            records_to_upsert: list[IntegrationStateRecord] = []
-            batch_created = 0
-            batch_updated = 0
-
-            async def flush_batch() -> tuple[int, int]:
-                """Flush accumulated records to DB and return (created, updated) counts."""
-                nonlocal records_to_upsert, batch_created, batch_updated
-                if not records_to_upsert:
-                    return 0, 0
-
-                created = batch_created
-                updated = batch_updated
-                try:
-                    upserted = await self._state_repo.batch_upsert_records(records_to_upsert)
-                    await self._write_history_entries(upserted, job.id)
-                    logger.debug(
-                        "Flushed inbound batch",
-                        extra={
-                            "job_id": str(job.id),
-                            "entity_type": entity_type,
-                            "batch_size": len(records_to_upsert),
-                        },
-                    )
-                except Exception as e:
-                    logger.error(
-                        "Batch upsert failed",
-                        extra={
-                            "job_id": str(job.id),
-                            "entity_type": entity_type,
-                            "batch_size": len(records_to_upsert),
-                            "error": str(e),
-                        },
-                    )
-                    # Count these as failed
-                    result["records_failed"] += created + updated
-                    created, updated = 0, 0
-
-                # Clear batch
-                records_to_upsert = []
-                batch_created = 0
-                batch_updated = 0
-                return created, updated
-
-            while True:
-                records, next_token = await adapter.fetch_records(
-                    entity_type, since=inbound_since, page_token=page_token
-                )
-                result["records_fetched"] += len(records)
-
-                for record in records:
-                    # Track max external updated_at for inbound cursor
-                    if record.updated_at and (
-                        max_external_updated_at is None
-                        or record.updated_at > max_external_updated_at
-                    ):
-                        max_external_updated_at = record.updated_at
-
-                    try:
-                        # Check if record exists by external ID
-                        state = await self._state_repo.get_record_by_external_id(
-                            job.client_id,
-                            job.integration_id,
-                            entity_type,
-                            record.id,
-                        )
-
-                        if state:
-                            state.external_version_id += 1
-                            state.sync_status = RecordSyncStatus.PENDING
-                            state.last_job_id = job.id
-                            records_to_upsert.append(state)
-                            batch_updated += 1
-                        else:
-                            now = datetime.now(timezone.utc)
-                            state = IntegrationStateRecord(
-                                id=uuid4(),
-                                client_id=job.client_id,
-                                integration_id=job.integration_id,
-                                entity_type=entity_type,
-                                internal_record_id=None,
-                                external_record_id=record.id,
-                                sync_status=RecordSyncStatus.SYNCED,
-                                sync_direction=SyncDirection.INBOUND,
-                                internal_version_id=1,
-                                external_version_id=1,
-                                last_sync_version_id=1,
-                                last_synced_at=now,
-                                last_job_id=job.id,
-                                metadata={"data": record.data},
-                                created_at=now,
-                                updated_at=now,
-                            )
-                            records_to_upsert.append(state)
-                            batch_created += 1
-
-                        # Flush batch when it reaches size limit
-                        if len(records_to_upsert) >= BATCH_SIZE:
-                            created, updated = await flush_batch()
-                            result["records_created"] += created
-                            result["records_updated"] += updated
-
-                    except Exception as e:
-                        logger.warning(
-                            "Failed to process inbound record",
-                            extra={
-                                "job_id": str(job.id),
-                                "entity_type": entity_type,
-                                "external_id": record.id,
-                                "error": str(e),
-                            },
-                        )
-                        result["records_failed"] += 1
-
-                if not next_token:
-                    break
-                page_token = next_token
-
-            # Flush any remaining records
-            created, updated = await flush_batch()
-            result["records_created"] += created
-            result["records_updated"] += updated
-
-        # Outbound sync: push pending internal records to external
-        # CRITICAL: We must update external_record_id immediately after external operation
-        # to prevent duplicates if batch update fails
-        if direction in (SyncDirection.OUTBOUND, SyncDirection.BIDIRECTIONAL):
-            pending_records = await self._state_repo.get_pending_records(
-                job.client_id, job.integration_id, entity_type
+            max_external_updated_at = await self._sync_entity_inbound(
+                job, entity_type, adapter, inbound_since, result,
             )
 
-            # Collect successful syncs for batch update
-            successful_syncs: list[tuple[UUID, UUID, str | None]] = []
-            successful_records: list[IntegrationStateRecord] = []
-
-            for state in pending_records:
-                try:
-                    # Get record data from metadata (simplified - real impl would fetch from internal system)
-                    data = state.metadata.get("data", {}) if state.metadata else {}
-
-                    if state.external_record_id:
-                        # Update existing external record
-                        await adapter.update_record(
-                            entity_type, state.external_record_id, data
-                        )
-                    else:
-                        # Create new external record
-                        external_record = await adapter.create_record(entity_type, data)
-                        state.external_record_id = external_record.id
-
-                        # CRITICAL: Immediately persist external_record_id to prevent duplicates
-                        # If this fails but external create succeeded, we'll have a duplicate on retry
-                        # But this is better than losing track of the external_record_id
-                        try:
-                            await self._state_repo.upsert_record(state)
-                        except Exception as persist_err:
-                            logger.error(
-                                "Failed to persist external_record_id - duplicate risk on retry",
-                                extra={
-                                    "job_id": str(job.id),
-                                    "entity_type": entity_type,
-                                    "internal_id": state.internal_record_id,
-                                    "external_id": state.external_record_id,
-                                    "error": str(persist_err),
-                                },
-                            )
-                            # Continue - we'll try to mark as synced in batch
-
-                    # Collect for batch update
-                    successful_syncs.append(
-                        (state.id, job.client_id, state.external_record_id)
-                    )
-                    successful_records.append(state)
-
-                except Exception as e:
-                    logger.warning(
-                        "Failed to process outbound record",
-                        extra={
-                            "job_id": str(job.id),
-                            "entity_type": entity_type,
-                            "internal_id": state.internal_record_id,
-                            "error": str(e),
-                        },
-                    )
-                    await self._state_repo.update_sync_status(
-                        state.id,
-                        job.client_id,
-                        RecordSyncStatus.FAILED,
-                        error_message=str(e),
-                    )
-                    # Write history for failed record
-                    state.sync_status = RecordSyncStatus.FAILED
-                    state.error_message = str(e)
-                    await self._write_history_entries([state], job.id)
-                    result["records_failed"] += 1
-
-            # Batch mark all successful syncs in a single transaction with advisory lock
-            if successful_syncs:
-                try:
-                    await self._state_repo.batch_mark_synced(
-                        successful_syncs,
-                        client_id=job.client_id,
-                        integration_id=job.integration_id,
-                    )
-                    # Write history for successful outbound records
-                    for sr in successful_records:
-                        sr.sync_status = RecordSyncStatus.SYNCED
-                    await self._write_history_entries(successful_records, job.id)
-                    result["records_updated"] += len(successful_syncs)
-                except Exception as e:
-                    logger.error(
-                        "Batch mark_synced failed - attempting individual updates",
-                        extra={
-                            "job_id": str(job.id),
-                            "entity_type": entity_type,
-                            "records_count": len(successful_syncs),
-                            "error": str(e),
-                        },
-                    )
-                    # Fallback: try individual updates to salvage what we can
-                    for record_id, client_id_param, external_id in successful_syncs:
-                        try:
-                            await self._state_repo.mark_synced(
-                                record_id, client_id_param, external_id
-                            )
-                            result["records_updated"] += 1
-                        except Exception as individual_err:
-                            logger.error(
-                                "Individual mark_synced failed",
-                                extra={
-                                    "record_id": str(record_id),
-                                    "external_id": external_id,
-                                    "error": str(individual_err),
-                                },
-                            )
-                            result["records_failed"] += 1
+        if direction in (SyncDirection.OUTBOUND, SyncDirection.BIDIRECTIONAL):
+            await self._sync_entity_outbound(job, entity_type, adapter, result)
 
         # Update entity sync status
         total_synced = result["records_created"] + result["records_updated"]

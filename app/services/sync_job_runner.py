@@ -309,6 +309,166 @@ class SyncJobRunner:
                 extra={"error": str(e)},
             )
 
+    def _validate_and_parse_message(
+        self,
+        message: QueueMessage,
+    ) -> SyncJobMessage | None:
+        """Validate message fields and parse into SyncJobMessage.
+
+        Returns None for any malformed message (caller should delete and return).
+        """
+        message_body = message.body
+
+        # Validate required message fields before parsing
+        required_fields = ["job_id", "client_id", "integration_id", "job_type"]
+        missing_fields = [f for f in required_fields if f not in message_body]
+        if missing_fields:
+            logger.error(
+                "Malformed message - missing required fields",
+                extra={
+                    "message_id": message.message_id,
+                    "missing_fields": missing_fields,
+                    "message_keys": list(message_body.keys()),
+                },
+            )
+            return None
+
+        # Validate UUID format for ID fields
+        from uuid import UUID
+        try:
+            job_id = UUID(str(message_body["job_id"]))
+            client_id = UUID(str(message_body["client_id"]))
+            integration_id = UUID(str(message_body["integration_id"]))
+        except (ValueError, TypeError) as e:
+            logger.error(
+                "Malformed message - invalid UUID format",
+                extra={
+                    "message_id": message.message_id,
+                    "error": str(e),
+                },
+            )
+            return None
+
+        # Validate job_type enum value
+        try:
+            job_type = SyncJobType(message_body["job_type"])
+        except ValueError:
+            logger.error(
+                "Malformed message - invalid job_type",
+                extra={
+                    "message_id": message.message_id,
+                    "job_type": message_body["job_type"],
+                    "valid_types": [t.value for t in SyncJobType],
+                },
+            )
+            return None
+
+        return SyncJobMessage(
+            job_id=job_id,
+            client_id=client_id,
+            integration_id=integration_id,
+            job_type=job_type,
+            entity_types=message_body.get("entity_types"),
+        )
+
+    async def _check_job_ready_for_execution(
+        self,
+        job_message: SyncJobMessage,
+        receipt_handle: str,
+        settings: Any,
+    ) -> SyncJob | None:
+        """Look up job and verify it is ready to execute.
+
+        Returns the SyncJob if ready, or None if the message was handled
+        (deleted from queue) because the job is not actionable.
+        Note: global kill switch check stays in the caller (different behavior:
+        message is NOT deleted when globally disabled).
+        """
+        # Get the job
+        job = await self._job_repo.get_job(job_message.job_id)
+        if not job:
+            logger.error(
+                "Job not found",
+                extra={"job_id": str(job_message.job_id)},
+            )
+            await self._queue.delete_message(receipt_handle)
+            return None
+
+        # Check if job is still pending (not cancelled)
+        if job.status != SyncJobStatus.PENDING:
+            logger.info(
+                "Skipping job - not pending",
+                extra={
+                    "job_id": str(job.id),
+                    "status": job.status.value,
+                },
+            )
+            await self._queue.delete_message(receipt_handle)
+            return None
+
+        # Check if integration is disabled via feature flag
+        integration = await self._integration_repo.get_available_integration(
+            job.integration_id
+        )
+        if integration and integration.name in settings.disabled_integrations:
+            logger.warning(
+                "Integration disabled via feature flag - skipping job",
+                extra={
+                    "job_id": str(job.id),
+                    "integration": integration.name,
+                },
+            )
+            # Mark job as cancelled instead of leaving in queue
+            await self._job_repo.update_job_status(
+                job.id,
+                SyncJobStatus.CANCELLED,
+                error_code="INTEGRATION_DISABLED",
+                error_message=f"Integration '{integration.name}' is currently disabled",
+            )
+            await self._queue.delete_message(receipt_handle)
+            return None
+
+        return job
+
+    async def _handle_message_failure(
+        self,
+        message: QueueMessage,
+        receipt_handle: str,
+        receive_count: int,
+        error: Exception,
+    ) -> None:
+        """Log error, record backpressure, and route to DLQ if max retries exceeded."""
+        error_msg = str(error)
+        self._record_error()
+        logger.error(
+            "Failed to process sync job",
+            extra={
+                "error": error_msg,
+                "message_body": message.body,
+                "receive_count": receive_count,
+                "consecutive_errors": self._consecutive_errors,
+            },
+        )
+
+        # Send to DLQ after failure
+        # Note: The memory queue auto-moves to DLQ after max_receive_count,
+        # but we can also explicitly send on catastrophic failures
+        settings = get_settings()
+        if receive_count >= settings.queue_max_receive_count:
+            logger.warning(
+                "Moving message to DLQ after max retries",
+                extra={
+                    "message_id": message.message_id,
+                    "receive_count": receive_count,
+                    "max_receive_count": settings.queue_max_receive_count,
+                },
+            )
+            await self._queue.send_to_dlq(message, error_msg)
+            await self._queue.delete_message(receipt_handle)
+
+        # Don't delete message - it will become visible again for retry
+        # After max_receive_count, the queue will auto-move to DLQ
+
     async def _process_message(
         self,
         message: QueueMessage,
@@ -319,68 +479,15 @@ class SyncJobRunner:
         Args:
             message: The queue message to process.
         """
-        message_body = message.body
         receipt_handle = message.receipt_handle
         receive_count = int(message.attributes.get("ApproximateReceiveCount", 1))
         settings = get_settings()
 
         try:
-            # Validate required message fields before parsing
-            required_fields = ["job_id", "client_id", "integration_id", "job_type"]
-            missing_fields = [f for f in required_fields if f not in message_body]
-            if missing_fields:
-                logger.error(
-                    "Malformed message - missing required fields",
-                    extra={
-                        "message_id": message.message_id,
-                        "missing_fields": missing_fields,
-                        "message_keys": list(message_body.keys()),
-                    },
-                )
-                # Delete malformed messages - they can't be processed
+            job_message = self._validate_and_parse_message(message)
+            if job_message is None:
                 await self._queue.delete_message(receipt_handle)
                 return
-
-            # Validate UUID format for ID fields
-            from uuid import UUID
-            try:
-                job_id = UUID(str(message_body["job_id"]))
-                client_id = UUID(str(message_body["client_id"]))
-                integration_id = UUID(str(message_body["integration_id"]))
-            except (ValueError, TypeError) as e:
-                logger.error(
-                    "Malformed message - invalid UUID format",
-                    extra={
-                        "message_id": message.message_id,
-                        "error": str(e),
-                    },
-                )
-                await self._queue.delete_message(receipt_handle)
-                return
-
-            # Validate job_type enum value
-            try:
-                job_type = SyncJobType(message_body["job_type"])
-            except ValueError:
-                logger.error(
-                    "Malformed message - invalid job_type",
-                    extra={
-                        "message_id": message.message_id,
-                        "job_type": message_body["job_type"],
-                        "valid_types": [t.value for t in SyncJobType],
-                    },
-                )
-                await self._queue.delete_message(receipt_handle)
-                return
-
-            # Parse validated message
-            job_message = SyncJobMessage(
-                job_id=job_id,
-                client_id=client_id,
-                integration_id=integration_id,
-                job_type=job_type,
-                entity_types=message_body.get("entity_types"),
-            )
 
             logger.info(
                 "Processing sync job",
@@ -402,48 +509,10 @@ class SyncJobRunner:
                 # Don't delete - leave for retry when feature flag is cleared
                 return
 
-            # Get the job
-            job = await self._job_repo.get_job(job_message.job_id)
-            if not job:
-                logger.error(
-                    "Job not found",
-                    extra={"job_id": str(job_message.job_id)},
-                )
-                await self._queue.delete_message(receipt_handle)
-                return
-
-            # Check if job is still pending (not cancelled)
-            if job.status != SyncJobStatus.PENDING:
-                logger.info(
-                    "Skipping job - not pending",
-                    extra={
-                        "job_id": str(job.id),
-                        "status": job.status.value,
-                    },
-                )
-                await self._queue.delete_message(receipt_handle)
-                return
-
-            # Check if integration is disabled via feature flag
-            integration = await self._integration_repo.get_available_integration(
-                job.integration_id
+            job = await self._check_job_ready_for_execution(
+                job_message, receipt_handle, settings,
             )
-            if integration and integration.name in settings.disabled_integrations:
-                logger.warning(
-                    "Integration disabled via feature flag - skipping job",
-                    extra={
-                        "job_id": str(job.id),
-                        "integration": integration.name,
-                    },
-                )
-                # Mark job as cancelled instead of leaving in queue
-                await self._job_repo.update_job_status(
-                    job.id,
-                    SyncJobStatus.CANCELLED,
-                    error_code="INTEGRATION_DISABLED",
-                    error_message=f"Integration '{integration.name}' is currently disabled",
-                )
-                await self._queue.delete_message(receipt_handle)
+            if job is None:
                 return
 
             # Execute the job
@@ -459,35 +528,9 @@ class SyncJobRunner:
             )
 
         except Exception as e:
-            error_msg = str(e)
-            self._record_error()
-            logger.error(
-                "Failed to process sync job",
-                extra={
-                    "error": error_msg,
-                    "message_body": message_body,
-                    "receive_count": receive_count,
-                    "consecutive_errors": self._consecutive_errors,
-                },
+            await self._handle_message_failure(
+                message, receipt_handle, receive_count, e,
             )
-
-            # Send to DLQ after failure
-            # Note: The memory queue auto-moves to DLQ after max_receive_count,
-            # but we can also explicitly send on catastrophic failures
-            if receive_count >= settings.queue_max_receive_count:
-                logger.warning(
-                    "Moving message to DLQ after max retries",
-                    extra={
-                        "message_id": message.message_id,
-                        "receive_count": receive_count,
-                        "max_receive_count": settings.queue_max_receive_count,
-                    },
-                )
-                await self._queue.send_to_dlq(message, error_msg)
-                await self._queue.delete_message(receipt_handle)
-
-            # Don't delete message - it will become visible again for retry
-            # After max_receive_count, the queue will auto-move to DLQ
 
 
 async def run_job_runner() -> None:
