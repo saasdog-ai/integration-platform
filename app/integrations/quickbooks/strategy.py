@@ -25,7 +25,7 @@ from app.integrations.quickbooks.constants import (
     QBO_ENTITY_NAMES,
 )
 from app.integrations.quickbooks.internal_repo import InternalDataRepository
-from app.integrations.quickbooks.mappers import INBOUND_MAPPERS, OUTBOUND_MAPPERS
+from app.integrations.quickbooks.mappers import INBOUND_MAPPERS, OUTBOUND_MAPPERS, map_vendor_inbound
 
 logger = get_logger(__name__)
 
@@ -128,6 +128,7 @@ class QuickBooksSyncStrategy:
                         record=record,
                         mapper_fn=mapper_fn,
                         state_repo=state_repo,
+                        adapter=adapter,
                     )
                     records_to_upsert.append(state_record)
 
@@ -185,6 +186,7 @@ class QuickBooksSyncStrategy:
         record: ExternalRecord,
         mapper_fn: Any,
         state_repo: IntegrationStateRepositoryInterface,
+        adapter: IntegrationAdapterInterface | None = None,
     ) -> IntegrationStateRecord:
         """Map a single QBO record and write to internal database.
 
@@ -195,6 +197,12 @@ class QuickBooksSyncStrategy:
 
         # Tag with external_id so the internal repo can do upsert-by-external-id
         mapped_data["_external_id"] = record.id
+
+        # Resolve vendor dependency before bill upsert
+        if entity_type == "bill" and mapped_data.get("vendor_external_id") and adapter:
+            await self._ensure_vendor_synced(
+                job, mapped_data["vendor_external_id"], adapter, state_repo,
+            )
 
         # 2. Write to internal database
         upsert_fn = self._get_internal_upsert_fn(entity_type)
@@ -465,6 +473,41 @@ class QuickBooksSyncStrategy:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    async def _ensure_vendor_synced(
+        self,
+        job: SyncJob,
+        vendor_external_id: str,
+        adapter: IntegrationAdapterInterface,
+        state_repo: IntegrationStateRepositoryInterface,
+    ) -> None:
+        """Auto-fetch and sync a vendor if not already present in integration state."""
+        existing = await state_repo.get_record_by_external_id(
+            job.client_id, job.integration_id, "vendor", vendor_external_id,
+        )
+        if existing:
+            return
+
+        vendor_record = await adapter.get_record("vendor", vendor_external_id)
+        if not vendor_record:
+            logger.warning(
+                "Vendor not found in QBO during bill dependency resolution",
+                extra={
+                    "job_id": str(job.id),
+                    "vendor_external_id": vendor_external_id,
+                },
+            )
+            return
+
+        vendor_state = await self._process_inbound_record(
+            job=job,
+            entity_type="vendor",
+            record=vendor_record,
+            mapper_fn=map_vendor_inbound,
+            state_repo=state_repo,
+        )
+        await state_repo.batch_upsert_records([vendor_state])
+        await self._write_history_entries([vendor_state], state_repo, job.id)
 
     async def _write_history_entries(
         self,
