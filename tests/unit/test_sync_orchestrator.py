@@ -1478,3 +1478,389 @@ class TestEnsureValidToken:
                 )
 
         assert instance.refresh_integration_token.await_count == 2
+
+
+class TestSplitSyncCursors:
+    """Test split inbound/outbound sync cursors.
+
+    Uses a generic integration (not 'QuickBooks Online') so the orchestrator
+    takes the generic ``_sync_entity`` path which doesn't need a live database
+    for internal data tables.
+    """
+
+    @pytest.fixture
+    def generic_integration(self, mock_integration_repo) -> AvailableIntegration:
+        """Create a generic (non-QBO) integration so the generic path is used."""
+        return mock_integration_repo.seed_available_integration(
+            name="Generic ERP",
+            type="erp",
+            supported_entities=["bill", "invoice", "vendor"],
+        )
+
+    @pytest.fixture
+    async def generic_connected(
+        self, mock_integration_repo, sample_client_id, generic_integration,
+    ) -> UserIntegration:
+        now = datetime.now(timezone.utc)
+        ui = UserIntegration(
+            id=uuid4(),
+            client_id=sample_client_id,
+            integration_id=generic_integration.id,
+            status=IntegrationStatus.CONNECTED,
+            credentials_encrypted=b"encrypted",
+            credentials_key_id="k",
+            external_account_id="ext-123",
+            last_connected_at=now,
+            created_at=now,
+            updated_at=now,
+        )
+        await mock_integration_repo.create_user_integration(ui)
+        return ui
+
+    # ---- helpers ----
+
+    async def _run_inbound_job(
+        self,
+        mock_integration_repo,
+        mock_job_repo,
+        mock_adapter_factory,
+        mock_state_repo,
+        orchestrator,
+        sample_client_id,
+        integration,
+        *,
+        seed_records: bool = True,
+        custom_updated_at: datetime | None = None,
+        preset_entity_status=None,
+        job_type: SyncJobType = SyncJobType.FULL_SYNC,
+    ):
+        from app.domain.entities import ExternalRecord
+
+        settings = UserIntegrationSettings(
+            sync_rules=[
+                SyncRule(entity_type="bill", direction=SyncDirection.INBOUND, enabled=True),
+            ],
+        )
+        await mock_integration_repo.upsert_user_settings(
+            sample_client_id, integration.id, settings,
+        )
+
+        adapter = mock_adapter_factory.get_adapter(
+            integration, "mock_token", "ext-123",
+        )
+
+        if seed_records:
+            ts = custom_updated_at or datetime(2026, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+            record = ExternalRecord(
+                id="ext-bill-1",
+                entity_type="bill",
+                data={"name": "Test bill"},
+                version="1",
+                updated_at=ts,
+            )
+            adapter._records.setdefault("bill", {})["ext-bill-1"] = record
+
+        if preset_entity_status is not None:
+            mock_state_repo._entity_sync_status[
+                (sample_client_id, integration.id, "bill")
+            ] = preset_entity_status
+
+        now = datetime.now(timezone.utc)
+        job = SyncJob(
+            id=uuid4(),
+            client_id=sample_client_id,
+            integration_id=integration.id,
+            job_type=job_type,
+            status=SyncJobStatus.PENDING,
+            triggered_by=SyncJobTrigger.USER,
+            created_at=now,
+            updated_at=now,
+        )
+        await mock_job_repo.create_job(job)
+
+        result = await orchestrator.execute_sync_job(job)
+        return result, adapter
+
+    # ---- tests ----
+
+    async def test_inbound_sets_qbo_cursor(
+        self,
+        orchestrator,
+        mock_integration_repo,
+        mock_job_repo,
+        mock_adapter_factory,
+        mock_state_repo,
+        sample_client_id,
+        generic_integration,
+        generic_connected,
+    ):
+        """Inbound sync sets last_inbound_sync_at to max external timestamp."""
+        qbo_ts = datetime(2026, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+
+        await self._run_inbound_job(
+            mock_integration_repo, mock_job_repo, mock_adapter_factory,
+            mock_state_repo, orchestrator, sample_client_id,
+            generic_integration, custom_updated_at=qbo_ts,
+        )
+
+        entity_status = mock_state_repo._entity_sync_status.get(
+            (sample_client_id, generic_integration.id, "bill")
+        )
+        assert entity_status is not None
+        assert entity_status.last_inbound_sync_at == qbo_ts
+
+    async def test_outbound_does_not_touch_inbound_cursor(
+        self,
+        orchestrator,
+        mock_integration_repo,
+        mock_job_repo,
+        mock_adapter_factory,
+        mock_state_repo,
+        sample_client_id,
+        generic_integration,
+        generic_connected,
+    ):
+        """Running outbound sync does not alter last_inbound_sync_at."""
+        from app.domain.entities import EntitySyncStatus, IntegrationStateRecord
+        from app.domain.enums import RecordSyncStatus
+
+        qbo_ts = datetime(2026, 1, 10, 8, 0, 0, tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+
+        entity_status = EntitySyncStatus(
+            id=uuid4(),
+            client_id=sample_client_id,
+            integration_id=generic_integration.id,
+            entity_type="bill",
+            last_successful_sync_at=now,
+            last_inbound_sync_at=qbo_ts,
+            last_sync_job_id=uuid4(),
+            records_synced_count=5,
+            created_at=now,
+            updated_at=now,
+        )
+        mock_state_repo._entity_sync_status[
+            (sample_client_id, generic_integration.id, "bill")
+        ] = entity_status
+
+        settings = UserIntegrationSettings(
+            sync_rules=[
+                SyncRule(entity_type="bill", direction=SyncDirection.OUTBOUND, enabled=True),
+            ],
+        )
+        await mock_integration_repo.upsert_user_settings(
+            sample_client_id, generic_integration.id, settings,
+        )
+
+        # Pending record for outbound sync
+        pending = IntegrationStateRecord(
+            id=uuid4(),
+            client_id=sample_client_id,
+            integration_id=generic_integration.id,
+            entity_type="bill",
+            internal_record_id="int-bill-1",
+            external_record_id=None,
+            sync_status=RecordSyncStatus.PENDING,
+            sync_direction=SyncDirection.OUTBOUND,
+            metadata={"data": {"name": "Test bill"}},
+            created_at=now,
+            updated_at=now,
+        )
+        mock_state_repo._records[(sample_client_id, pending.id)] = pending
+
+        adapter = mock_adapter_factory.get_adapter(
+            generic_integration, "mock_token", "ext-123",
+        )
+
+        job = SyncJob(
+            id=uuid4(),
+            client_id=sample_client_id,
+            integration_id=generic_integration.id,
+            job_type=SyncJobType.FULL_SYNC,
+            status=SyncJobStatus.PENDING,
+            triggered_by=SyncJobTrigger.USER,
+            created_at=now,
+            updated_at=now,
+        )
+        await mock_job_repo.create_job(job)
+
+        await orchestrator.execute_sync_job(job)
+
+        updated_status = mock_state_repo._entity_sync_status.get(
+            (sample_client_id, generic_integration.id, "bill")
+        )
+        assert updated_status.last_inbound_sync_at == qbo_ts
+
+    async def test_incremental_inbound_reads_inbound_cursor(
+        self,
+        orchestrator,
+        mock_integration_repo,
+        mock_job_repo,
+        mock_adapter_factory,
+        mock_state_repo,
+        sample_client_id,
+        generic_integration,
+        generic_connected,
+    ):
+        """Incremental inbound sync uses last_inbound_sync_at (not last_successful_sync_at)."""
+        from app.domain.entities import EntitySyncStatus
+
+        inbound_ts = datetime(2026, 1, 10, 8, 0, 0, tzinfo=timezone.utc)
+        outbound_ts = datetime(2026, 1, 12, 14, 0, 0, tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+
+        entity_status = EntitySyncStatus(
+            id=uuid4(),
+            client_id=sample_client_id,
+            integration_id=generic_integration.id,
+            entity_type="bill",
+            last_successful_sync_at=outbound_ts,
+            last_inbound_sync_at=inbound_ts,
+            last_sync_job_id=uuid4(),
+            records_synced_count=5,
+            created_at=now,
+            updated_at=now,
+        )
+        mock_state_repo._entity_sync_status[
+            (sample_client_id, generic_integration.id, "bill")
+        ] = entity_status
+
+        settings = UserIntegrationSettings(
+            sync_rules=[
+                SyncRule(entity_type="bill", direction=SyncDirection.INBOUND, enabled=True),
+            ],
+        )
+        await mock_integration_repo.upsert_user_settings(
+            sample_client_id, generic_integration.id, settings,
+        )
+
+        adapter = mock_adapter_factory.get_adapter(
+            generic_integration, "mock_token", "ext-123",
+        )
+
+        job = SyncJob(
+            id=uuid4(),
+            client_id=sample_client_id,
+            integration_id=generic_integration.id,
+            job_type=SyncJobType.INCREMENTAL,
+            status=SyncJobStatus.PENDING,
+            triggered_by=SyncJobTrigger.USER,
+            created_at=now,
+            updated_at=now,
+        )
+        await mock_job_repo.create_job(job)
+
+        await orchestrator.execute_sync_job(job)
+
+        assert len(adapter.fetch_records_calls) > 0
+        _, since_arg, _, _ = adapter.fetch_records_calls[0]
+        assert since_arg == inbound_ts
+
+    async def test_fallback_for_pre_migration_rows(
+        self,
+        orchestrator,
+        mock_integration_repo,
+        mock_job_repo,
+        mock_adapter_factory,
+        mock_state_repo,
+        sample_client_id,
+        generic_integration,
+        generic_connected,
+    ):
+        """When last_inbound_sync_at is None, falls back to last_successful_sync_at."""
+        from app.domain.entities import EntitySyncStatus
+
+        outbound_ts = datetime(2026, 1, 12, 14, 0, 0, tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+
+        entity_status = EntitySyncStatus(
+            id=uuid4(),
+            client_id=sample_client_id,
+            integration_id=generic_integration.id,
+            entity_type="bill",
+            last_successful_sync_at=outbound_ts,
+            last_inbound_sync_at=None,
+            last_sync_job_id=uuid4(),
+            records_synced_count=5,
+            created_at=now,
+            updated_at=now,
+        )
+        mock_state_repo._entity_sync_status[
+            (sample_client_id, generic_integration.id, "bill")
+        ] = entity_status
+
+        settings = UserIntegrationSettings(
+            sync_rules=[
+                SyncRule(entity_type="bill", direction=SyncDirection.INBOUND, enabled=True),
+            ],
+        )
+        await mock_integration_repo.upsert_user_settings(
+            sample_client_id, generic_integration.id, settings,
+        )
+
+        adapter = mock_adapter_factory.get_adapter(
+            generic_integration, "mock_token", "ext-123",
+        )
+
+        job = SyncJob(
+            id=uuid4(),
+            client_id=sample_client_id,
+            integration_id=generic_integration.id,
+            job_type=SyncJobType.INCREMENTAL,
+            status=SyncJobStatus.PENDING,
+            triggered_by=SyncJobTrigger.USER,
+            created_at=now,
+            updated_at=now,
+        )
+        await mock_job_repo.create_job(job)
+
+        await orchestrator.execute_sync_job(job)
+
+        assert len(adapter.fetch_records_calls) > 0
+        _, since_arg, _, _ = adapter.fetch_records_calls[0]
+        assert since_arg == outbound_ts
+
+    async def test_no_records_does_not_advance_cursor(
+        self,
+        orchestrator,
+        mock_integration_repo,
+        mock_job_repo,
+        mock_adapter_factory,
+        mock_state_repo,
+        sample_client_id,
+        generic_integration,
+        generic_connected,
+    ):
+        """When adapter returns 0 records, last_inbound_sync_at stays unchanged."""
+        from app.domain.entities import EntitySyncStatus
+
+        original_inbound_ts = datetime(2026, 1, 10, 8, 0, 0, tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+
+        entity_status = EntitySyncStatus(
+            id=uuid4(),
+            client_id=sample_client_id,
+            integration_id=generic_integration.id,
+            entity_type="bill",
+            last_successful_sync_at=now,
+            last_inbound_sync_at=original_inbound_ts,
+            last_sync_job_id=uuid4(),
+            records_synced_count=5,
+            created_at=now,
+            updated_at=now,
+        )
+        mock_state_repo._entity_sync_status[
+            (sample_client_id, generic_integration.id, "bill")
+        ] = entity_status
+
+        await self._run_inbound_job(
+            mock_integration_repo, mock_job_repo, mock_adapter_factory,
+            mock_state_repo, orchestrator, sample_client_id,
+            generic_integration, seed_records=False,
+            preset_entity_status=entity_status,
+        )
+
+        updated = mock_state_repo._entity_sync_status.get(
+            (sample_client_id, generic_integration.id, "bill")
+        )
+        assert updated.last_inbound_sync_at == original_inbound_ts

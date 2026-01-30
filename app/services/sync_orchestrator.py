@@ -160,14 +160,21 @@ class SyncOrchestrator:
             direction = rule.direction
             record_ids = record_ids_by_entity.get(entity_type)
 
-            # Get last sync time for incremental sync
-            since = None
+            # Get last sync time for incremental sync — use direction-appropriate cursor
+            inbound_since = None
+            outbound_since = None
             if not full_sync:
                 entity_status = await self._state_repo.get_entity_sync_status(
                     job.client_id, job.integration_id, entity_type
                 )
-                if entity_status and entity_status.last_successful_sync_at:
-                    since = entity_status.last_successful_sync_at
+                if entity_status:
+                    # Inbound: prefer QBO-clock cursor, fall back to our clock for pre-migration rows
+                    inbound_since = (
+                        entity_status.last_inbound_sync_at
+                        or entity_status.last_successful_sync_at
+                    )
+                    # Outbound: always our clock
+                    outbound_since = entity_status.last_successful_sync_at
 
             try:
                 result: dict[str, Any] = {}
@@ -178,7 +185,7 @@ class SyncOrchestrator:
                         entity_type=entity_type,
                         adapter=adapter,
                         state_repo=self._state_repo,
-                        since=since,
+                        since=inbound_since,
                         record_ids=record_ids,
                     )
 
@@ -188,7 +195,7 @@ class SyncOrchestrator:
                         entity_type=entity_type,
                         adapter=adapter,
                         state_repo=self._state_repo,
-                        since=since,
+                        since=outbound_since,
                         record_ids=record_ids,
                     )
                     if result:
@@ -208,6 +215,7 @@ class SyncOrchestrator:
                     await self._state_repo.update_entity_sync_status(
                         job.client_id, job.integration_id, entity_type,
                         job.id, total_synced,
+                        last_inbound_sync_at=result.get("max_external_updated_at"),
                     )
 
             except Exception as e:
@@ -656,18 +664,26 @@ class SyncOrchestrator:
             "records_failed": 0,
         }
 
-        # Get last sync time for incremental sync
-        since = None
+        # Get last sync time for incremental sync — use direction-appropriate cursor
+        inbound_since = None
+        outbound_since = None
         if not full_sync:
             entity_status = await self._state_repo.get_entity_sync_status(
                 job.client_id, job.integration_id, entity_type
             )
-            if entity_status and entity_status.last_successful_sync_at:
-                since = entity_status.last_successful_sync_at
+            if entity_status:
+                # Inbound: prefer QBO-clock cursor, fall back to our clock for pre-migration rows
+                inbound_since = (
+                    entity_status.last_inbound_sync_at
+                    or entity_status.last_successful_sync_at
+                )
+                # Outbound: always our clock
+                outbound_since = entity_status.last_successful_sync_at
 
         # Inbound sync: fetch from external, update internal
         # Process in batches to prevent memory exhaustion with large datasets
         BATCH_SIZE = 1000  # Max records to hold in memory before flushing
+        max_external_updated_at: datetime | None = None
 
         if direction in (SyncDirection.INBOUND, SyncDirection.BIDIRECTIONAL):
             page_token = None
@@ -716,11 +732,18 @@ class SyncOrchestrator:
 
             while True:
                 records, next_token = await adapter.fetch_records(
-                    entity_type, since=since, page_token=page_token
+                    entity_type, since=inbound_since, page_token=page_token
                 )
                 result["records_fetched"] += len(records)
 
                 for record in records:
+                    # Track max external updated_at for inbound cursor
+                    if record.updated_at and (
+                        max_external_updated_at is None
+                        or record.updated_at > max_external_updated_at
+                    ):
+                        max_external_updated_at = record.updated_at
+
                     try:
                         # Check if record exists by external ID
                         state = await self._state_repo.get_record_by_external_id(
@@ -904,7 +927,8 @@ class SyncOrchestrator:
         total_synced = result["records_created"] + result["records_updated"]
         if total_synced > 0:
             await self._state_repo.update_entity_sync_status(
-                job.client_id, job.integration_id, entity_type, job.id, total_synced
+                job.client_id, job.integration_id, entity_type, job.id, total_synced,
+                last_inbound_sync_at=max_external_updated_at,
             )
 
         return result

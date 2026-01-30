@@ -68,9 +68,8 @@ class OAuthConfig(BaseModel):
     authorization_url: str
     token_url: str
     scopes: list[str] = Field(default_factory=list)
-    client_id_env_var: str | None = None  # Name of env var holding client_id
-    client_secret_env_var: str | None = None  # Name of env var holding client_secret
-    client_id: str | None = None  # Actual client_id (loaded from env var)
+    client_id: str | None = None
+    client_secret: str | None = None
 
 
 class AvailableIntegration(BaseEntity):
@@ -128,6 +127,7 @@ class EntitySyncStatus(BaseEntity):
     integration_id: UUID
     entity_type: str  # NOT an enum - configurable string
     last_successful_sync_at: datetime | None = None
+    last_inbound_sync_at: datetime | None = None
     last_sync_job_id: UUID | None = None
     records_synced_count: int = 0
 

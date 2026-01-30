@@ -289,6 +289,9 @@ class EntitySyncStatusModel(Base, TimestampMixin):
     last_successful_sync_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    last_inbound_sync_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     last_sync_job_id: Mapped[UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("sync_jobs.id"),

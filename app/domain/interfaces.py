@@ -11,6 +11,7 @@ from app.domain.entities import (
     ExternalRecord,
     IntegrationHistoryRecord,
     IntegrationStateRecord,
+    OAuthConfig,
     OAuthTokens,
     QueueMessage,
     SyncJob,
@@ -302,6 +303,7 @@ class IntegrationStateRepositoryInterface(ABC):
         entity_type: str,
         job_id: UUID,
         records_count: int,
+        last_inbound_sync_at: datetime | None = None,
     ) -> EntitySyncStatus:
         """Update the entity sync status after a sync."""
         pass
@@ -554,12 +556,12 @@ class IntegrationAdapterInterface(ABC):
     """
 
     @abstractmethod
-    async def authenticate(self, auth_code: str, redirect_uri: str) -> OAuthTokens:
+    async def authenticate(self, auth_code: str, redirect_uri: str, oauth_config: OAuthConfig | None = None) -> OAuthTokens:
         """Exchange auth code for tokens."""
         pass
 
     @abstractmethod
-    async def refresh_token(self, refresh_token: str) -> OAuthTokens:
+    async def refresh_token(self, refresh_token: str, oauth_config: OAuthConfig | None = None) -> OAuthTokens:
         """Refresh expired access token."""
         pass
 

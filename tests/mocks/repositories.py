@@ -494,6 +494,7 @@ class MockIntegrationStateRepository(IntegrationStateRepositoryInterface):
         entity_type: str,
         job_id: UUID,
         records_count: int,
+        last_inbound_sync_at: datetime | None = None,
     ) -> EntitySyncStatus:
         key = (client_id, integration_id, entity_type)
         now = datetime.now(timezone.utc)
@@ -503,6 +504,8 @@ class MockIntegrationStateRepository(IntegrationStateRepositoryInterface):
             existing.last_successful_sync_at = now
             existing.last_sync_job_id = job_id
             existing.records_synced_count += records_count
+            if last_inbound_sync_at is not None:
+                existing.last_inbound_sync_at = last_inbound_sync_at
             existing.updated_at = now
             return existing
         else:
@@ -514,6 +517,7 @@ class MockIntegrationStateRepository(IntegrationStateRepositoryInterface):
                 last_successful_sync_at=now,
                 last_sync_job_id=job_id,
                 records_synced_count=records_count,
+                last_inbound_sync_at=last_inbound_sync_at,
                 created_at=now,
                 updated_at=now,
             )

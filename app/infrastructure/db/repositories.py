@@ -198,6 +198,7 @@ def _model_to_entity_sync_status(model: EntitySyncStatusModel) -> EntitySyncStat
         integration_id=model.integration_id,
         entity_type=model.entity_type,
         last_successful_sync_at=model.last_successful_sync_at,
+        last_inbound_sync_at=model.last_inbound_sync_at,
         last_sync_job_id=model.last_sync_job_id,
         records_synced_count=model.records_synced_count,
         created_at=model.created_at,
@@ -959,6 +960,7 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
         entity_type: str,
         job_id: UUID,
         records_count: int,
+        last_inbound_sync_at: datetime | None = None,
     ) -> EntitySyncStatus:
         async with get_session_context() as session:
             result = await session.execute(
@@ -977,6 +979,8 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
                 model.last_successful_sync_at = now
                 model.last_sync_job_id = job_id
                 model.records_synced_count += records_count
+                if last_inbound_sync_at is not None:
+                    model.last_inbound_sync_at = last_inbound_sync_at
                 await session.flush()  # Flush updates before refresh
             else:
                 model = EntitySyncStatusModel(
@@ -986,6 +990,7 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
                     last_successful_sync_at=now,
                     last_sync_job_id=job_id,
                     records_synced_count=records_count,
+                    last_inbound_sync_at=last_inbound_sync_at,
                 )
                 session.add(model)
                 await session.flush()  # Flush insert before refresh

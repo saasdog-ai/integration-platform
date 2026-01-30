@@ -102,6 +102,7 @@ class QuickBooksSyncStrategy:
         # Paginated fetch from QBO
         page_token = None
         records_to_upsert: list[IntegrationStateRecord] = []
+        max_external_updated_at: datetime | None = None
         BATCH_SIZE = 200
 
         while True:
@@ -114,6 +115,12 @@ class QuickBooksSyncStrategy:
             result["records_fetched"] += len(records)
 
             for record in records:
+                if record.updated_at and (
+                    max_external_updated_at is None
+                    or record.updated_at > max_external_updated_at
+                ):
+                    max_external_updated_at = record.updated_at
+
                 try:
                     state_record = await self._process_inbound_record(
                         job=job,
@@ -159,12 +166,14 @@ class QuickBooksSyncStrategy:
             result["records_updated"] += updated
             result["records_failed"] += failed
 
+        result["max_external_updated_at"] = max_external_updated_at
+
         logger.info(
             f"Inbound sync complete for {display}",
             extra={
                 "job_id": str(job.id),
                 "entity_type": entity_type,
-                **result,
+                **{k: v for k, v in result.items() if k != "max_external_updated_at"},
             },
         )
         return result
