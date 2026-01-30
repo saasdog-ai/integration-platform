@@ -120,6 +120,9 @@ class SyncJobRunner:
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, lambda: asyncio.create_task(self.stop()))
 
+        # Recover any orphaned pending jobs (lost from in-memory queue on restart)
+        await self._recover_pending_jobs()
+
         # Main polling loop
         while self._running:
             try:
@@ -246,6 +249,46 @@ class SyncJobRunner:
         except Exception as e:
             logger.error(
                 "Failed to cleanup old history",
+                extra={"error": str(e)},
+            )
+
+    async def _recover_pending_jobs(self) -> None:
+        """Re-enqueue orphaned pending jobs whose queue messages were lost.
+
+        This handles the case where the in-memory queue loses messages on
+        server restart while jobs remain in PENDING status in the database.
+        """
+        try:
+            pending_jobs = await self._job_repo.get_pending_jobs(stale_seconds=30)
+            if not pending_jobs:
+                return
+
+            logger.info(
+                "Recovering orphaned pending jobs",
+                extra={"count": len(pending_jobs)},
+            )
+            for job in pending_jobs:
+                try:
+                    message = SyncJobMessage(
+                        job_id=job.id,
+                        client_id=job.client_id,
+                        integration_id=job.integration_id,
+                        job_type=job.job_type,
+                        entity_types=job.job_params.get("entity_types") if job.job_params else None,
+                    )
+                    await self._queue.send_message(message.model_dump(mode="json"))
+                    logger.info(
+                        "Re-enqueued pending job",
+                        extra={"job_id": str(job.id)},
+                    )
+                except Exception as e:
+                    logger.error(
+                        "Failed to re-enqueue pending job",
+                        extra={"job_id": str(job.id), "error": str(e)},
+                    )
+        except Exception as e:
+            logger.error(
+                "Failed to recover pending jobs",
                 extra={"error": str(e)},
             )
 

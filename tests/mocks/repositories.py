@@ -273,6 +273,22 @@ class MockSyncJobRepository(SyncJobRepositoryInterface):
         self._jobs[job.id] = job
         return job, None
 
+    async def get_pending_jobs(
+        self,
+        stale_seconds: int = 30,
+    ) -> list[SyncJob]:
+        """Find jobs stuck in PENDING status longer than stale_seconds."""
+        from datetime import timedelta
+
+        cutoff_time = datetime.now(timezone.utc) - timedelta(seconds=stale_seconds)
+
+        return [
+            j
+            for j in self._jobs.values()
+            if j.status == SyncJobStatus.PENDING
+            and j.created_at < cutoff_time
+        ]
+
     async def get_stuck_jobs(
         self,
         stuck_threshold_minutes: int = 60,

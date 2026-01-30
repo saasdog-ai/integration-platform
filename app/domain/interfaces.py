@@ -172,6 +172,18 @@ class SyncJobRepositoryInterface(ABC):
         pass
 
     @abstractmethod
+    async def get_pending_jobs(
+        self,
+        stale_seconds: int = 30,
+    ) -> list[SyncJob]:
+        """Find jobs stuck in PENDING status longer than stale_seconds.
+
+        Used on startup to recover orphaned jobs whose queue messages
+        were lost (e.g. in-memory queue after a server restart).
+        """
+        pass
+
+    @abstractmethod
     async def get_stuck_jobs(
         self,
         stuck_threshold_minutes: int = 60,

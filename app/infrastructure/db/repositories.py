@@ -649,6 +649,29 @@ class SyncJobRepository(SyncJobRepositoryInterface):
                 model = result.scalar_one()
                 return _model_to_sync_job(model), None
 
+    async def get_pending_jobs(
+        self,
+        stale_seconds: int = 30,
+    ) -> list[SyncJob]:
+        """Find jobs stuck in PENDING status longer than stale_seconds."""
+        from datetime import timedelta
+
+        async with get_session_context() as session:
+            cutoff_time = datetime.now(timezone.utc) - timedelta(seconds=stale_seconds)
+
+            result = await session.execute(
+                select(SyncJobModel)
+                .options(selectinload(SyncJobModel.integration))
+                .where(
+                    and_(
+                        SyncJobModel.status == SyncJobStatus.PENDING.value,
+                        SyncJobModel.created_at < cutoff_time,
+                    )
+                )
+            )
+            models = result.scalars().all()
+            return [_model_to_sync_job(m) for m in models]
+
     async def get_stuck_jobs(
         self,
         stuck_threshold_minutes: int = 60,
