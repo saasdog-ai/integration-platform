@@ -32,6 +32,7 @@ from app.domain.enums import (
 from app.domain.interfaces import (
     AdapterFactoryInterface,
     EncryptionServiceInterface,
+    IntegrationAdapterInterface,
     IntegrationRepositoryInterface,
     IntegrationStateRepositoryInterface,
     MessageQueueInterface,
@@ -39,6 +40,25 @@ from app.domain.interfaces import (
 )
 
 logger = get_logger(__name__)
+
+# Strategy registry: integration name → strategy class
+_SYNC_STRATEGIES: dict[str, type] = {}
+
+
+def register_sync_strategy(integration_name: str, strategy_class: type) -> None:
+    """Register a sync strategy for an integration."""
+    _SYNC_STRATEGIES[integration_name] = strategy_class
+
+
+def _init_strategies() -> None:
+    """Register built-in strategies on first use."""
+    if _SYNC_STRATEGIES:
+        return
+    try:
+        from app.integrations.quickbooks.strategy import QuickBooksSyncStrategy
+        register_sync_strategy("QuickBooks Online", QuickBooksSyncStrategy)
+    except ImportError:
+        pass
 
 
 class SyncOrchestrator:
@@ -70,6 +90,7 @@ class SyncOrchestrator:
         self._queue = queue
         self._encryption = encryption_service
         self._adapter_factory = adapter_factory
+        _init_strategies()
 
     async def _write_history_entries(
         self, records: list[IntegrationStateRecord], job_id: UUID
@@ -106,6 +127,101 @@ class SyncOrchestrator:
                     "error": str(e),
                 },
             )
+
+    async def _execute_with_strategy(
+        self,
+        strategy_class: type,
+        job: SyncJob,
+        enabled_rules: list[SyncRule],
+        adapter: IntegrationAdapterInterface,
+        record_ids_by_entity: dict[str, list[str]],
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        """Execute sync using an integration-specific strategy.
+
+        Returns (entities_processed, errors).
+        """
+        strategy = strategy_class()
+        full_sync = job.job_type == SyncJobType.FULL_SYNC
+        entities_processed: dict[str, Any] = {}
+        errors: list[dict[str, Any]] = []
+
+        # Determine primary direction from rules for ordering
+        directions = {r.direction for r in enabled_rules}
+        if SyncDirection.INBOUND in directions or SyncDirection.BIDIRECTIONAL in directions:
+            primary_direction = SyncDirection.INBOUND
+        else:
+            primary_direction = SyncDirection.OUTBOUND
+
+        ordered_rules = strategy.get_ordered_rules(enabled_rules, primary_direction)
+
+        for rule in ordered_rules:
+            entity_type = rule.entity_type
+            direction = rule.direction
+            record_ids = record_ids_by_entity.get(entity_type)
+
+            # Get last sync time for incremental sync
+            since = None
+            if not full_sync:
+                entity_status = await self._state_repo.get_entity_sync_status(
+                    job.client_id, job.integration_id, entity_type
+                )
+                if entity_status and entity_status.last_successful_sync_at:
+                    since = entity_status.last_successful_sync_at
+
+            try:
+                result: dict[str, Any] = {}
+
+                if direction in (SyncDirection.INBOUND, SyncDirection.BIDIRECTIONAL):
+                    result = await strategy.sync_entity_inbound(
+                        job=job,
+                        entity_type=entity_type,
+                        adapter=adapter,
+                        state_repo=self._state_repo,
+                        since=since,
+                        record_ids=record_ids,
+                    )
+
+                if direction in (SyncDirection.OUTBOUND, SyncDirection.BIDIRECTIONAL):
+                    outbound_result = await strategy.sync_entity_outbound(
+                        job=job,
+                        entity_type=entity_type,
+                        adapter=adapter,
+                        state_repo=self._state_repo,
+                        since=since,
+                        record_ids=record_ids,
+                    )
+                    if result:
+                        # Merge bidirectional results
+                        result["direction"] = "bidirectional"
+                        for key in ("records_fetched", "records_created",
+                                    "records_updated", "records_failed"):
+                            result[key] = result.get(key, 0) + outbound_result.get(key, 0)
+                    else:
+                        result = outbound_result
+
+                entities_processed[entity_type] = result
+
+                # Update entity sync status
+                total_synced = result.get("records_created", 0) + result.get("records_updated", 0)
+                if total_synced > 0:
+                    await self._state_repo.update_entity_sync_status(
+                        job.client_id, job.integration_id, entity_type,
+                        job.id, total_synced,
+                    )
+
+            except Exception as e:
+                logger.error(
+                    "Strategy entity sync failed",
+                    extra={
+                        "job_id": str(job.id),
+                        "entity_type": entity_type,
+                        "strategy": strategy_class.__name__,
+                        "error": str(e),
+                    },
+                )
+                errors.append({"entity_type": entity_type, "error": str(e)})
+
+        return entities_processed, errors
 
     async def trigger_sync(
         self,
@@ -239,6 +355,33 @@ class SyncOrchestrator:
 
         return job
 
+    @staticmethod
+    def _resolve_requested_entity_types(
+        job_params: dict[str, Any] | None,
+    ) -> set[str] | None:
+        """Resolve which entity types were requested in job params.
+
+        Returns a set of entity type names to filter on, or None if no
+        filtering was requested (run all enabled rules).
+
+        Priority:
+            1. entity_requests (with optional record_ids) -> extract entity types
+            2. entity_types -> use directly
+            3. Neither -> None (no filtering)
+        """
+        if not job_params:
+            return None
+
+        entity_requests = job_params.get("entity_requests")
+        if entity_requests:
+            return {req["entity_type"] for req in entity_requests}
+
+        entity_types = job_params.get("entity_types")
+        if entity_types:
+            return set(entity_types)
+
+        return None
+
     async def execute_sync_job(self, job: SyncJob) -> SyncJob:
         """
         Execute a sync job (called by job runner).
@@ -265,6 +408,19 @@ class SyncOrchestrator:
             enabled_rules = [r for r in settings.sync_rules if r.enabled]
             if not enabled_rules:
                 raise SyncError("No sync rules are enabled")
+
+            # Filter enabled rules by requested entity types (from job_params)
+            requested_entity_types = self._resolve_requested_entity_types(job.job_params)
+            if requested_entity_types is not None:
+                enabled_rules = [
+                    r for r in enabled_rules
+                    if r.entity_type in requested_entity_types
+                ]
+                if not enabled_rules:
+                    raise SyncError(
+                        f"Requested entity types are not enabled in sync settings: "
+                        f"{', '.join(sorted(requested_entity_types))}",
+                    )
 
             # Get credentials and create adapter
             user_integration = await self._integration_repo.get_user_integration(
@@ -304,28 +460,44 @@ class SyncOrchestrator:
                 user_integration.external_account_id if user_integration else None,
             )
 
+            # Check for integration-specific sync strategy
+            strategy_class = _SYNC_STRATEGIES.get(integration.name) if integration else None
+
+            # Parse entity_requests from job_params for record-level filtering
+            record_ids_by_entity: dict[str, list[str]] = {}
+            if job.job_params and job.job_params.get("entity_requests"):
+                for req in job.job_params["entity_requests"]:
+                    if req.get("record_ids"):
+                        record_ids_by_entity[req["entity_type"]] = req["record_ids"]
+
             # Process each enabled entity rule
             entities_processed: dict[str, Any] = {}
             errors: list[dict[str, Any]] = []
 
-            for rule in enabled_rules:
-                try:
-                    result = await self._sync_entity(
-                        job, rule, adapter, job.job_type == SyncJobType.FULL_SYNC
-                    )
-                    entities_processed[rule.entity_type] = result
-                except Exception as e:
-                    logger.error(
-                        "Entity sync failed",
-                        extra={
-                            "job_id": str(job.id),
-                            "entity_type": rule.entity_type,
-                            "error": str(e),
-                        },
-                    )
-                    errors.append(
-                        {"entity_type": rule.entity_type, "error": str(e)}
-                    )
+            if strategy_class:
+                entities_processed, errors = await self._execute_with_strategy(
+                    strategy_class, job, enabled_rules, adapter,
+                    record_ids_by_entity,
+                )
+            else:
+                for rule in enabled_rules:
+                    try:
+                        result = await self._sync_entity(
+                            job, rule, adapter, job.job_type == SyncJobType.FULL_SYNC
+                        )
+                        entities_processed[rule.entity_type] = result
+                    except Exception as e:
+                        logger.error(
+                            "Entity sync failed",
+                            extra={
+                                "job_id": str(job.id),
+                                "entity_type": rule.entity_type,
+                                "error": str(e),
+                            },
+                        )
+                        errors.append(
+                            {"entity_type": rule.entity_type, "error": str(e)}
+                        )
 
             # Update job status
             if errors and len(errors) == len(enabled_rules):

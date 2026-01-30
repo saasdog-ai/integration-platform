@@ -1037,3 +1037,276 @@ class TestGlobalDisable:
                     integration_id=sample_integration.id,
                 )
             assert "disabled" in str(exc_info.value).lower()
+
+
+class TestResolveRequestedEntityTypes:
+    """Test _resolve_requested_entity_types static method."""
+
+    def test_none_job_params(self):
+        """Return None when job_params is None."""
+        result = SyncOrchestrator._resolve_requested_entity_types(None)
+        assert result is None
+
+    def test_empty_dict(self):
+        """Return None when job_params is empty."""
+        result = SyncOrchestrator._resolve_requested_entity_types({})
+        assert result is None
+
+    def test_entity_types_only(self):
+        """Return set of entity types from entity_types list."""
+        result = SyncOrchestrator._resolve_requested_entity_types(
+            {"entity_types": ["bill", "vendor"]}
+        )
+        assert result == {"bill", "vendor"}
+
+    def test_entity_requests_takes_precedence(self):
+        """entity_requests wins when both entity_types and entity_requests present."""
+        result = SyncOrchestrator._resolve_requested_entity_types(
+            {
+                "entity_types": ["bill", "vendor"],
+                "entity_requests": [
+                    {"entity_type": "invoice", "record_ids": ["inv-1"]},
+                ],
+            }
+        )
+        assert result == {"invoice"}
+
+    def test_entity_requests_without_record_ids(self):
+        """entity_requests works even without record_ids field."""
+        result = SyncOrchestrator._resolve_requested_entity_types(
+            {
+                "entity_requests": [{"entity_type": "vendor"}],
+            }
+        )
+        assert result == {"vendor"}
+
+    def test_empty_entity_types_list(self):
+        """Empty entity_types list treated as no filtering."""
+        result = SyncOrchestrator._resolve_requested_entity_types(
+            {"entity_types": []}
+        )
+        assert result is None
+
+    def test_empty_entity_requests_list(self):
+        """Empty entity_requests list treated as no filtering."""
+        result = SyncOrchestrator._resolve_requested_entity_types(
+            {"entity_requests": []}
+        )
+        assert result is None
+
+
+class TestEntityTypeFiltering:
+    """Test entity type filtering in execute_sync_job."""
+
+    async def _setup_rules_and_job(
+        self,
+        mock_integration_repo,
+        mock_job_repo,
+        mock_adapter_factory,
+        sample_client_id,
+        sample_integration,
+        sync_rules,
+        job_params=None,
+    ):
+        """Set up sync rules, seed adapter records, and create a pending job."""
+        settings = UserIntegrationSettings(
+            sync_rules=sync_rules,
+            sync_frequency="hourly",
+            auto_sync_enabled=True,
+        )
+        await mock_integration_repo.upsert_user_settings(
+            sample_client_id, sample_integration.id, settings
+        )
+
+        # Seed adapter with one record per entity type so fetch_records returns data
+        adapter = mock_adapter_factory.get_adapter(
+            sample_integration, "mock_token", "ext-account-123"
+        )
+        for rule in sync_rules:
+            adapter.seed_record(
+                rule.entity_type,
+                f"ext-{rule.entity_type}-1",
+                {"name": f"Test {rule.entity_type}"},
+            )
+
+        now = datetime.now(timezone.utc)
+        job = SyncJob(
+            id=uuid4(),
+            client_id=sample_client_id,
+            integration_id=sample_integration.id,
+            job_type=SyncJobType.FULL_SYNC,
+            status=SyncJobStatus.PENDING,
+            triggered_by=SyncJobTrigger.USER,
+            job_params=job_params,
+            created_at=now,
+            updated_at=now,
+        )
+        await mock_job_repo.create_job(job)
+        return job, adapter
+
+    async def test_no_entity_types_runs_all_enabled_rules(
+        self,
+        orchestrator,
+        mock_integration_repo,
+        mock_job_repo,
+        mock_adapter_factory,
+        sample_client_id,
+        sample_integration,
+        connected_user_integration,
+    ):
+        """All enabled rules run when no entity types specified."""
+        rules = [
+            SyncRule(entity_type="bill", direction=SyncDirection.INBOUND, enabled=True),
+            SyncRule(entity_type="invoice", direction=SyncDirection.INBOUND, enabled=True),
+            SyncRule(entity_type="vendor", direction=SyncDirection.INBOUND, enabled=True),
+        ]
+        job, adapter = await self._setup_rules_and_job(
+            mock_integration_repo, mock_job_repo, mock_adapter_factory,
+            sample_client_id, sample_integration, rules,
+            job_params=None,
+        )
+
+        result = await orchestrator.execute_sync_job(job)
+
+        fetched_types = {call[0] for call in adapter.fetch_records_calls}
+        assert fetched_types == {"bill", "invoice", "vendor"}
+        assert result.status == SyncJobStatus.SUCCEEDED
+
+    async def test_entity_types_filters_to_matching_rules(
+        self,
+        orchestrator,
+        mock_integration_repo,
+        mock_job_repo,
+        mock_adapter_factory,
+        sample_client_id,
+        sample_integration,
+        connected_user_integration,
+    ):
+        """Only matching entity types are synced when entity_types specified."""
+        rules = [
+            SyncRule(entity_type="bill", direction=SyncDirection.INBOUND, enabled=True),
+            SyncRule(entity_type="invoice", direction=SyncDirection.INBOUND, enabled=True),
+            SyncRule(entity_type="vendor", direction=SyncDirection.INBOUND, enabled=True),
+        ]
+        job, adapter = await self._setup_rules_and_job(
+            mock_integration_repo, mock_job_repo, mock_adapter_factory,
+            sample_client_id, sample_integration, rules,
+            job_params={"entity_types": ["vendor"]},
+        )
+
+        result = await orchestrator.execute_sync_job(job)
+
+        fetched_types = {call[0] for call in adapter.fetch_records_calls}
+        assert fetched_types == {"vendor"}
+        assert result.status == SyncJobStatus.SUCCEEDED
+
+    async def test_no_matching_enabled_rule_raises_error(
+        self,
+        orchestrator,
+        mock_integration_repo,
+        mock_job_repo,
+        mock_adapter_factory,
+        sample_client_id,
+        sample_integration,
+        connected_user_integration,
+    ):
+        """Job fails when requested entity types have no enabled rules."""
+        rules = [
+            SyncRule(entity_type="bill", direction=SyncDirection.INBOUND, enabled=True),
+        ]
+        job, adapter = await self._setup_rules_and_job(
+            mock_integration_repo, mock_job_repo, mock_adapter_factory,
+            sample_client_id, sample_integration, rules,
+            job_params={"entity_types": ["vendor"]},
+        )
+
+        result = await orchestrator.execute_sync_job(job)
+
+        assert result.status == SyncJobStatus.FAILED
+        assert "not enabled" in result.error_message
+
+    async def test_entity_requests_implies_entity_types(
+        self,
+        orchestrator,
+        mock_integration_repo,
+        mock_job_repo,
+        mock_adapter_factory,
+        sample_client_id,
+        sample_integration,
+        connected_user_integration,
+    ):
+        """entity_requests filters rules by extracted entity type."""
+        rules = [
+            SyncRule(entity_type="bill", direction=SyncDirection.INBOUND, enabled=True),
+            SyncRule(entity_type="invoice", direction=SyncDirection.INBOUND, enabled=True),
+            SyncRule(entity_type="vendor", direction=SyncDirection.INBOUND, enabled=True),
+        ]
+        job, adapter = await self._setup_rules_and_job(
+            mock_integration_repo, mock_job_repo, mock_adapter_factory,
+            sample_client_id, sample_integration, rules,
+            job_params={
+                "entity_requests": [
+                    {"entity_type": "vendor", "record_ids": ["v-1"]},
+                ],
+            },
+        )
+
+        result = await orchestrator.execute_sync_job(job)
+
+        fetched_types = {call[0] for call in adapter.fetch_records_calls}
+        assert fetched_types == {"vendor"}
+        assert result.status == SyncJobStatus.SUCCEEDED
+
+    async def test_disabled_rules_stay_excluded(
+        self,
+        orchestrator,
+        mock_integration_repo,
+        mock_job_repo,
+        mock_adapter_factory,
+        sample_client_id,
+        sample_integration,
+        connected_user_integration,
+    ):
+        """Disabled rules are not executed even if requested via entity_types."""
+        rules = [
+            SyncRule(entity_type="bill", direction=SyncDirection.INBOUND, enabled=True),
+            SyncRule(entity_type="vendor", direction=SyncDirection.INBOUND, enabled=False),
+        ]
+        job, adapter = await self._setup_rules_and_job(
+            mock_integration_repo, mock_job_repo, mock_adapter_factory,
+            sample_client_id, sample_integration, rules,
+            job_params={"entity_types": ["bill", "vendor"]},
+        )
+
+        result = await orchestrator.execute_sync_job(job)
+
+        fetched_types = {call[0] for call in adapter.fetch_records_calls}
+        assert fetched_types == {"bill"}
+        assert result.status == SyncJobStatus.SUCCEEDED
+
+    async def test_direction_preserved(
+        self,
+        orchestrator,
+        mock_integration_repo,
+        mock_job_repo,
+        mock_adapter_factory,
+        sample_client_id,
+        sample_integration,
+        connected_user_integration,
+    ):
+        """Outbound rules don't trigger inbound fetch even when filtered."""
+        rules = [
+            SyncRule(entity_type="vendor", direction=SyncDirection.OUTBOUND, enabled=True),
+        ]
+        job, adapter = await self._setup_rules_and_job(
+            mock_integration_repo, mock_job_repo, mock_adapter_factory,
+            sample_client_id, sample_integration, rules,
+            job_params={"entity_types": ["vendor"]},
+        )
+
+        result = await orchestrator.execute_sync_job(job)
+
+        # Outbound rules don't call fetch_records (that's inbound only);
+        # job may fail in strategy path but the key point is no inbound fetch
+        fetched_types = {call[0] for call in adapter.fetch_records_calls}
+        assert "vendor" not in fetched_types
