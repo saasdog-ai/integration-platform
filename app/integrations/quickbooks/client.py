@@ -239,7 +239,7 @@ class QuickBooksAdapter(IntegrationAdapterInterface):
 
         conditions: list[str] = []
         if since:
-            conditions.append(f"MetaData.LastUpdatedTime > '{since.strftime('%Y-%m-%dT%H:%M:%S%z')}'")
+            conditions.append(f"MetaData.LastUpdatedTime > '{since.isoformat()}'")
         if record_ids:
             id_list = ",".join(f"'{rid}'" for rid in record_ids)
             conditions.append(f"Id IN ({id_list})")
