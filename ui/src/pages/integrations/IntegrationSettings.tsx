@@ -248,11 +248,21 @@ export function IntegrationSettings() {
   const updateRule = useCallback((entityType: string, patch: Partial<SyncRule>) => {
     setLocalSettings((prev) => {
       if (!prev) return prev
+      const exists = prev.sync_rules.some((r) => r.entity_type === entityType)
+      if (exists) {
+        return {
+          ...prev,
+          sync_rules: prev.sync_rules.map((r) =>
+            r.entity_type === entityType ? { ...r, ...patch } : r
+          ),
+        }
+      }
       return {
         ...prev,
-        sync_rules: prev.sync_rules.map((r) =>
-          r.entity_type === entityType ? { ...r, ...patch } : r
-        ),
+        sync_rules: [
+          ...prev.sync_rules,
+          { entity_type: entityType, direction: 'inbound' as const, enabled: false, ...patch },
+        ],
       }
     })
   }, [])
