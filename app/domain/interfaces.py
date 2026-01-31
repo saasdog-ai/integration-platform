@@ -65,6 +65,11 @@ class IntegrationRepositoryInterface(ABC):
         pass
 
     @abstractmethod
+    async def get_all_user_integrations(self) -> list[UserIntegration]:
+        """Get all user integrations across all clients (admin use only)."""
+        pass
+
+    @abstractmethod
     async def create_user_integration(
         self, integration: UserIntegration
     ) -> UserIntegration:
@@ -104,6 +109,13 @@ class IntegrationRepositoryInterface(ABC):
         self, integration_id: UUID
     ) -> UserIntegrationSettings | None:
         """Get system default settings for an integration."""
+        pass
+
+    @abstractmethod
+    async def upsert_system_settings(
+        self, integration_id: UUID, settings: UserIntegrationSettings,
+    ) -> UserIntegrationSettings:
+        """Create or update system default settings for an integration."""
         pass
 
 
@@ -308,6 +320,13 @@ class IntegrationStateRepositoryInterface(ABC):
         pass
 
     @abstractmethod
+    async def list_entity_sync_statuses(
+        self, client_id: UUID, integration_id: UUID,
+    ) -> list[EntitySyncStatus]:
+        """Get all entity sync statuses for a client+integration."""
+        pass
+
+    @abstractmethod
     async def update_entity_sync_status(
         self,
         client_id: UUID,
@@ -326,10 +345,10 @@ class IntegrationStateRepositoryInterface(ABC):
         client_id: UUID,
         integration_id: UUID,
         entity_type: str,
-        reset_inbound_cursor: bool = True,
-        reset_sync_cursor: bool = True,
+        reset_inbound_sync_time: bool = True,
+        reset_last_sync_time: bool = True,
     ) -> EntitySyncStatus | None:
-        """Reset sync cursors for an entity type to allow full re-sync."""
+        """Reset last sync times for an entity type to allow full re-sync."""
         pass
 
     @abstractmethod

@@ -13,6 +13,9 @@ import type {
   SyncJobStatus,
   SyncRecordsResponse,
   RecordSyncStatus,
+  EntitySyncStatusListResponse,
+  ResetLastSyncTimeRequest,
+  EntitySyncStatusResetResponse,
 } from '@/types'
 import type { IntegrationsConfig } from '@/providers/ConfigProvider'
 
@@ -122,18 +125,18 @@ export function createApiClient(config: IntegrationsConfig) {
     async connectIntegration(
       integrationId: string,
       request: ConnectIntegrationRequest
-    ): Promise<UserIntegration> {
+    ): Promise<{ authorization_url: string }> {
       const response = await fetchWithTimeout(`${apiBaseUrl}/integrations/${integrationId}/connect`, {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify(request),
       })
-      return handleResponse<UserIntegration>(response)
+      return handleResponse<{ authorization_url: string }>(response)
     },
 
     async completeOAuthCallback(
       integrationId: string,
-      request: { code: string; redirect_uri: string }
+      request: { code: string; redirect_uri: string; state?: string; realm_id?: string }
     ): Promise<UserIntegration> {
       const response = await fetchWithTimeout(`${apiBaseUrl}/integrations/${integrationId}/callback`, {
         method: 'POST',
@@ -262,6 +265,93 @@ export function createApiClient(config: IntegrationsConfig) {
         headers: getAuthHeaders(),
       })
       return handleResponse<SyncRecordsResponse>(response)
+    },
+
+    // ========================
+    // System Default Settings
+    // ========================
+
+    async getSystemDefaultSettings(integrationId: string): Promise<UserIntegrationSettings> {
+      const response = await fetchWithTimeout(`${apiBaseUrl}/integrations/${integrationId}/settings/defaults`, {
+        headers: getAuthHeaders(),
+      })
+      return handleResponse<UserIntegrationSettings>(response)
+    },
+
+    async updateSystemDefaultSettings(
+      integrationId: string,
+      settings: UserIntegrationSettings
+    ): Promise<UserIntegrationSettings> {
+      const response = await fetchWithTimeout(`${apiBaseUrl}/integrations/${integrationId}/settings/defaults`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(settings),
+      })
+      return handleResponse<UserIntegrationSettings>(response)
+    },
+
+    // ========================
+    // Entity Sync Statuses
+    // ========================
+
+    async listEntitySyncStatuses(integrationId: string): Promise<EntitySyncStatusListResponse> {
+      const response = await fetchWithTimeout(`${apiBaseUrl}/integrations/${integrationId}/sync-status`, {
+        headers: getAuthHeaders(),
+      })
+      return handleResponse<EntitySyncStatusListResponse>(response)
+    },
+
+    async resetLastSyncTime(
+      integrationId: string,
+      entityType: string,
+      request: ResetLastSyncTimeRequest
+    ): Promise<EntitySyncStatusResetResponse> {
+      const response = await fetchWithTimeout(`${apiBaseUrl}/integrations/${integrationId}/sync-status/${entityType}/reset`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(request),
+      })
+      return handleResponse<EntitySyncStatusResetResponse>(response)
+    },
+
+    // ========================
+    // Admin - Cross-Client
+    // ========================
+
+    async adminGetAllIntegrations(): Promise<UserIntegration[]> {
+      const response = await fetchWithTimeout(`${apiBaseUrl}/admin/integrations`, {
+        headers: getAuthHeaders(),
+      })
+      const data = await handleResponse<{ integrations: UserIntegration[] }>(response)
+      return data.integrations
+    },
+
+    async adminListEntitySyncStatuses(
+      clientId: string,
+      integrationId: string
+    ): Promise<EntitySyncStatusListResponse> {
+      const response = await fetchWithTimeout(
+        `${apiBaseUrl}/admin/clients/${clientId}/integrations/${integrationId}/sync-status`,
+        { headers: getAuthHeaders() }
+      )
+      return handleResponse<EntitySyncStatusListResponse>(response)
+    },
+
+    async adminResetLastSyncTime(
+      clientId: string,
+      integrationId: string,
+      entityType: string,
+      request: ResetLastSyncTimeRequest
+    ): Promise<EntitySyncStatusResetResponse> {
+      const response = await fetchWithTimeout(
+        `${apiBaseUrl}/admin/clients/${clientId}/integrations/${integrationId}/sync-status/${entityType}/reset`,
+        {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify(request),
+        }
+      )
+      return handleResponse<EntitySyncStatusResetResponse>(response)
     },
 
     // ========================

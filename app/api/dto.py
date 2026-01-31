@@ -246,15 +246,36 @@ class SyncRecordsResponse(BaseResponse):
 
 
 # =============================================================================
-# Sync Cursor Reset DTOs
+# Entity Sync Status List DTOs
 # =============================================================================
 
 
-class ResetSyncCursorRequest(BaseModel):
-    """Request to reset sync cursors for an entity type."""
+class EntitySyncStatusItem(BaseResponse):
+    """Individual entity sync status."""
 
-    reset_inbound_cursor: bool = True
-    reset_sync_cursor: bool = True
+    entity_type: str
+    last_successful_sync_at: datetime | None
+    last_inbound_sync_at: datetime | None
+    last_sync_job_id: UUID | None
+    records_synced_count: int
+
+
+class EntitySyncStatusListResponse(BaseResponse):
+    """List of entity sync statuses."""
+
+    statuses: list[EntitySyncStatusItem]
+
+
+# =============================================================================
+# Last Sync Time Reset DTOs
+# =============================================================================
+
+
+class ResetLastSyncTimeRequest(BaseModel):
+    """Request to reset last sync times for an entity type."""
+
+    reset_inbound_sync_time: bool = True
+    reset_last_sync_time: bool = True
 
 
 class EntitySyncStatusResponse(BaseResponse):

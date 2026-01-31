@@ -9,10 +9,12 @@ from app.api.dto import (
     AvailableIntegrationsResponse,
     ConnectIntegrationRequest,
     ConnectIntegrationResponse,
+    EntitySyncStatusItem,
+    EntitySyncStatusListResponse,
     EntitySyncStatusResponse,
     OAuthCallbackRequest,
     OAuthConfigResponse,
-    ResetSyncCursorRequest,
+    ResetLastSyncTimeRequest,
     UserIntegrationResponse,
     UserIntegrationsResponse,
 )
@@ -262,20 +264,60 @@ async def disconnect_integration(
         )
 
 
+@router.get(
+    "/{integration_id}/sync-status",
+    response_model=EntitySyncStatusListResponse,
+    summary="List entity sync statuses",
+)
+async def list_entity_sync_statuses(
+    integration_id: UUID,
+    client_id: UUID = Depends(get_client_id),
+    service: IntegrationService = Depends(get_integration_service),
+    state_repo: IntegrationStateRepositoryInterface = Depends(get_state_repository),
+) -> EntitySyncStatusListResponse:
+    """List all entity sync statuses for an integration."""
+    # Verify the integration belongs to this client
+    try:
+        await service.get_user_integration(client_id, integration_id)
+    except NotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Integration not found: {integration_id}",
+        )
+
+    statuses = await state_repo.list_entity_sync_statuses(
+        client_id=client_id,
+        integration_id=integration_id,
+    )
+
+    return EntitySyncStatusListResponse(
+        statuses=[
+            EntitySyncStatusItem(
+                entity_type=s.entity_type,
+                last_successful_sync_at=s.last_successful_sync_at,
+                last_inbound_sync_at=s.last_inbound_sync_at,
+                last_sync_job_id=s.last_sync_job_id,
+                records_synced_count=s.records_synced_count,
+            )
+            for s in statuses
+        ]
+    )
+
+
 @router.post(
     "/{integration_id}/sync-status/{entity_type}/reset",
     response_model=EntitySyncStatusResponse,
-    summary="Reset entity sync cursor",
+    summary="Reset entity last sync time",
 )
-async def reset_entity_sync_cursor(
+async def reset_entity_last_sync_time(
     integration_id: UUID,
     entity_type: str,
-    request: ResetSyncCursorRequest,
+    request: ResetLastSyncTimeRequest,
     client_id: UUID = Depends(get_client_id),
     service: IntegrationService = Depends(get_integration_service),
     state_repo: IntegrationStateRepositoryInterface = Depends(get_state_repository),
 ) -> EntitySyncStatusResponse:
-    """Reset sync cursors for an entity type to allow full re-sync."""
+    """Reset last sync times for an entity type to allow full re-sync."""
     # Verify the integration belongs to this client
     try:
         await service.get_user_integration(client_id, integration_id)
@@ -289,8 +331,8 @@ async def reset_entity_sync_cursor(
         client_id=client_id,
         integration_id=integration_id,
         entity_type=entity_type,
-        reset_inbound_cursor=request.reset_inbound_cursor,
-        reset_sync_cursor=request.reset_sync_cursor,
+        reset_inbound_sync_time=request.reset_inbound_sync_time,
+        reset_last_sync_time=request.reset_last_sync_time,
     )
 
     if result is None:
@@ -300,10 +342,10 @@ async def reset_entity_sync_cursor(
         )
 
     parts = []
-    if request.reset_inbound_cursor:
-        parts.append("inbound cursor")
-    if request.reset_sync_cursor:
-        parts.append("sync cursor")
+    if request.reset_inbound_sync_time:
+        parts.append("inbound sync time")
+    if request.reset_last_sync_time:
+        parts.append("last sync time")
     message = f"Successfully reset {' and '.join(parts)} for {entity_type}"
 
     return EntitySyncStatusResponse(

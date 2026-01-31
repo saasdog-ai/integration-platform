@@ -301,6 +301,17 @@ class IntegrationRepository(IntegrationRepositoryInterface):
             models = result.scalars().all()
             return [_model_to_user_integration(m) for m in models]
 
+    async def get_all_user_integrations(self) -> list[UserIntegration]:
+        async with get_session_context() as session:
+            result = await session.execute(
+                select(UserIntegrationModel).options(
+                    selectinload(UserIntegrationModel.integration),
+                    selectinload(UserIntegrationModel.settings),
+                )
+            )
+            models = result.scalars().all()
+            return [_model_to_user_integration(m) for m in models]
+
     async def create_user_integration(
         self, integration: UserIntegration
     ) -> UserIntegration:
@@ -422,6 +433,32 @@ class IntegrationRepository(IntegrationRepositoryInterface):
             )
             model = result.scalar_one_or_none()
             return _settings_dict_to_entity(model.settings) if model else None
+
+    async def upsert_system_settings(
+        self,
+        integration_id: UUID,
+        settings: UserIntegrationSettings,
+    ) -> UserIntegrationSettings:
+        async with get_session_context() as session:
+            result = await session.execute(
+                select(SystemIntegrationSettingsModel).where(
+                    SystemIntegrationSettingsModel.integration_id == integration_id
+                )
+            )
+            model = result.scalar_one_or_none()
+            settings_dict = _settings_entity_to_dict(settings)
+
+            if model:
+                model.settings = settings_dict
+            else:
+                model = SystemIntegrationSettingsModel(
+                    integration_id=integration_id,
+                    settings=settings_dict,
+                )
+                session.add(model)
+
+            await session.flush()
+            return settings
 
 
 class SyncJobRepository(SyncJobRepositoryInterface):
@@ -957,6 +994,21 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
                     model.last_job_id = job_id
                 await session.flush()  # Ensure changes are queued before commit
 
+    async def list_entity_sync_statuses(
+        self, client_id: UUID, integration_id: UUID,
+    ) -> list[EntitySyncStatus]:
+        async with get_session_context() as session:
+            result = await session.execute(
+                select(EntitySyncStatusModel).where(
+                    and_(
+                        EntitySyncStatusModel.client_id == client_id,
+                        EntitySyncStatusModel.integration_id == integration_id,
+                    )
+                )
+            )
+            models = result.scalars().all()
+            return [_model_to_entity_sync_status(m) for m in models]
+
     async def get_entity_sync_status(
         self,
         client_id: UUID,
@@ -1026,8 +1078,8 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
         client_id: UUID,
         integration_id: UUID,
         entity_type: str,
-        reset_inbound_cursor: bool = True,
-        reset_sync_cursor: bool = True,
+        reset_inbound_sync_time: bool = True,
+        reset_last_sync_time: bool = True,
     ) -> EntitySyncStatus | None:
         async with get_session_context() as session:
             result = await session.execute(
@@ -1043,9 +1095,9 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
             if not model:
                 return None
 
-            if reset_inbound_cursor:
+            if reset_inbound_sync_time:
                 model.last_inbound_sync_at = None
-            if reset_sync_cursor:
+            if reset_last_sync_time:
                 model.last_successful_sync_at = None
             model.records_synced_count = 0
 

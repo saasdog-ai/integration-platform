@@ -50,7 +50,7 @@ export interface UserIntegration {
 /**
  * Conflict resolution strategy
  */
-export type ConflictResolution = 'external' | 'our_system' | 'most_recent'
+export type ConflictResolution = 'external' | 'our_system'
 
 /**
  * Sync Rule - configuration for syncing an entity type
@@ -122,15 +122,11 @@ export interface OAuthCallbackRequest {
 }
 
 /**
- * Connect integration request (mock)
+ * Connect integration request - initiates OAuth flow
  */
 export interface ConnectIntegrationRequest {
-  external_account_id: string
-  // Mock credentials - in real implementation, OAuth would handle this
-  mock_credentials?: {
-    access_token: string
-    refresh_token: string
-  }
+  redirect_uri: string
+  state?: string
 }
 
 /**
@@ -189,4 +185,37 @@ export interface SyncRecordsResponse {
   page: number
   page_size: number
   total_pages: number
+}
+
+/**
+ * Entity sync status for admin last sync time management
+ */
+export interface EntitySyncStatus {
+  entity_type: string
+  last_successful_sync_at: string | null
+  last_inbound_sync_at: string | null
+  last_sync_job_id: string | null
+  records_synced_count: number
+}
+
+/**
+ * List response for entity sync statuses
+ */
+export interface EntitySyncStatusListResponse {
+  statuses: EntitySyncStatus[]
+}
+
+/**
+ * Request to reset last sync times
+ */
+export interface ResetLastSyncTimeRequest {
+  reset_inbound_sync_time: boolean
+  reset_last_sync_time: boolean
+}
+
+/**
+ * Response after resetting last sync time
+ */
+export interface EntitySyncStatusResetResponse extends EntitySyncStatus {
+  message: string
 }

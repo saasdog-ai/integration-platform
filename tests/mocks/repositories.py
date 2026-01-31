@@ -94,6 +94,9 @@ class MockIntegrationRepository(IntegrationRepositoryInterface):
             if cid == client_id
         ]
 
+    async def get_all_user_integrations(self) -> list[UserIntegration]:
+        return list(self._user_integrations.values())
+
     async def create_user_integration(
         self, integration: UserIntegration
     ) -> UserIntegration:
@@ -133,6 +136,12 @@ class MockIntegrationRepository(IntegrationRepositoryInterface):
         self, integration_id: UUID
     ) -> UserIntegrationSettings | None:
         return self._system_settings.get(integration_id)
+
+    async def upsert_system_settings(
+        self, integration_id: UUID, settings: UserIntegrationSettings,
+    ) -> UserIntegrationSettings:
+        self._system_settings[integration_id] = settings
+        return settings
 
     def clear(self) -> None:
         """Clear all data (for test isolation)."""
@@ -495,6 +504,15 @@ class MockIntegrationStateRepository(IntegrationStateRepositoryInterface):
             if job_id:
                 record.last_job_id = job_id
 
+    async def list_entity_sync_statuses(
+        self, client_id: UUID, integration_id: UUID,
+    ) -> list[EntitySyncStatus]:
+        return [
+            status
+            for (cid, iid, _), status in self._entity_sync_status.items()
+            if cid == client_id and iid == integration_id
+        ]
+
     async def get_entity_sync_status(
         self,
         client_id: UUID,
@@ -545,16 +563,16 @@ class MockIntegrationStateRepository(IntegrationStateRepositoryInterface):
         client_id: UUID,
         integration_id: UUID,
         entity_type: str,
-        reset_inbound_cursor: bool = True,
-        reset_sync_cursor: bool = True,
+        reset_inbound_sync_time: bool = True,
+        reset_last_sync_time: bool = True,
     ) -> EntitySyncStatus | None:
         key = (client_id, integration_id, entity_type)
         existing = self._entity_sync_status.get(key)
         if not existing:
             return None
-        if reset_inbound_cursor:
+        if reset_inbound_sync_time:
             existing.last_inbound_sync_at = None
-        if reset_sync_cursor:
+        if reset_last_sync_time:
             existing.last_successful_sync_at = None
         existing.records_synced_count = 0
         existing.updated_at = datetime.now(timezone.utc)

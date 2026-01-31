@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api import (
+    admin_router,
     health_router,
     integrations_router,
     settings_router,
@@ -34,14 +35,18 @@ from app.infrastructure.db.database import close_db, init_db
 
 logger = get_logger(__name__)
 
-# Global reference to job runner task
+# Global references for job runner
 _job_runner_task: asyncio.Task | None = None
+_job_runner_watchdog: asyncio.Task | None = None
+_shutdown_requested = False
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
-    global _job_runner_task
+    global _job_runner_task, _job_runner_watchdog, _shutdown_requested
+
+    _shutdown_requested = False
 
     # Startup
     setup_logging()
@@ -59,6 +64,7 @@ async def lifespan(app: FastAPI):
     # Start job runner as background task (shares in-memory queue with API)
     if settings.job_runner_enabled:
         _job_runner_task = asyncio.create_task(_run_job_runner())
+        _job_runner_watchdog = asyncio.create_task(_watch_job_runner())
         logger.info(
             "Job runner started as background task",
             extra={"max_workers": settings.job_runner_max_workers},
@@ -67,7 +73,16 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
+    _shutdown_requested = True
     logger.info("Shutting down application...")
+
+    # Stop watchdog
+    if _job_runner_watchdog and not _job_runner_watchdog.done():
+        _job_runner_watchdog.cancel()
+        try:
+            await _job_runner_watchdog
+        except asyncio.CancelledError:
+            pass
 
     # Stop job runner
     if _job_runner_task and not _job_runner_task.done():
@@ -101,7 +116,25 @@ async def _run_job_runner() -> None:
         max_workers=settings.job_runner_max_workers,
     )
 
-    await runner.start()
+    try:
+        await runner.start()
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        logger.error(f"Job runner crashed: {e}", exc_info=True)
+
+
+async def _watch_job_runner() -> None:
+    """Restart the job runner if it dies unexpectedly."""
+    global _job_runner_task
+
+    while not _shutdown_requested:
+        await asyncio.sleep(10)
+        if _shutdown_requested:
+            break
+        if _job_runner_task and _job_runner_task.done():
+            logger.warning("Job runner task died — restarting")
+            _job_runner_task = asyncio.create_task(_run_job_runner())
 
 
 def create_app() -> FastAPI:
@@ -140,6 +173,7 @@ def create_app() -> FastAPI:
     app.include_router(integrations_router)
     app.include_router(settings_router)
     app.include_router(sync_jobs_router)
+    app.include_router(admin_router)
 
     return app
 
