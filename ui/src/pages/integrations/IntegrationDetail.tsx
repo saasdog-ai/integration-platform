@@ -7,10 +7,9 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/com
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Spinner } from '@/components/ui/spinner'
-import { IntegrationStatusBadge, SyncJobStatusBadge } from '@/components/StatusBadge'
+import { IntegrationStatusBadge } from '@/components/StatusBadge'
 import { OnboardingDialog } from './OnboardingDialog'
 import { formatDate } from '@/lib/utils'
-import { RECENT_JOBS_LIMIT } from '@/lib/constants'
 
 export function IntegrationDetail() {
   const { integrationId } = useParams<{ integrationId: string }>()
@@ -30,13 +29,6 @@ export function IntegrationDetail() {
   const { data: settings, isLoading: loadingSettings } = useQuery({
     queryKey: ['integration-settings', integrationId],
     queryFn: () => api.getIntegrationSettings(integrationId!),
-    enabled: !!integrationId,
-  })
-
-  // Fetch recent sync jobs
-  const { data: jobsData } = useQuery({
-    queryKey: ['sync-jobs', { integration_id: integrationId, page_size: RECENT_JOBS_LIMIT }],
-    queryFn: () => api.getSyncJobs({ integration_id: integrationId, page_size: RECENT_JOBS_LIMIT }),
     enabled: !!integrationId,
   })
 
@@ -156,44 +148,6 @@ export function IntegrationDetail() {
             </div>
           ) : (
             <p className="text-muted-foreground">No sync rules configured.</p>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Recent Jobs */}
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <div>
-            <CardTitle>Recent Sync Jobs</CardTitle>
-            <CardDescription>Latest sync activity for this integration</CardDescription>
-          </div>
-          <Button variant="outline" onClick={() => navigate('../jobs')}>
-            View All Jobs
-          </Button>
-        </CardHeader>
-        <CardContent>
-          {jobsData?.items && jobsData.items.length > 0 ? (
-            <div className="space-y-2">
-              {jobsData.items.map((job) => (
-                <div
-                  key={job.id}
-                  className="flex items-center justify-between p-3 bg-muted rounded-lg cursor-pointer hover:bg-muted/80"
-                  onClick={() => navigate(`../jobs/${job.id}`)}
-                >
-                  <div className="flex items-center gap-3">
-                    <SyncJobStatusBadge status={job.status} />
-                    <span className="text-sm">
-                      {job.job_type.replace('_', ' ')}
-                    </span>
-                  </div>
-                  <span className="text-sm text-muted-foreground">
-                    {formatDate(job.created_at)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-muted-foreground">No sync jobs yet.</p>
           )}
         </CardContent>
       </Card>
