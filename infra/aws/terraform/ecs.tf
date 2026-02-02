@@ -108,7 +108,7 @@ resource "aws_ecs_task_definition" "app" {
 
       secrets = [
         {
-          name      = "DB_CREDENTIALS"
+          name      = "DATABASE_URL"
           valueFrom = local.db_credentials_secret_arn
         }
       ]

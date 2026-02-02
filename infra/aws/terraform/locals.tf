@@ -23,8 +23,10 @@ locals {
   rds_endpoint              = local.use_shared ? var.shared_rds_endpoint : aws_db_instance.main[0].endpoint
   db_credentials_secret_arn = local.use_shared ? var.shared_db_credentials_secret_arn : aws_secretsmanager_secret.db_password[0].arn
 
-  # KMS
-  kms_key_id = local.use_shared ? var.shared_kms_key_id : aws_kms_key.credentials[0].key_id
+  # KMS — create our own key unless a shared one is provided
+  create_kms  = !var.use_shared_infra || var.shared_kms_key_id == ""
+  kms_key_id  = local.create_kms ? aws_kms_key.credentials[0].key_id : var.shared_kms_key_id
+  kms_key_arn = local.create_kms ? aws_kms_key.credentials[0].arn : "arn:aws:kms:${var.aws_region}:*:key/${var.shared_kms_key_id}"
 
   # Common tags
   common_tags = {

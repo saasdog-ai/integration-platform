@@ -1,11 +1,11 @@
 # =============================================================================
-# KMS - Only created in standalone mode (use_shared_infra = false)
+# KMS - Created unless a shared KMS key is provided
 # =============================================================================
 
 data "aws_caller_identity" "current" {}
 
 resource "aws_kms_key" "credentials" {
-  count = var.use_shared_infra ? 0 : 1
+  count = local.create_kms ? 1 : 0
 
   description             = "KMS key for encrypting integration credentials"
   deletion_window_in_days = var.enable_deletion_protection ? 30 : 7
@@ -46,7 +46,7 @@ resource "aws_kms_key" "credentials" {
 }
 
 resource "aws_kms_alias" "credentials" {
-  count = var.use_shared_infra ? 0 : 1
+  count = local.create_kms ? 1 : 0
 
   name          = "alias/${var.app_name}-${var.environment}-credentials"
   target_key_id = aws_kms_key.credentials[0].key_id
