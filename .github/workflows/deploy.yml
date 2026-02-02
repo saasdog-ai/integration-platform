@@ -1,0 +1,138 @@
+name: Deploy to AWS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+
+permissions:
+  id-token: write  # Required for OIDC
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'dev' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate AWS_ROLE_ARN secret
+        run: |
+          if [ -z "${{ secrets.AWS_ROLE_ARN }}" ]; then
+            echo "Error: AWS_ROLE_ARN secret is not set"
+            echo "Please configure it in: Settings > Secrets and variables > Actions"
+            echo "Or in: Settings > Environments > ${{ github.event.inputs.environment || 'dev' }} > Secrets"
+            exit 1
+          fi
+          echo "AWS_ROLE_ARN secret is configured"
+
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+          role-session-name: GitHubActions-Deploy-${{ github.run_id }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.0
+
+      - name: Validate DATABASE_PASSWORD secret
+        run: |
+          if [ -z "${{ secrets.DATABASE_PASSWORD }}" ]; then
+            echo "Error: DATABASE_PASSWORD secret is not set"
+            echo "Please configure it in: Settings > Secrets and variables > Actions"
+            echo "Or in: Settings > Environments > ${{ github.event.inputs.environment || 'dev' }} > Secrets"
+            exit 1
+          fi
+          echo "DATABASE_PASSWORD secret is configured"
+
+      - name: Create terraform.tfvars from example
+        working-directory: ./infra/aws/terraform
+        run: |
+          if [ ! -f terraform.tfvars ]; then
+            echo "Creating terraform.tfvars from example..."
+            cp terraform.tfvars.example terraform.tfvars
+            echo "Created terraform.tfvars"
+          else
+            echo "terraform.tfvars already exists"
+          fi
+          terraform fmt terraform.tfvars
+
+      - name: Terraform Init
+        working-directory: ./infra/aws/terraform
+        env:
+          TF_VAR_github_repository: ${{ github.repository }}
+          TF_VAR_environment: ${{ github.event.inputs.environment || 'dev' }}
+        run: |
+          # Derive account ID from the authenticated OIDC session (no secret needed)
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ENV="${{ github.event.inputs.environment || 'dev' }}"
+
+          terraform init \
+            -backend-config="bucket=integration-platform-terraform-state-${ENV}-${ACCOUNT_ID}" \
+            -backend-config="key=terraform.tfstate" \
+            -backend-config="region=us-east-1" \
+            -backend-config="encrypt=true" \
+            -backend-config="dynamodb_table=integration-platform-terraform-state-lock-${ENV}"
+
+      - name: Terraform Format Check
+        working-directory: ./infra/aws/terraform
+        run: |
+          terraform fmt -check || {
+            echo "Format check failed for .tf files"
+            echo "Run 'terraform fmt' to fix formatting issues"
+            exit 1
+          }
+          echo "All Terraform files are properly formatted"
+
+      - name: Terraform Validate
+        working-directory: ./infra/aws/terraform
+        run: terraform validate
+
+      - name: Terraform Plan
+        working-directory: ./infra/aws/terraform
+        env:
+          TF_VAR_database_password: ${{ secrets.DATABASE_PASSWORD }}
+          TF_VAR_github_repository: ${{ github.repository }}
+          TF_VAR_environment: ${{ github.event.inputs.environment || 'dev' }}
+        run: |
+          echo "Running terraform plan..."
+          terraform plan -out=tfplan
+
+      - name: Terraform Apply
+        if: github.ref == 'refs/heads/main'
+        working-directory: ./infra/aws/terraform
+        env:
+          TF_VAR_database_password: ${{ secrets.DATABASE_PASSWORD }}
+          TF_VAR_github_repository: ${{ github.repository }}
+          TF_VAR_environment: ${{ github.event.inputs.environment || 'dev' }}
+        run: |
+          echo "Applying Terraform changes..."
+          terraform apply -auto-approve tfplan
+
+          echo ""
+          echo "Deployment Information:"
+          terraform output -json || echo "Some outputs may not be available"
+          echo ""
+          if terraform output -raw alb_dns_name > /dev/null 2>&1; then
+            echo "ALB DNS: $(terraform output -raw alb_dns_name)"
+          fi
+          if terraform output -raw ecs_cluster_name > /dev/null 2>&1; then
+            echo "ECS Cluster: $(terraform output -raw ecs_cluster_name)"
+          fi
+          if terraform output -raw ecr_repository_url > /dev/null 2>&1; then
+            echo "ECR Repository: $(terraform output -raw ecr_repository_url)"
+          fi
