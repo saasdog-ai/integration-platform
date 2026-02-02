@@ -6,32 +6,53 @@ A production-ready framework for building integrations between your SaaS applica
 
 Instead of paying expensive third-party integration vendors like Workato, MuleSoft, or Tray.io thousands of dollars per month, use this framework as a starting point to build your own integrations. The codebase is designed to be extended with AI coding tools like Claude Code — describe the integration you need, and let AI generate the adapter implementation.
 
-**This is a chassis, not a finished product.** The included integrations (QuickBooks, etc.) are stubbed out for demonstration. You'll implement the actual API calls and data mappings for your specific use case.
+**This is a chassis, not a finished product.** The included QuickBooks Online integration is a fully working reference implementation with inbound, outbound, and bidirectional sync. You'll extend it with additional integrations for your specific use case.
 
 ## Features
 
-- **Framework for Integrations**: Extensible adapter pattern — add new integrations by implementing a simple interface
-- **OAuth Flow Built-In**: Complete OAuth 2.0 infrastructure for connecting external systems
-- **Encrypted Credentials**: Secure credential storage with pluggable encryption (AWS KMS, Azure Key Vault, local)
+### Sync Engine
+- **Inbound Sync**: Pull records from external systems (e.g., QBO) into your internal database with schema mapping
+- **Outbound Sync**: Push internal records to external systems, discover changes via version vectors
+- **Bidirectional Sync**: Version-vector-based conflict detection with configurable resolution (external wins or our system wins)
+- **Version Vectors**: Three-component tracking (internal, external, last_sync) — all equalized after every successful sync
+- **Entity Dependency Ordering**: Vendors sync before bills, customers before invoices
+- **Incremental Sync**: Cursor-based with separate inbound (external clock) and outbound (internal clock) cursors
+- **Batch Operations**: Batch upsert, batch mark-synced with advisory locks
+
+### Integration Framework
+- **Extensible Adapter Pattern**: Add new integrations by implementing `IntegrationAdapterInterface`
+- **Strategy Pattern**: Integration-specific sync logic via `QuickBooksSyncStrategy` (entity ordering, schema mapping, version equalization)
+- **Schema Mappers**: Bidirectional data mapping between external and internal formats
+
+### Infrastructure
+- **OAuth 2.0 Flow**: Complete infrastructure for connecting external systems (authorization, callback, token refresh)
+- **Encrypted Credentials**: Pluggable encryption (AWS KMS, Azure Key Vault, Fernet for dev)
 - **Async Job Processing**: Background job runner with pluggable message queues (AWS SQS, in-memory)
-- **Multi-Tenant Ready**: Full client isolation with partition-ready database design
-- **Micro-Frontend UI**: React-based UI that can be embedded in your host application
+- **Stuck Job Detection**: Auto-terminate jobs exceeding runtime threshold
+- **Pending Job Recovery**: Recover jobs lost due to queue failure
+- **History & Audit**: Append-only sync history per job with configurable retention
+
+### Platform
+- **Multi-Tenant Ready**: Full `client_id` isolation with partition-ready composite primary keys
+- **Micro-Frontend UI**: React-based UI embeddable in host applications via module federation
 - **OpenAPI 3.1 Spec**: Auto-generated API docs with client SDK generation support
-- **Clean Architecture**: Hexagonal architecture makes it easy for AI tools to understand and extend
-- **Cloud-Agnostic**: Designed to run on AWS, Azure, or GCP
+- **Clean Architecture**: Hexagonal architecture with strict layer separation
+- **Cloud-Agnostic**: Runs on AWS, Azure, GCP, or local development
+- **Feature Flags**: Global sync kill switch, per-integration disable, rate limiting
+- **Admin API**: Cross-client visibility, sync cursor reset
 
 ## Technology Stack
 
-- **Python 3.11+**
-- **FastAPI** - Modern, fast async web framework
-- **Pydantic v2** - Data validation and settings management
-- **SQLAlchemy 2** - ORM with async support
+- **Python 3.12** / **FastAPI** - Async web framework
+- **Pydantic v2** - Data validation and settings
+- **SQLAlchemy 2** - Async ORM
 - **Alembic** - Database migrations
-- **APScheduler** - Cron job scheduling (ready for integration)
-- **pytest** - Testing with coverage reporting
-- **mypy, Ruff, Black** - Code quality tools
+- **PostgreSQL 15+** - Primary database (port 5433)
+- **React / TypeScript / Vite** - Micro-frontend UI
+- **pytest** - 318 tests (unit + integration)
+- **mypy, Ruff, Black** - Code quality
 - **Docker & Docker Compose** - Containerization
-- **Terraform** - Infrastructure as Code
+- **Terraform** - AWS infrastructure (ECS/Fargate)
 
 ## Project Structure
 
@@ -40,23 +61,26 @@ integration-platform/
 ├── app/
 │   ├── api/                  # FastAPI routers and DTOs
 │   ├── auth/                 # JWT authentication (pluggable)
-│   ├── core/                 # Configuration, DI, logging, middleware
-│   ├── domain/               # Domain entities, enums, interfaces
+│   ├── core/                 # Configuration, DI, logging, middleware, exceptions
+│   ├── domain/               # Entities, enums, interfaces (pure, no deps)
 │   ├── infrastructure/
-│   │   ├── adapters/         # Integration adapters (QuickBooks, Mock, etc.)
-│   │   ├── db/               # Database models, repositories
-│   │   ├── encryption/       # Encryption services (KMS, KeyVault, local)
-│   │   ├── queue/            # Message queues (SQS, in-memory)
-│   │   └── storage/          # Storage abstractions
-│   ├── services/             # Business logic (sync orchestration, job runner)
-│   └── main.py               # FastAPI application entry point
-├── ui/                       # React micro-frontend
-├── infra/
-│   └── aws/terraform/        # AWS infrastructure (ECS/Fargate)
-├── tests/                    # Test suite
-├── alembic/                  # Database migrations
-├── scripts/                  # Utility scripts
-└── docker-compose.yml        # Local development setup
+│   │   ├── adapters/         # Adapter factory, HTTP client, mock adapter
+│   │   ├── db/               # SQLAlchemy models, repositories
+│   │   ├── encryption/       # KMS, Key Vault, Fernet
+│   │   └── queue/            # SQS, in-memory
+│   ├── integrations/
+│   │   └── quickbooks/       # QBO strategy, mappers, constants, client, internal repo
+│   ├── services/             # Orchestrator, job runner, integration service, settings
+│   └── main.py               # FastAPI app entry point
+├── ui/                       # React micro-frontend (Vite, TypeScript)
+├── infra/aws/terraform/      # AWS ECS/Fargate infrastructure
+├── tests/
+│   ├── unit/                 # 285 unit tests
+│   ├── integration/          # 3 E2E integration tests
+│   └── mocks/                # Mock adapters, repos, encryption
+├── alembic/                  # Database migrations (001–010)
+├── scripts/                  # Demo, data generation, seed SQL
+└── docker-compose.yml        # Local development (LocalStack, app)
 ```
 
 ## Quick Start
@@ -149,6 +173,49 @@ integration-platform/
    ```bash
    make run
    ```
+
+## Sync Architecture
+
+### Version Vectors
+
+Every record tracked in `integration_state` has three version fields:
+
+| Field | Meaning |
+|-------|---------|
+| `internal_version_id` (iv) | Bumped when our system modifies the record |
+| `external_version_id` (ev) | Bumped when the external system modifies the record |
+| `last_sync_version_id` (lsv) | Set to `max(iv, ev)` after successful sync |
+
+**Change detection**:
+- `iv > lsv` = needs outbound sync (our change not yet pushed)
+- `ev > lsv` = needs inbound sync (external change not yet pulled)
+- Both true = conflict (resolved by `master_if_conflict` setting)
+- `iv == ev == lsv` = fully in sync
+
+After every successful sync, all three are equalized: `iv = ev = lsv`.
+
+### Sync Directions
+
+Configured per entity type in user settings:
+
+| Direction | Behavior |
+|-----------|----------|
+| `inbound` | Fetch from external, write to internal DB |
+| `outbound` | Discover outbound-needing records via version vectors, push to external |
+| `bidirectional` | Classify each record as inbound/outbound/conflict using version vectors |
+
+### Conflict Resolution
+
+When `master_if_conflict = external`: external system wins (synced as inbound).
+When `master_if_conflict = our_system`: our system wins (synced as outbound).
+
+The `sync_direction` field on each record always reflects the actual direction of the most recent sync (INBOUND or OUTBOUND), never BIDIRECTIONAL.
+
+### QuickBooks Online Integration
+
+Supported entities: vendor, customer, chart_of_accounts, item, bill, invoice, payment.
+
+Entity sync order respects dependencies (vendors before bills, customers before invoices). The strategy handles schema mapping via dedicated mapper functions.
 
 ## API Reference
 
@@ -442,7 +509,7 @@ Response:
 #### Get Integration Settings
 
 ```bash
-curl "$BASE_URL/settings/f47ac10b-58cc-4372-a567-0e02b2c3d479" \
+curl "$BASE_URL/integrations/f47ac10b-58cc-4372-a567-0e02b2c3d479/settings" \
   -H "X-Client-ID: $CLIENT_ID"
 ```
 
@@ -451,8 +518,15 @@ Response:
 {
   "sync_rules": [
     {
-      "entity_type": "invoice",
+      "entity_type": "vendor",
       "direction": "bidirectional",
+      "enabled": true,
+      "master_if_conflict": "external",
+      "field_mappings": null
+    },
+    {
+      "entity_type": "bill",
+      "direction": "inbound",
       "enabled": true,
       "master_if_conflict": "external",
       "field_mappings": null
@@ -463,19 +537,22 @@ Response:
 }
 ```
 
+Sync direction options: `inbound`, `outbound`, `bidirectional`.
+Conflict resolution options: `external` (external system wins), `our_system` (our system wins).
+
 #### Update Settings
 
 ```bash
-curl -X PUT "$BASE_URL/settings/f47ac10b-58cc-4372-a567-0e02b2c3d479" \
+curl -X PUT "$BASE_URL/integrations/f47ac10b-58cc-4372-a567-0e02b2c3d479/settings" \
   -H "X-Client-ID: $CLIENT_ID" \
   -H "Content-Type: application/json" \
   -d '{
     "sync_rules": [
       {
-        "entity_type": "invoice",
+        "entity_type": "vendor",
         "direction": "bidirectional",
         "enabled": true,
-        "master_if_conflict": "internal"
+        "master_if_conflict": "external"
       },
       {
         "entity_type": "bill",
@@ -581,14 +658,20 @@ See [OpenAPI Generator docs](https://openapi-generator.tech/docs/generators) for
 ### Running Tests
 
 ```bash
-# Run all tests with coverage
-make test
+# Run all 318 tests
+pytest tests/ -v --no-cov
 
-# Run specific test file
-pytest tests/unit/test_domain.py
+# Run unit tests only (285 tests)
+pytest tests/unit/ -v --no-cov
 
-# Run with verbose output
-pytest -v
+# Run integration tests with output (3 E2E tests)
+pytest tests/integration/ -v -s --no-cov
+
+# Run version vector / bidirectional sync tests (30 tests)
+pytest tests/unit/test_version_vectors.py -v --no-cov
+
+# Run with coverage
+make test-cov
 ```
 
 ### Code Quality
@@ -622,11 +705,11 @@ make migrate-downgrade
 The adapter pattern makes it easy to add new integrations — either manually or with AI assistance. Use Claude Code or similar tools to generate implementations:
 
 **Example prompt for Claude Code:**
-> "Create a Xero integration adapter that implements OAuth token exchange and fetches invoices. Follow the pattern in `app/infrastructure/adapters/quickbooks/`."
+> "Create a Xero integration adapter that implements OAuth token exchange and fetches invoices. Follow the pattern in `app/integrations/quickbooks/`."
 
 ### Manual Steps
 
-1. **Create adapter** in `app/infrastructure/adapters/<integration_name>/`:
+1. **Create adapter** in `app/integrations/<integration_name>/`:
    ```python
    from app.domain.interfaces import IntegrationAdapterInterface
 
