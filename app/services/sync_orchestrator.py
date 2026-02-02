@@ -179,7 +179,17 @@ class SyncOrchestrator:
             try:
                 result: dict[str, Any] = {}
 
-                if direction in (SyncDirection.INBOUND, SyncDirection.BIDIRECTIONAL):
+                if direction == SyncDirection.BIDIRECTIONAL:
+                    result = await strategy.sync_entity_bidirectional(
+                        job=job,
+                        entity_type=entity_type,
+                        adapter=adapter,
+                        state_repo=self._state_repo,
+                        rule=rule,
+                        since=inbound_since,
+                        record_ids=record_ids,
+                    )
+                elif direction == SyncDirection.INBOUND:
                     result = await strategy.sync_entity_inbound(
                         job=job,
                         entity_type=entity_type,
@@ -188,9 +198,8 @@ class SyncOrchestrator:
                         since=inbound_since,
                         record_ids=record_ids,
                     )
-
-                if direction in (SyncDirection.OUTBOUND, SyncDirection.BIDIRECTIONAL):
-                    outbound_result = await strategy.sync_entity_outbound(
+                elif direction == SyncDirection.OUTBOUND:
+                    result = await strategy.sync_entity_outbound(
                         job=job,
                         entity_type=entity_type,
                         adapter=adapter,
@@ -198,18 +207,8 @@ class SyncOrchestrator:
                         since=outbound_since,
                         record_ids=record_ids,
                     )
-                    if result:
-                        # Merge bidirectional results
-                        result["direction"] = "bidirectional"
-                        for key in ("records_fetched", "records_created",
-                                    "records_updated", "records_failed"):
-                            result[key] = result.get(key, 0) + outbound_result.get(key, 0)
-                    else:
-                        result = outbound_result
 
-                entities_processed[entity_type] = result
-
-                # Update entity sync status
+                # Update entity sync status (before serializing datetime for JSON)
                 total_synced = result.get("records_created", 0) + result.get("records_updated", 0)
                 if total_synced > 0:
                     await self._state_repo.update_entity_sync_status(
@@ -217,6 +216,13 @@ class SyncOrchestrator:
                         job.id, total_synced,
                         last_inbound_sync_at=result.get("max_external_updated_at"),
                     )
+
+                # Serialize datetime for JSONB storage
+                ts = result.get("max_external_updated_at")
+                if ts is not None:
+                    result["max_external_updated_at"] = ts.isoformat()
+
+                entities_processed[entity_type] = result
 
             except Exception as e:
                 logger.error(

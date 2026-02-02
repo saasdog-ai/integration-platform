@@ -13,7 +13,7 @@ from uuid import UUID, uuid4
 
 from app.core.logging import get_logger
 from app.domain.entities import ExternalRecord, IntegrationHistoryRecord, IntegrationStateRecord, SyncJob, SyncRule
-from app.domain.enums import RecordSyncStatus, SyncDirection
+from app.domain.enums import ConflictResolution, RecordSyncStatus, SyncDirection
 from app.domain.interfaces import (
     IntegrationAdapterInterface,
     IntegrationStateRepositoryInterface,
@@ -38,8 +38,8 @@ class QuickBooksSyncStrategy:
     doing generic entity sync.
     """
 
-    def __init__(self) -> None:
-        self._internal_repo = InternalDataRepository()
+    def __init__(self, internal_repo: Any | None = None) -> None:
+        self._internal_repo = internal_repo or InternalDataRepository()
 
     # ------------------------------------------------------------------
     # Entity ordering
@@ -220,6 +220,7 @@ class QuickBooksSyncStrategy:
             if internal_record_id:
                 existing.internal_record_id = internal_record_id
             existing.external_version_id += 1
+            existing.internal_version_id = existing.external_version_id
             existing.last_sync_version_id = existing.external_version_id
             existing.sync_status = RecordSyncStatus.SYNCED
             existing.sync_direction = SyncDirection.INBOUND
@@ -286,12 +287,14 @@ class QuickBooksSyncStrategy:
         since: datetime | None = None,
         record_ids: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Read from internal database, map to QBO schema, push to QBO.
+        """Push records needing outbound sync to QBO.
+
+        Discovers records via version vectors in state_repo, pushes to
+        the external system, and equalizes all three version fields.
 
         Returns a summary dict with counts.
         """
         display = ENTITY_DISPLAY_NAMES.get(entity_type, entity_type)
-        mapper_fn = OUTBOUND_MAPPERS.get(entity_type)
 
         result: dict[str, Any] = {
             "direction": "outbound",
@@ -301,21 +304,20 @@ class QuickBooksSyncStrategy:
             "records_failed": 0,
         }
 
-        if not mapper_fn:
-            logger.info(
-                "No outbound mapper for entity type — skipping",
-                extra={"entity_type": entity_type},
-            )
-            return result
-
-        # 1. Get records from internal database
-        getter_fn = self._get_internal_getter_fn(entity_type)
-        internal_records = await getter_fn(
-            job.client_id, since=since, record_ids=record_ids
+        # 1. Find records needing outbound sync via state repo
+        synced_records = await state_repo.get_records_by_status(
+            job.client_id, job.integration_id, entity_type, RecordSyncStatus.SYNCED,
         )
-        result["records_fetched"] = len(internal_records)
+        pending_records = await state_repo.get_records_by_status(
+            job.client_id, job.integration_id, entity_type, RecordSyncStatus.PENDING,
+        )
+        outbound_records = [
+            r for r in (synced_records + pending_records)
+            if r.needs_outbound_sync
+        ]
+        result["records_fetched"] = len(outbound_records)
 
-        if not internal_records:
+        if not outbound_records:
             logger.info(
                 f"No {display} records to sync outbound",
                 extra={"job_id": str(job.id), "entity_type": entity_type},
@@ -323,65 +325,49 @@ class QuickBooksSyncStrategy:
             return result
 
         # 2. Process each record
-        successful_syncs: list[tuple[UUID, UUID, str | None]] = []
+        now = datetime.now(timezone.utc)
         successful_states: list[IntegrationStateRecord] = []
 
-        for internal_record in internal_records:
+        for state in outbound_records:
             try:
-                state, external_id = await self._process_outbound_record(
-                    job=job,
-                    entity_type=entity_type,
-                    internal_record=internal_record,
-                    mapper_fn=mapper_fn,
-                    adapter=adapter,
-                    state_repo=state_repo,
-                )
+                data = state.metadata.get("data", {}) if state.metadata else {}
 
-                successful_syncs.append(
-                    (state.id, job.client_id, external_id)
-                )
+                if state.external_record_id:
+                    await adapter.update_record(entity_type, state.external_record_id, data)
+                else:
+                    ext_record = await adapter.create_record(entity_type, data)
+                    state.external_record_id = ext_record.id
+
+                # Equalize version vectors
+                max_v = max(state.internal_version_id, state.external_version_id)
+                state.internal_version_id = max_v
+                state.external_version_id = max_v
+                state.last_sync_version_id = max_v
+                state.sync_status = RecordSyncStatus.SYNCED
+                state.sync_direction = SyncDirection.OUTBOUND
+                state.last_synced_at = now
+                state.last_job_id = job.id
+                state.updated_at = now
+
+                await state_repo.upsert_record(state)
                 successful_states.append(state)
+                result["records_updated"] += 1
 
             except Exception as e:
-                internal_id = str(internal_record.get("id", "unknown"))
                 logger.warning(
                     f"Failed to sync outbound {display} record",
                     extra={
                         "job_id": str(job.id),
                         "entity_type": entity_type,
-                        "internal_id": internal_id,
+                        "internal_id": state.internal_record_id,
                         "error": str(e),
                     },
                 )
                 result["records_failed"] += 1
 
-        # 3. Batch mark synced + write history
+        # 3. Write history
         if successful_states:
             await self._write_history_entries(successful_states, state_repo, job.id)
-        if successful_syncs:
-            try:
-                await state_repo.batch_mark_synced(
-                    successful_syncs,
-                    client_id=job.client_id,
-                    integration_id=job.integration_id,
-                )
-                result["records_updated"] += len(successful_syncs)
-            except Exception as e:
-                logger.error(
-                    "Outbound batch mark_synced failed — trying individually",
-                    extra={
-                        "job_id": str(job.id),
-                        "entity_type": entity_type,
-                        "count": len(successful_syncs),
-                        "error": str(e),
-                    },
-                )
-                for record_id, client_id, ext_id in successful_syncs:
-                    try:
-                        await state_repo.mark_synced(record_id, client_id, ext_id)
-                        result["records_updated"] += 1
-                    except Exception:
-                        result["records_failed"] += 1
 
         logger.info(
             f"Outbound sync complete for {display}",
@@ -389,6 +375,250 @@ class QuickBooksSyncStrategy:
                 "job_id": str(job.id),
                 "entity_type": entity_type,
                 **result,
+            },
+        )
+        return result
+
+    # ------------------------------------------------------------------
+    # Bidirectional sync: version-vector based classification
+    # ------------------------------------------------------------------
+
+    async def sync_entity_bidirectional(
+        self,
+        job: SyncJob,
+        entity_type: str,
+        adapter: IntegrationAdapterInterface,
+        state_repo: IntegrationStateRepositoryInterface,
+        rule: SyncRule,
+        since: datetime | None = None,
+        record_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Bidirectional sync using version vectors for conflict detection.
+
+        Classifies each record as inbound, outbound, conflict, or in-sync
+        based on version vectors, then delegates to the appropriate handler.
+
+        Returns a summary dict with counts.
+        """
+        display = ENTITY_DISPLAY_NAMES.get(entity_type, entity_type)
+        mapper_fn = INBOUND_MAPPERS.get(entity_type)
+
+        result: dict[str, Any] = {
+            "direction": "bidirectional",
+            "records_fetched": 0,
+            "records_created": 0,
+            "records_updated": 0,
+            "records_failed": 0,
+        }
+
+        now = datetime.now(timezone.utc)
+
+        # Track which state record IDs we've already processed
+        processed_state_ids: set[UUID] = set()
+
+        # 1. Fetch external records from adapter
+        page_token = None
+        external_records = []
+        max_external_updated_at: datetime | None = None
+
+        while True:
+            records, next_token = await adapter.fetch_records(
+                entity_type,
+                since=since,
+                page_token=page_token,
+                record_ids=record_ids,
+            )
+            result["records_fetched"] += len(records)
+
+            for record in records:
+                if record.updated_at and (
+                    max_external_updated_at is None
+                    or record.updated_at > max_external_updated_at
+                ):
+                    max_external_updated_at = record.updated_at
+                external_records.append(record)
+
+            if not next_token:
+                break
+            page_token = next_token
+
+        # 2. Classify and process each external record
+        records_to_upsert: list[IntegrationStateRecord] = []
+        BATCH_SIZE = 200
+
+        for record in external_records:
+            try:
+                existing = await state_repo.get_record_by_external_id(
+                    job.client_id, job.integration_id, entity_type, record.id
+                )
+
+                if not existing:
+                    # New external record → inbound
+                    if mapper_fn:
+                        state_record = await self._process_inbound_record(
+                            job=job,
+                            entity_type=entity_type,
+                            record=record,
+                            mapper_fn=mapper_fn,
+                            state_repo=state_repo,
+                            adapter=adapter,
+                        )
+                        records_to_upsert.append(state_record)
+                    continue
+
+                processed_state_ids.add(existing.id)
+
+                needs_out = existing.needs_outbound_sync
+                needs_in = existing.needs_inbound_sync
+
+                if not needs_out and not needs_in:
+                    # In sync — skip
+                    continue
+
+                if needs_out and not needs_in:
+                    direction = SyncDirection.OUTBOUND
+                elif needs_in and not needs_out:
+                    direction = SyncDirection.INBOUND
+                else:
+                    # Both changed — conflict: use master_if_conflict
+                    if rule.master_if_conflict == ConflictResolution.EXTERNAL:
+                        direction = SyncDirection.INBOUND
+                    else:
+                        direction = SyncDirection.OUTBOUND
+
+                if direction == SyncDirection.INBOUND:
+                    # Write to internal database if mapper available
+                    if mapper_fn:
+                        mapped_data = mapper_fn(record.data)
+                        mapped_data["_external_id"] = record.id
+                        upsert_fn = self._get_internal_upsert_fn(entity_type)
+                        internal_record_id = await upsert_fn(job.client_id, mapped_data)
+                        if internal_record_id and not existing.internal_record_id:
+                            existing.internal_record_id = internal_record_id
+
+                    # Equalize version vectors
+                    max_v = max(existing.internal_version_id, existing.external_version_id)
+                    existing.internal_version_id = max_v
+                    existing.external_version_id = max_v
+                    existing.last_sync_version_id = max_v
+                    existing.sync_status = RecordSyncStatus.SYNCED
+                    existing.sync_direction = SyncDirection.INBOUND
+                    existing.last_synced_at = now
+                    existing.last_job_id = job.id
+                    existing.metadata = {"data": record.data}
+                    existing.updated_at = now
+                    await state_repo.upsert_record(existing)
+                    result["records_updated"] += 1
+
+                elif direction == SyncDirection.OUTBOUND:
+                    # Push outbound using state metadata
+                    data = existing.metadata.get("data", {}) if existing.metadata else {}
+
+                    if existing.external_record_id:
+                        await adapter.update_record(entity_type, existing.external_record_id, data)
+                    else:
+                        ext_record = await adapter.create_record(entity_type, data)
+                        existing.external_record_id = ext_record.id
+
+                    # Equalize version vectors
+                    max_v = max(existing.internal_version_id, existing.external_version_id)
+                    existing.internal_version_id = max_v
+                    existing.external_version_id = max_v
+                    existing.last_sync_version_id = max_v
+                    existing.sync_status = RecordSyncStatus.SYNCED
+                    existing.sync_direction = SyncDirection.OUTBOUND
+                    existing.last_synced_at = now
+                    existing.last_job_id = job.id
+                    existing.updated_at = now
+                    await state_repo.upsert_record(existing)
+                    result["records_updated"] += 1
+
+                # Flush inbound batch
+                if len(records_to_upsert) >= BATCH_SIZE:
+                    created, updated, failed = await self._flush_inbound_batch(
+                        records_to_upsert, state_repo, job
+                    )
+                    result["records_created"] += created
+                    result["records_updated"] += updated
+                    result["records_failed"] += failed
+                    records_to_upsert = []
+
+            except Exception as e:
+                logger.warning(
+                    f"Failed to process bidirectional {display} record",
+                    extra={
+                        "job_id": str(job.id),
+                        "entity_type": entity_type,
+                        "external_id": record.id,
+                        "error": str(e),
+                    },
+                )
+                result["records_failed"] += 1
+
+        # 3. Handle internal-only records (state with needs_outbound_sync
+        #    but not seen in the external fetch above)
+        synced_records = await state_repo.get_records_by_status(
+            job.client_id, job.integration_id, entity_type, RecordSyncStatus.SYNCED,
+        )
+        pending_records = await state_repo.get_records_by_status(
+            job.client_id, job.integration_id, entity_type, RecordSyncStatus.PENDING,
+        )
+        for state in (synced_records + pending_records):
+            if state.id in processed_state_ids:
+                continue
+            if not state.needs_outbound_sync:
+                continue
+
+            try:
+                data = state.metadata.get("data", {}) if state.metadata else {}
+
+                if state.external_record_id:
+                    await adapter.update_record(entity_type, state.external_record_id, data)
+                else:
+                    ext_record = await adapter.create_record(entity_type, data)
+                    state.external_record_id = ext_record.id
+
+                max_v = max(state.internal_version_id, state.external_version_id)
+                state.internal_version_id = max_v
+                state.external_version_id = max_v
+                state.last_sync_version_id = max_v
+                state.sync_status = RecordSyncStatus.SYNCED
+                state.sync_direction = SyncDirection.OUTBOUND
+                state.last_synced_at = now
+                state.last_job_id = job.id
+                state.updated_at = now
+                await state_repo.upsert_record(state)
+                result["records_updated"] += 1
+
+            except Exception as e:
+                logger.warning(
+                    f"Failed to sync outbound-only {display} record",
+                    extra={
+                        "job_id": str(job.id),
+                        "entity_type": entity_type,
+                        "internal_id": state.internal_record_id,
+                        "error": str(e),
+                    },
+                )
+                result["records_failed"] += 1
+
+        # 4. Flush remaining inbound records
+        if records_to_upsert:
+            created, updated, failed = await self._flush_inbound_batch(
+                records_to_upsert, state_repo, job
+            )
+            result["records_created"] += created
+            result["records_updated"] += updated
+            result["records_failed"] += failed
+
+        result["max_external_updated_at"] = max_external_updated_at
+
+        logger.info(
+            f"Bidirectional sync complete for {display}",
+            extra={
+                "job_id": str(job.id),
+                "entity_type": entity_type,
+                **{k: v for k, v in result.items() if k != "max_external_updated_at"},
             },
         )
         return result
@@ -441,6 +671,9 @@ class QuickBooksSyncStrategy:
 
         if existing_state:
             existing_state.external_record_id = external_id
+            existing_state.internal_version_id = max(existing_state.internal_version_id, existing_state.external_version_id)
+            existing_state.external_version_id = existing_state.internal_version_id
+            existing_state.last_sync_version_id = existing_state.internal_version_id
             existing_state.sync_status = RecordSyncStatus.SYNCED
             existing_state.sync_direction = SyncDirection.OUTBOUND
             existing_state.last_synced_at = now
