@@ -94,7 +94,7 @@ variable "shared_kms_key_id" {
 variable "vpc_cidr" {
   description = "CIDR block for VPC (standalone mode)"
   type        = string
-  default     = "10.1.0.0/16"  # Different from shared to avoid conflicts
+  default     = "10.1.0.0/16" # Different from shared to avoid conflicts
 }
 
 variable "availability_zones" {
@@ -160,4 +160,14 @@ variable "enable_deletion_protection" {
   description = "Enable deletion protection for RDS and KMS"
   type        = bool
   default     = false
+}
+
+# =============================================================================
+# CI/CD Configuration
+# =============================================================================
+
+variable "github_repository" {
+  description = "GitHub repository (format: owner/repo) for OIDC trust policy"
+  type        = string
+  default     = ""
 }

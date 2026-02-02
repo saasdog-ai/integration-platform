@@ -2,10 +2,10 @@
 resource "aws_sqs_queue" "sync_jobs" {
   name                       = "${var.app_name}-${var.environment}-sync-jobs"
   delay_seconds              = 0
-  max_message_size           = 262144 # 256 KB
+  max_message_size           = 262144  # 256 KB
   message_retention_seconds  = 1209600 # 14 days
-  receive_wait_time_seconds  = 20 # Long polling
-  visibility_timeout_seconds = 300 # 5 minutes
+  receive_wait_time_seconds  = 20      # Long polling
+  visibility_timeout_seconds = 300     # 5 minutes
 
   # Enable server-side encryption
   sqs_managed_sse_enabled = true

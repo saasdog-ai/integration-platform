@@ -6,6 +6,9 @@ aws_region  = "us-east-1"
 environment = "dev"
 app_name    = "integration-platform"
 
+# GitHub repository for CI/CD OIDC (format: owner/repo)
+github_repository = "your-org/integration-platform"
+
 # =============================================================================
 # Deployment Mode
 # =============================================================================
