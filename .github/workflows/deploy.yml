@@ -59,15 +59,17 @@ jobs:
           fi
           echo "DATABASE_PASSWORD secret is configured"
 
-      - name: Create terraform.tfvars from example
+      - name: Write terraform.tfvars from secret
         working-directory: ./infra/aws/terraform
+        env:
+          TFVARS_CONTENT: ${{ secrets.TERRAFORM_TFVARS }}
         run: |
-          if [ ! -f terraform.tfvars ]; then
-            echo "Creating terraform.tfvars from example..."
-            cp terraform.tfvars.example terraform.tfvars
-            echo "Created terraform.tfvars"
+          if [ -n "$TFVARS_CONTENT" ]; then
+            echo "$TFVARS_CONTENT" > terraform.tfvars
+            echo "Created terraform.tfvars from environment secret"
           else
-            echo "terraform.tfvars already exists"
+            echo "TERRAFORM_TFVARS secret not set, using example as fallback"
+            cp terraform.tfvars.example terraform.tfvars
           fi
           terraform fmt terraform.tfvars
 
