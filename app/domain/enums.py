@@ -1,9 +1,9 @@
 """System-level enums (NOT business entity types - those are stored in DB)."""
 
-from enum import Enum
+from enum import StrEnum
 
 
-class IntegrationStatus(str, Enum):
+class IntegrationStatus(StrEnum):
     """Status of a user's integration connection."""
 
     PENDING = "pending"
@@ -12,7 +12,7 @@ class IntegrationStatus(str, Enum):
     REVOKED = "revoked"
 
 
-class SyncJobStatus(str, Enum):
+class SyncJobStatus(StrEnum):
     """Status of a sync job execution."""
 
     PENDING = "pending"
@@ -22,7 +22,7 @@ class SyncJobStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
-class RecordSyncStatus(str, Enum):
+class RecordSyncStatus(StrEnum):
     """Sync status of an individual record."""
 
     PENDING = "pending"
@@ -31,7 +31,7 @@ class RecordSyncStatus(str, Enum):
     CONFLICT = "conflict"
 
 
-class SyncDirection(str, Enum):
+class SyncDirection(StrEnum):
     """Direction of data sync."""
 
     INBOUND = "inbound"  # External -> Internal
@@ -39,14 +39,14 @@ class SyncDirection(str, Enum):
     BIDIRECTIONAL = "bidirectional"
 
 
-class ConflictResolution(str, Enum):
+class ConflictResolution(StrEnum):
     """Which system's data takes precedence when both have changes."""
 
     OUR_SYSTEM = "our_system"  # Our system overwrites external
     EXTERNAL = "external"  # External system overwrites ours
 
 
-class SyncJobTrigger(str, Enum):
+class SyncJobTrigger(StrEnum):
     """What triggered the sync job."""
 
     USER = "user"
@@ -55,7 +55,7 @@ class SyncJobTrigger(str, Enum):
     SYSTEM = "system"
 
 
-class SyncJobType(str, Enum):
+class SyncJobType(StrEnum):
     """Type of sync job."""
 
     FULL_SYNC = "full_sync"
