@@ -6,13 +6,13 @@ Claude Code to generate for their specific integration.
 """
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _map_address_inbound(qbo_addr: dict | None) -> dict | None:
     """Map a QBO address object to our internal address format."""
@@ -72,6 +72,7 @@ def _safe_json(val: Any) -> Any:
 # Vendor
 # ---------------------------------------------------------------------------
 
+
 def map_vendor_inbound(qbo_data: dict) -> dict:
     """Map QBO Vendor response to sample_vendors fields."""
     email_obj = qbo_data.get("PrimaryEmailAddr") or {}
@@ -121,6 +122,7 @@ def map_vendor_outbound(internal_data: dict) -> dict:
 # Bill
 # ---------------------------------------------------------------------------
 
+
 def map_bill_inbound(qbo_data: dict) -> dict:
     """Map QBO Bill response to sample_bills fields."""
     vendor_ref = qbo_data.get("VendorRef") or {}
@@ -159,8 +161,8 @@ def map_bill_inbound(qbo_data: dict) -> dict:
         due = _parse_qbo_timestamp(qbo_data["DueDate"])
         if due:
             # Ensure timezone-aware comparison (QBO dates may be naive)
-            now = datetime.now(timezone.utc)
-            due_aware = due if due.tzinfo else due.replace(tzinfo=timezone.utc)
+            now = datetime.now(UTC)
+            due_aware = due if due.tzinfo else due.replace(tzinfo=UTC)
             if due_aware < now:
                 status = "overdue"
             else:
@@ -177,7 +179,9 @@ def map_bill_inbound(qbo_data: dict) -> dict:
         "amount": total,
         "date": _parse_qbo_timestamp(qbo_data.get("TxnDate")),
         "due_date": _parse_qbo_timestamp(qbo_data.get("DueDate")),
-        "paid_on_date": _parse_qbo_timestamp(meta.get("LastUpdatedTime")) if status == "paid" else None,
+        "paid_on_date": _parse_qbo_timestamp(meta.get("LastUpdatedTime"))
+        if status == "paid"
+        else None,
         "description": (line_items[0]["description"] if line_items else None),
         "currency": (qbo_data.get("CurrencyRef") or {}).get("value", "USD"),
         "status": status,
@@ -218,25 +222,29 @@ def map_bill_outbound(internal_data: dict) -> dict:
     qbo_lines = []
     for item in line_items:
         if isinstance(item, dict):
-            qbo_lines.append({
-                "Amount": float(item.get("total", item.get("unit_price", 0))),
-                "Description": item.get("description", ""),
-                "DetailType": "AccountBasedExpenseLineDetail",
-                "AccountBasedExpenseLineDetail": {
-                    "AccountRef": {"value": "1"},  # Default expense account
-                },
-            })
+            qbo_lines.append(
+                {
+                    "Amount": float(item.get("total", item.get("unit_price", 0))),
+                    "Description": item.get("description", ""),
+                    "DetailType": "AccountBasedExpenseLineDetail",
+                    "AccountBasedExpenseLineDetail": {
+                        "AccountRef": {"value": "1"},  # Default expense account
+                    },
+                }
+            )
 
     if not qbo_lines:
         # QBO requires at least one line item
-        qbo_lines.append({
-            "Amount": float(internal_data.get("amount", 0)),
-            "Description": internal_data.get("description", "Expense"),
-            "DetailType": "AccountBasedExpenseLineDetail",
-            "AccountBasedExpenseLineDetail": {
-                "AccountRef": {"value": "1"},
-            },
-        })
+        qbo_lines.append(
+            {
+                "Amount": float(internal_data.get("amount", 0)),
+                "Description": internal_data.get("description", "Expense"),
+                "DetailType": "AccountBasedExpenseLineDetail",
+                "AccountBasedExpenseLineDetail": {
+                    "AccountRef": {"value": "1"},
+                },
+            }
+        )
 
     result["Line"] = qbo_lines
     return result
@@ -245,6 +253,7 @@ def map_bill_outbound(internal_data: dict) -> dict:
 # ---------------------------------------------------------------------------
 # Invoice
 # ---------------------------------------------------------------------------
+
 
 def map_invoice_inbound(qbo_data: dict) -> dict:
     """Map QBO Invoice response to sample_invoices fields."""
@@ -295,7 +304,9 @@ def map_invoice_inbound(qbo_data: dict) -> dict:
         "contact_name": customer_ref.get("name"),
         "issue_date": _parse_qbo_timestamp(qbo_data.get("TxnDate")),
         "due_date": _parse_qbo_timestamp(qbo_data.get("DueDate")),
-        "paid_on_date": _parse_qbo_timestamp(meta.get("LastUpdatedTime")) if status == "PAID" else None,
+        "paid_on_date": _parse_qbo_timestamp(meta.get("LastUpdatedTime"))
+        if status == "PAID"
+        else None,
         "memo": qbo_data.get("PrivateNote"),
         "currency": (qbo_data.get("CurrencyRef") or {}).get("value", "USD"),
         "exchange_rate": None,
@@ -349,28 +360,32 @@ def map_invoice_outbound(internal_data: dict) -> dict:
     qbo_lines = []
     for item in line_items:
         if isinstance(item, dict):
-            qbo_lines.append({
-                "Amount": float(item.get("total", item.get("unit_price", 0))),
-                "Description": item.get("description", ""),
+            qbo_lines.append(
+                {
+                    "Amount": float(item.get("total", item.get("unit_price", 0))),
+                    "Description": item.get("description", ""),
+                    "DetailType": "SalesItemLineDetail",
+                    "SalesItemLineDetail": {
+                        "ItemRef": {"value": "1", "name": "Services"},
+                        "Qty": float(item.get("quantity", 1)),
+                        "UnitPrice": float(item.get("unit_price", 0)),
+                    },
+                }
+            )
+
+    if not qbo_lines:
+        qbo_lines.append(
+            {
+                "Amount": float(internal_data.get("total_amount", 0)),
+                "Description": internal_data.get("memo", "Service"),
                 "DetailType": "SalesItemLineDetail",
                 "SalesItemLineDetail": {
                     "ItemRef": {"value": "1", "name": "Services"},
-                    "Qty": float(item.get("quantity", 1)),
-                    "UnitPrice": float(item.get("unit_price", 0)),
+                    "Qty": 1,
+                    "UnitPrice": float(internal_data.get("total_amount", 0)),
                 },
-            })
-
-    if not qbo_lines:
-        qbo_lines.append({
-            "Amount": float(internal_data.get("total_amount", 0)),
-            "Description": internal_data.get("memo", "Service"),
-            "DetailType": "SalesItemLineDetail",
-            "SalesItemLineDetail": {
-                "ItemRef": {"value": "1", "name": "Services"},
-                "Qty": 1,
-                "UnitPrice": float(internal_data.get("total_amount", 0)),
-            },
-        })
+            }
+        )
 
     result["Line"] = qbo_lines
     return result
@@ -379,6 +394,7 @@ def map_invoice_outbound(internal_data: dict) -> dict:
 # ---------------------------------------------------------------------------
 # Chart of Accounts
 # ---------------------------------------------------------------------------
+
 
 def map_chart_of_accounts_inbound(qbo_data: dict) -> dict:
     """Map QBO Account response to sample_chart_of_accounts fields."""

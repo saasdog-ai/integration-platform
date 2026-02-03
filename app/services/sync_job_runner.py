@@ -1,7 +1,6 @@
 """Background worker for processing sync jobs from queue."""
 
 import asyncio
-import json
 import signal
 import time
 from typing import Any
@@ -155,7 +154,10 @@ class SyncJobRunner:
                     )
                     logger.warning(
                         "Backpressure active, delaying polling",
-                        extra={"delay_seconds": delay, "consecutive_errors": self._consecutive_errors},
+                        extra={
+                            "delay_seconds": delay,
+                            "consecutive_errors": self._consecutive_errors,
+                        },
                     )
                     await asyncio.sleep(delay)
 
@@ -179,8 +181,10 @@ class SyncJobRunner:
         if self._consecutive_errors >= BACKPRESSURE_ERROR_THRESHOLD:
             # Exponential backoff with jitter
             import random
+
             delay = min(
-                BACKPRESSURE_BASE_DELAY ** (self._consecutive_errors - BACKPRESSURE_ERROR_THRESHOLD + 1),
+                BACKPRESSURE_BASE_DELAY
+                ** (self._consecutive_errors - BACKPRESSURE_ERROR_THRESHOLD + 1),
                 BACKPRESSURE_MAX_DELAY,
             )
             delay = delay * (0.5 + random.random())  # Add jitter
@@ -360,9 +364,7 @@ class SyncJobRunner:
             # Acquire semaphore to limit concurrency
             await self._semaphore.acquire()
 
-            task = asyncio.create_task(
-                self._process_message(message)
-            )
+            task = asyncio.create_task(self._process_message(message))
             self._tasks.add(task)
             task.add_done_callback(self._task_done)
 
@@ -407,6 +409,7 @@ class SyncJobRunner:
 
         # Validate UUID format for ID fields
         from uuid import UUID
+
         try:
             job_id = UUID(str(message_body["job_id"]))
             client_id = UUID(str(message_body["client_id"]))
@@ -479,9 +482,7 @@ class SyncJobRunner:
             return None
 
         # Check if integration is disabled via feature flag
-        integration = await self._integration_repo.get_available_integration(
-            job.integration_id
-        )
+        integration = await self._integration_repo.get_available_integration(job.integration_id)
         if integration and integration.name in settings.disabled_integrations:
             logger.warning(
                 "Integration disabled via feature flag - skipping job",
@@ -582,7 +583,9 @@ class SyncJobRunner:
                 return
 
             job = await self._check_job_ready_for_execution(
-                job_message, receipt_handle, settings,
+                job_message,
+                receipt_handle,
+                settings,
             )
             if job is None:
                 return
@@ -601,7 +604,10 @@ class SyncJobRunner:
 
         except Exception as e:
             await self._handle_message_failure(
-                message, receipt_handle, receive_count, e,
+                message,
+                receipt_handle,
+                receive_count,
+                e,
             )
 
 

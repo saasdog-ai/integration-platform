@@ -41,9 +41,7 @@ class AzureKeyVaultEncryptionService(EncryptionServiceInterface):
                 from azure.keyvault.keys.crypto import CryptographyClient
 
                 credential = DefaultAzureCredential()
-                self._client = KeyClient(
-                    vault_url=self._vault_url, credential=credential
-                )
+                self._client = KeyClient(vault_url=self._vault_url, credential=credential)
 
                 # Get or create the key
                 try:
@@ -57,7 +55,7 @@ class AzureKeyVaultEncryptionService(EncryptionServiceInterface):
                 raise EncryptionError(
                     "azure-identity and azure-keyvault-keys are required. "
                     "Install with: pip install azure-identity azure-keyvault-keys"
-                )
+                ) from None
 
         return self._client, self._crypto_client
 
@@ -78,9 +76,7 @@ class AzureKeyVaultEncryptionService(EncryptionServiceInterface):
 
             result = await loop.run_in_executor(
                 None,
-                lambda: crypto_client.encrypt(
-                    EncryptionAlgorithm.rsa_oaep_256, plaintext
-                ),
+                lambda: crypto_client.encrypt(EncryptionAlgorithm.rsa_oaep_256, plaintext),
             )
 
             ciphertext = result.ciphertext
@@ -95,7 +91,7 @@ class AzureKeyVaultEncryptionService(EncryptionServiceInterface):
 
         except Exception as e:
             logger.error("Azure Key Vault encryption failed", extra={"error": str(e)})
-            raise EncryptionError(f"Azure Key Vault encryption failed: {e}")
+            raise EncryptionError(f"Azure Key Vault encryption failed: {e}") from e
 
     async def decrypt(self, ciphertext: bytes, key_id: str) -> bytes:
         """
@@ -118,9 +114,7 @@ class AzureKeyVaultEncryptionService(EncryptionServiceInterface):
 
             result = await loop.run_in_executor(
                 None,
-                lambda: crypto_client.decrypt(
-                    EncryptionAlgorithm.rsa_oaep_256, ciphertext
-                ),
+                lambda: crypto_client.decrypt(EncryptionAlgorithm.rsa_oaep_256, ciphertext),
             )
 
             plaintext = result.plaintext
@@ -134,4 +128,4 @@ class AzureKeyVaultEncryptionService(EncryptionServiceInterface):
 
         except Exception as e:
             logger.error("Azure Key Vault decryption failed", extra={"error": str(e)})
-            raise EncryptionError(f"Azure Key Vault decryption failed: {e}")
+            raise EncryptionError(f"Azure Key Vault decryption failed: {e}") from e

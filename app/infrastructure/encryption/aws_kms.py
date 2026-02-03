@@ -56,7 +56,7 @@ class AWSKMSEncryptionService(EncryptionServiceInterface):
             except ImportError:
                 raise EncryptionError(
                     "boto3 is required for AWS KMS. Install with: pip install boto3"
-                )
+                ) from None
 
         return self._client
 
@@ -93,7 +93,7 @@ class AWSKMSEncryptionService(EncryptionServiceInterface):
 
         except Exception as e:
             logger.error("KMS encryption failed", extra={"error": str(e)})
-            raise EncryptionError(f"KMS encryption failed: {e}")
+            raise EncryptionError(f"KMS encryption failed: {e}") from e
 
     async def decrypt(self, ciphertext: bytes, key_id: str) -> bytes:
         """
@@ -131,4 +131,4 @@ class AWSKMSEncryptionService(EncryptionServiceInterface):
 
         except Exception as e:
             logger.error("KMS decryption failed", extra={"error": str(e)})
-            raise EncryptionError(f"KMS decryption failed: {e}")
+            raise EncryptionError(f"KMS decryption failed: {e}") from e

@@ -109,9 +109,7 @@ class SettingsService:
             self._validate_cron_expression(settings.sync_frequency)
 
         # Save settings
-        updated = await self._repo.upsert_user_settings(
-            client_id, integration_id, settings
-        )
+        updated = await self._repo.upsert_user_settings(client_id, integration_id, settings)
 
         logger.info(
             "User settings updated",
@@ -180,9 +178,7 @@ class SettingsService:
             self._validate_cron_expression(settings.sync_frequency)
 
         # Save settings
-        updated = await self._repo.upsert_system_settings(
-            integration_id, settings
-        )
+        updated = await self._repo.upsert_system_settings(integration_id, settings)
 
         logger.info(
             "System default settings updated",
@@ -271,13 +267,25 @@ class SettingsService:
             (0, 23),  # hour
             (1, 31),  # day of month
             (1, 12),  # month
-            (0, 7),   # day of week (0 and 7 both = Sunday)
+            (0, 7),  # day of week (0 and 7 both = Sunday)
         ]
         min_val, max_val = ranges[field_index]
 
         # Month and day names
-        month_names = {"jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
-                       "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12}
+        month_names = {
+            "jan": 1,
+            "feb": 2,
+            "mar": 3,
+            "apr": 4,
+            "may": 5,
+            "jun": 6,
+            "jul": 7,
+            "aug": 8,
+            "sep": 9,
+            "oct": 10,
+            "nov": 11,
+            "dec": 12,
+        }
         day_names = {"sun": 0, "mon": 1, "tue": 2, "wed": 3, "thu": 4, "fri": 5, "sat": 6}
 
         def parse_value(val: str) -> int | None:

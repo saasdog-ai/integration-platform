@@ -1,6 +1,6 @@
 """Unit tests for services layer."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -43,9 +43,7 @@ class TestSettingsService:
         return SettingsService(integration_repo=repo)
 
     @pytest.fixture
-    def integration(
-        self, repo: MockIntegrationRepository
-    ) -> AvailableIntegration:
+    def integration(self, repo: MockIntegrationRepository) -> AvailableIntegration:
         """Create test integration."""
         return repo.seed_available_integration(
             name="Test Integration",
@@ -88,9 +86,7 @@ class TestSettingsService:
             auto_sync_enabled=True,
         )
 
-        updated = await service.update_user_settings(
-            client_id, integration.id, new_settings
-        )
+        updated = await service.update_user_settings(client_id, integration.id, new_settings)
 
         assert updated.auto_sync_enabled is True
         assert len(updated.sync_rules) == 1
@@ -117,9 +113,7 @@ class TestSettingsService:
         )
 
         with pytest.raises(ValidationError) as exc_info:
-            await service.update_user_settings(
-                client_id, integration.id, invalid_settings
-            )
+            await service.update_user_settings(client_id, integration.id, invalid_settings)
 
         assert "invalid_entity" in str(exc_info.value)
 
@@ -145,9 +139,7 @@ class TestSettingsService:
         )
 
         with pytest.raises(ValidationError) as exc_info:
-            await service.update_user_settings(
-                client_id, integration.id, invalid_settings
-            )
+            await service.update_user_settings(client_id, integration.id, invalid_settings)
 
         assert "cron" in str(exc_info.value).lower()
 
@@ -202,7 +194,7 @@ class TestMockRepositories:
         client_id = uuid4()
         integration = repo.seed_available_integration("Test", "erp")
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         user_integration = UserIntegration(
             id=uuid4(),
             client_id=client_id,
@@ -223,7 +215,7 @@ class TestMockRepositories:
     async def test_mock_sync_job_repo_create_and_update(self):
         """Test sync job create and status update."""
         repo = MockSyncJobRepository()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         job = SyncJob(
             id=uuid4(),
@@ -252,7 +244,7 @@ class TestMockRepositories:
         repo = MockSyncJobRepository()
         client_id = uuid4()
         integration_id = uuid4()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Create two jobs, one running
         job1 = SyncJob(
@@ -294,7 +286,7 @@ class TestMockIntegrationStateRepository:
         from app.domain.enums import RecordSyncStatus
 
         repo = MockIntegrationStateRepository()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         record = IntegrationStateRecord(
             id=uuid4(),
@@ -328,7 +320,7 @@ class TestMockIntegrationStateRepository:
         from app.domain.enums import RecordSyncStatus
 
         repo = MockIntegrationStateRepository()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         record = IntegrationStateRecord(
             id=uuid4(),
@@ -364,7 +356,7 @@ class TestMockIntegrationStateRepository:
         from app.domain.enums import RecordSyncStatus, SyncDirection
 
         repo = MockIntegrationStateRepository()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         client_id = uuid4()
         integration_id = uuid4()
 
@@ -394,9 +386,7 @@ class TestMockIntegrationStateRepository:
         assert retrieved.internal_record_id is None
 
         # get_record with None internal_record_id returns None
-        not_found = await repo.get_record(
-            client_id, integration_id, "bill", None
-        )
+        not_found = await repo.get_record(client_id, integration_id, "bill", None)
         assert not_found is None
 
     @pytest.mark.asyncio
@@ -406,7 +396,7 @@ class TestMockIntegrationStateRepository:
         from app.domain.enums import RecordSyncStatus, SyncDirection
 
         repo = MockIntegrationStateRepository()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         client_id = uuid4()
         integration_id = uuid4()
         record_id = uuid4()
@@ -453,7 +443,8 @@ class TestMockIntegrationStateRepository:
 
         # Should still be only one record
         all_records = [
-            r for r in repo._records.values()
+            r
+            for r in repo._records.values()
             if r.client_id == client_id and r.entity_type == "vendor"
         ]
         assert len(all_records) == 1
@@ -465,7 +456,7 @@ class TestMockIntegrationStateRepository:
         from app.domain.enums import RecordSyncStatus, SyncDirection
 
         repo = MockIntegrationStateRepository()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         client_id = uuid4()
         integration_id = uuid4()
 
@@ -509,9 +500,7 @@ class TestMockIntegrationStateRepository:
         assert result.external_record_id == "ext-bill-1"
 
         # Should be retrievable by internal ID now
-        by_internal = await repo.get_record(
-            client_id, integration_id, "bill", "internal-bill-1"
-        )
+        by_internal = await repo.get_record(client_id, integration_id, "bill", "internal-bill-1")
         assert by_internal is not None
         assert by_internal.external_record_id == "ext-bill-1"
 
@@ -526,7 +515,7 @@ class TestUpsertGuard:
         from app.domain.enums import RecordSyncStatus, SyncDirection
 
         repo = MockIntegrationStateRepository()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         client_id = uuid4()
         integration_id = uuid4()
 
@@ -582,7 +571,7 @@ class TestIntegrationHistory:
         from app.domain.enums import RecordSyncStatus, SyncDirection
 
         repo = MockIntegrationStateRepository()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         client_id = uuid4()
         job_id = uuid4()
 
@@ -619,7 +608,7 @@ class TestIntegrationHistory:
         from app.domain.enums import RecordSyncStatus, SyncDirection
 
         repo = MockIntegrationStateRepository()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         client_id = uuid4()
         integration_id = uuid4()
         job_a_id = uuid4()
@@ -678,15 +667,11 @@ class TestIntegrationHistory:
         await repo.upsert_record(state_update)
 
         # State table now points to job B
-        state_records, state_total = await repo.get_records_by_job_id(
-            client_id, job_a_id
-        )
+        state_records, state_total = await repo.get_records_by_job_id(client_id, job_a_id)
         assert state_total == 0  # State overwritten by job B
 
         # But history for job A is still there
-        history_records, history_total = await repo.get_history_by_job_id(
-            client_id, job_a_id
-        )
+        history_records, history_total = await repo.get_history_by_job_id(client_id, job_a_id)
         assert history_total == 1
         assert history_records[0].job_id == job_a_id
         assert history_records[0].sync_status == RecordSyncStatus.SYNCED

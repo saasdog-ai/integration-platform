@@ -22,11 +22,28 @@ class StructuredFormatter(logging.Formatter):
 
         # Add extra fields (excluding internal ones)
         skip_fields = {
-            "name", "msg", "args", "created", "filename", "funcName",
-            "levelname", "levelno", "lineno", "module", "msecs",
-            "pathname", "process", "processName", "relativeCreated",
-            "stack_info", "exc_info", "exc_text", "thread", "threadName",
-            "taskName", "message",
+            "name",
+            "msg",
+            "args",
+            "created",
+            "filename",
+            "funcName",
+            "levelname",
+            "levelno",
+            "lineno",
+            "module",
+            "msecs",
+            "pathname",
+            "process",
+            "processName",
+            "relativeCreated",
+            "stack_info",
+            "exc_info",
+            "exc_text",
+            "thread",
+            "threadName",
+            "taskName",
+            "message",
         }
 
         for key, value in record.__dict__.items():

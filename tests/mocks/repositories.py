@@ -1,6 +1,6 @@
 """In-memory mock repositories for unit testing."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -10,17 +10,12 @@ from app.domain.entities import (
     IntegrationHistoryRecord,
     IntegrationStateRecord,
     SyncJob,
-    SyncRule,
     UserIntegration,
     UserIntegrationSettings,
 )
 from app.domain.enums import (
-    IntegrationStatus,
     RecordSyncStatus,
-    SyncDirection,
     SyncJobStatus,
-    SyncJobTrigger,
-    SyncJobType,
 )
 from app.domain.interfaces import (
     IntegrationRepositoryInterface,
@@ -55,8 +50,8 @@ class MockIntegrationRepository(IntegrationRepositoryInterface):
             supported_entities=supported_entities or ["bill", "invoice", "vendor"],
             oauth_config=oauth_config,
             is_active=is_active,
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
         )
         self._available_integrations[integration.id] = integration
         return integration
@@ -69,14 +64,10 @@ class MockIntegrationRepository(IntegrationRepositoryInterface):
             integrations = [i for i in integrations if i.is_active]
         return integrations
 
-    async def get_available_integration(
-        self, integration_id: UUID
-    ) -> AvailableIntegration | None:
+    async def get_available_integration(self, integration_id: UUID) -> AvailableIntegration | None:
         return self._available_integrations.get(integration_id)
 
-    async def get_available_integration_by_name(
-        self, name: str
-    ) -> AvailableIntegration | None:
+    async def get_available_integration_by_name(self, name: str) -> AvailableIntegration | None:
         for integration in self._available_integrations.values():
             if integration.name == name:
                 return integration
@@ -88,33 +79,23 @@ class MockIntegrationRepository(IntegrationRepositoryInterface):
         return self._user_integrations.get((client_id, integration_id))
 
     async def get_user_integrations(self, client_id: UUID) -> list[UserIntegration]:
-        return [
-            ui
-            for (cid, _), ui in self._user_integrations.items()
-            if cid == client_id
-        ]
+        return [ui for (cid, _), ui in self._user_integrations.items() if cid == client_id]
 
     async def get_all_user_integrations(self) -> list[UserIntegration]:
         return list(self._user_integrations.values())
 
-    async def create_user_integration(
-        self, integration: UserIntegration
-    ) -> UserIntegration:
+    async def create_user_integration(self, integration: UserIntegration) -> UserIntegration:
         key = (integration.client_id, integration.integration_id)
         self._user_integrations[key] = integration
         return integration
 
-    async def update_user_integration(
-        self, integration: UserIntegration
-    ) -> UserIntegration:
+    async def update_user_integration(self, integration: UserIntegration) -> UserIntegration:
         key = (integration.client_id, integration.integration_id)
-        integration.updated_at = datetime.now(timezone.utc)
+        integration.updated_at = datetime.now(UTC)
         self._user_integrations[key] = integration
         return integration
 
-    async def delete_user_integration(
-        self, client_id: UUID, integration_id: UUID
-    ) -> bool:
+    async def delete_user_integration(self, client_id: UUID, integration_id: UUID) -> bool:
         key = (client_id, integration_id)
         if key in self._user_integrations:
             del self._user_integrations[key]
@@ -132,13 +113,13 @@ class MockIntegrationRepository(IntegrationRepositoryInterface):
         self._user_settings[(client_id, integration_id)] = settings
         return settings
 
-    async def get_system_settings(
-        self, integration_id: UUID
-    ) -> UserIntegrationSettings | None:
+    async def get_system_settings(self, integration_id: UUID) -> UserIntegrationSettings | None:
         return self._system_settings.get(integration_id)
 
     async def upsert_system_settings(
-        self, integration_id: UUID, settings: UserIntegrationSettings,
+        self,
+        integration_id: UUID,
+        settings: UserIntegrationSettings,
     ) -> UserIntegrationSettings:
         self._system_settings[integration_id] = settings
         return settings
@@ -222,7 +203,7 @@ class MockSyncJobRepository(SyncJobRepositoryInterface):
         if not job:
             raise ValueError(f"Job not found: {job_id}")
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         job.status = status
         job.updated_at = now
 
@@ -246,9 +227,7 @@ class MockSyncJobRepository(SyncJobRepositoryInterface):
 
         return job
 
-    async def get_running_jobs(
-        self, client_id: UUID, integration_id: UUID
-    ) -> list[SyncJob]:
+    async def get_running_jobs(self, client_id: UUID, integration_id: UUID) -> list[SyncJob]:
         return [
             j
             for j in self._jobs.values()
@@ -257,9 +236,7 @@ class MockSyncJobRepository(SyncJobRepositoryInterface):
             and j.status == SyncJobStatus.RUNNING
         ]
 
-    async def create_job_if_no_running(
-        self, job: SyncJob
-    ) -> tuple[SyncJob | None, SyncJob | None]:
+    async def create_job_if_no_running(self, job: SyncJob) -> tuple[SyncJob | None, SyncJob | None]:
         """
         Atomically check for running/pending jobs and create a new job if none exist.
 
@@ -289,13 +266,12 @@ class MockSyncJobRepository(SyncJobRepositoryInterface):
         """Find jobs stuck in PENDING status longer than stale_seconds."""
         from datetime import timedelta
 
-        cutoff_time = datetime.now(timezone.utc) - timedelta(seconds=stale_seconds)
+        cutoff_time = datetime.now(UTC) - timedelta(seconds=stale_seconds)
 
         return [
             j
             for j in self._jobs.values()
-            if j.status == SyncJobStatus.PENDING
-            and j.created_at < cutoff_time
+            if j.status == SyncJobStatus.PENDING and j.created_at < cutoff_time
         ]
 
     async def get_stuck_jobs(
@@ -305,7 +281,7 @@ class MockSyncJobRepository(SyncJobRepositoryInterface):
         """Find jobs that have been running longer than the threshold."""
         from datetime import timedelta
 
-        cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=stuck_threshold_minutes)
+        cutoff_time = datetime.now(UTC) - timedelta(minutes=stuck_threshold_minutes)
 
         stuck_jobs = [
             j
@@ -326,7 +302,7 @@ class MockSyncJobRepository(SyncJobRepositoryInterface):
         if not job or job.status != SyncJobStatus.RUNNING:
             return None
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         job.status = SyncJobStatus.FAILED
         job.completed_at = now
         job.error_code = "JOB_TIMEOUT"
@@ -419,9 +395,7 @@ class MockIntegrationStateRepository(IntegrationStateRepositoryInterface):
             client_id, integration_id, entity_type, RecordSyncStatus.PENDING, limit
         )
 
-    async def upsert_record(
-        self, record: IntegrationStateRecord
-    ) -> IntegrationStateRecord:
+    async def upsert_record(self, record: IntegrationStateRecord) -> IntegrationStateRecord:
         # Dual-path lookup: try internal ID first, then external ID
         existing = None
         if record.internal_record_id is not None:
@@ -455,10 +429,10 @@ class MockIntegrationStateRepository(IntegrationStateRepositoryInterface):
             existing.error_message = record.error_message
             existing.error_details = record.error_details
             existing.metadata = record.metadata
-            existing.updated_at = datetime.now(timezone.utc)
+            existing.updated_at = datetime.now(UTC)
             return existing
 
-        record.updated_at = datetime.now(timezone.utc)
+        record.updated_at = datetime.now(UTC)
         self._records[(record.client_id, record.id)] = record
         return record
 
@@ -474,7 +448,7 @@ class MockIntegrationStateRepository(IntegrationStateRepositoryInterface):
         record = self._records.get((client_id, record_id))
         if record:
             record.sync_status = status
-            record.updated_at = datetime.now(timezone.utc)
+            record.updated_at = datetime.now(UTC)
             if error_code is not None:
                 record.error_code = error_code
             if error_message is not None:
@@ -492,7 +466,7 @@ class MockIntegrationStateRepository(IntegrationStateRepositoryInterface):
         record = self._records.get((client_id, record_id))
         if record:
             record.sync_status = RecordSyncStatus.SYNCED
-            record.last_synced_at = datetime.now(timezone.utc)
+            record.last_synced_at = datetime.now(UTC)
             record.last_sync_version_id = max(
                 record.internal_version_id, record.external_version_id
             )
@@ -505,7 +479,9 @@ class MockIntegrationStateRepository(IntegrationStateRepositoryInterface):
                 record.last_job_id = job_id
 
     async def list_entity_sync_statuses(
-        self, client_id: UUID, integration_id: UUID,
+        self,
+        client_id: UUID,
+        integration_id: UUID,
     ) -> list[EntitySyncStatus]:
         return [
             status
@@ -531,7 +507,7 @@ class MockIntegrationStateRepository(IntegrationStateRepositoryInterface):
         last_inbound_sync_at: datetime | None = None,
     ) -> EntitySyncStatus:
         key = (client_id, integration_id, entity_type)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         existing = self._entity_sync_status.get(key)
         if existing:
@@ -575,7 +551,7 @@ class MockIntegrationStateRepository(IntegrationStateRepositoryInterface):
         if reset_last_sync_time:
             existing.last_successful_sync_at = None
         existing.records_synced_count = 0
-        existing.updated_at = datetime.now(timezone.utc)
+        existing.updated_at = datetime.now(UTC)
         return existing
 
     async def batch_upsert_records(
@@ -600,7 +576,7 @@ class MockIntegrationStateRepository(IntegrationStateRepositoryInterface):
             record = self._records.get((record_client_id, record_id))
             if record:
                 record.sync_status = RecordSyncStatus.SYNCED
-                record.last_synced_at = datetime.now(timezone.utc)
+                record.last_synced_at = datetime.now(UTC)
                 record.last_sync_version_id = max(
                     record.internal_version_id, record.external_version_id
                 )
@@ -645,9 +621,7 @@ class MockIntegrationStateRepository(IntegrationStateRepositoryInterface):
         self._history[(entry.client_id, entry.id)] = entry
         return entry
 
-    async def batch_create_history(
-        self, entries: list[IntegrationHistoryRecord]
-    ) -> None:
+    async def batch_create_history(self, entries: list[IntegrationHistoryRecord]) -> None:
         for entry in entries:
             self._history[(entry.client_id, entry.id)] = entry
 
@@ -661,9 +635,7 @@ class MockIntegrationStateRepository(IntegrationStateRepositoryInterface):
         page_size: int = 50,
     ) -> tuple[list[IntegrationHistoryRecord], int]:
         records = [
-            r
-            for r in self._history.values()
-            if r.client_id == client_id and r.job_id == job_id
+            r for r in self._history.values() if r.client_id == client_id and r.job_id == job_id
         ]
 
         if entity_type:
@@ -686,11 +658,8 @@ class MockIntegrationStateRepository(IntegrationStateRepositoryInterface):
     ) -> int:
         from datetime import timedelta
 
-        cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
-        to_delete = [
-            key for key, entry in self._history.items()
-            if entry.created_at < cutoff
-        ]
+        cutoff = datetime.now(UTC) - timedelta(days=retention_days)
+        to_delete = [key for key, entry in self._history.items() if entry.created_at < cutoff]
         for key in to_delete:
             del self._history[key]
         return len(to_delete)

@@ -18,7 +18,6 @@ from app.api.dto import (
     UserIntegrationResponse,
     UserIntegrationsResponse,
 )
-from app.domain.interfaces import IntegrationStateRepositoryInterface
 from app.auth import get_client_id
 from app.core.exceptions import (
     ConflictError,
@@ -28,6 +27,7 @@ from app.core.exceptions import (
 )
 from app.core.logging import get_logger
 from app.domain.entities import AvailableIntegration, UserIntegration
+from app.domain.interfaces import IntegrationStateRepositoryInterface
 from app.services.integration_service import IntegrationService
 
 logger = get_logger(__name__)
@@ -134,7 +134,7 @@ async def get_available_integration(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Integration not found: {integration_id}",
-        )
+        ) from None
 
 
 @router.get(
@@ -171,7 +171,7 @@ async def get_user_integration(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Integration not found: {integration_id}",
-        )
+        ) from None
 
 
 @router.post(
@@ -198,17 +198,17 @@ async def connect_integration(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Integration not found: {integration_id}",
-        )
+        ) from None
     except ValidationError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
-        )
+        ) from e
     except ConflictError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(e),
-        )
+        ) from e
 
 
 @router.post(
@@ -236,12 +236,12 @@ async def oauth_callback(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Integration not found: {integration_id}",
-        )
+        ) from None
     except IntegrationError as e:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=str(e),
-        )
+        ) from e
 
 
 @router.delete(
@@ -261,7 +261,7 @@ async def disconnect_integration(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Integration not found: {integration_id}",
-        )
+        ) from None
 
 
 @router.get(
@@ -283,7 +283,7 @@ async def list_entity_sync_statuses(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Integration not found: {integration_id}",
-        )
+        ) from None
 
     statuses = await state_repo.list_entity_sync_statuses(
         client_id=client_id,
@@ -325,7 +325,7 @@ async def reset_entity_last_sync_time(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Integration not found: {integration_id}",
-        )
+        ) from None
 
     result = await state_repo.reset_entity_sync_status(
         client_id=client_id,

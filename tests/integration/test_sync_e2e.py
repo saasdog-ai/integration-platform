@@ -11,7 +11,7 @@ Each test phase operates on the *same* vendor, chained so state carries over:
 """
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
@@ -33,8 +33,8 @@ from app.domain.enums import (
     SyncJobStatus,
     SyncJobType,
 )
-from app.integrations.quickbooks.strategy import QuickBooksSyncStrategy
 from app.infrastructure.queue.memory_queue import InMemoryQueue
+from app.integrations.quickbooks.strategy import QuickBooksSyncStrategy
 from app.services.sync_orchestrator import SyncOrchestrator, register_sync_strategy
 from tests.mocks.adapters import MockAdapterFactory, MockIntegrationAdapter
 from tests.mocks.encryption import MockEncryptionService
@@ -55,6 +55,7 @@ CLIENT_ID = UUID("cccccccc-cccc-cccc-cccc-cccccccccccc")
 # ---------------------------------------------------------------------------
 # Mock internal repo (same as in unit tests)
 # ---------------------------------------------------------------------------
+
 
 class _MockInternalRepo:
     """Fake internal DB so the strategy never touches a real database."""
@@ -105,21 +106,26 @@ class _TestableStrategy(QuickBooksSyncStrategy):
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _banner(text: str) -> None:
-    print(f"\n{'='*70}\n  {text}\n{'='*70}")
+    print(f"\n{'=' * 70}\n  {text}\n{'=' * 70}")
 
 
 def _section(text: str) -> None:
-    print(f"\n>>> {text}\n{'-'*50}")
+    print(f"\n>>> {text}\n{'-' * 50}")
 
 
 def _show_state(label: str, state: IntegrationStateRecord) -> None:
     print(f"  [{label}]")
     print(f"    internal_record_id : {state.internal_record_id}")
     print(f"    external_record_id : {state.external_record_id}")
-    print(f"    iv / ev / lsv      : {state.internal_version_id} / {state.external_version_id} / {state.last_sync_version_id}")
+    print(
+        f"    iv / ev / lsv      : {state.internal_version_id} / {state.external_version_id} / {state.last_sync_version_id}"
+    )
     print(f"    sync_status        : {state.sync_status.value}")
-    print(f"    sync_direction     : {state.sync_direction.value if state.sync_direction else None}")
+    print(
+        f"    sync_direction     : {state.sync_direction.value if state.sync_direction else None}"
+    )
     print(f"    is_in_sync         : {state.is_in_sync}")
     print(f"    metadata.data.name : {(state.metadata or {}).get('data', {}).get('name', 'N/A')}")
 
@@ -134,10 +140,11 @@ def _show_job(job: SyncJob) -> None:
 # Fixture: full mock infrastructure
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 async def infra():
     """Set up mock infrastructure and wire the orchestrator."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Repos
     integration_repo = MockIntegrationRepository()
@@ -235,7 +242,7 @@ async def _create_and_execute_job(
     job_repo: MockSyncJobRepository,
 ) -> SyncJob:
     """Helper: create a sync job and execute it immediately."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     job = SyncJob(
         id=uuid4(),
         client_id=CLIENT_ID,
@@ -254,6 +261,7 @@ async def _create_and_execute_job(
 # ---------------------------------------------------------------------------
 # THE TEST: three phases on one vendor
 # ---------------------------------------------------------------------------
+
 
 class TestVendorSyncLifecycle:
     """Full lifecycle: outbound → inbound → bidirectional (external wins)."""
@@ -293,7 +301,7 @@ class TestVendorSyncLifecycle:
             external_record_id=None,  # Never synced before
             sync_status=RecordSyncStatus.SYNCED,
             sync_direction=None,
-            internal_version_id=2,   # Internal changed
+            internal_version_id=2,  # Internal changed
             external_version_id=1,
             last_sync_version_id=1,  # Last sync was at v1
             last_synced_at=None,
@@ -313,7 +321,9 @@ class TestVendorSyncLifecycle:
         # 4. Verify
         _section("Verify results")
         updated = await state_repo.get_record(
-            CLIENT_ID, INTEGRATION_ID, "vendor",
+            CLIENT_ID,
+            INTEGRATION_ID,
+            "vendor",
             internal_record_id=vendor_internal_id,
         )
         assert updated is not None, "State record should still exist"
@@ -322,14 +332,20 @@ class TestVendorSyncLifecycle:
         # Vendor was pushed to QBO (create, since no external_record_id)
         assert len(adapter.create_record_calls) == 1, "Should have created record in QBO"
         assert adapter.create_record_calls[0][0] == "vendor"
-        print(f"  Adapter calls: create={len(adapter.create_record_calls)}, update={len(adapter.update_record_calls)}")
+        print(
+            f"  Adapter calls: create={len(adapter.create_record_calls)}, update={len(adapter.update_record_calls)}"
+        )
 
         # External record ID should be set
         assert updated.external_record_id is not None, "External ID should be assigned"
         print(f"  External record ID assigned: {updated.external_record_id}")
 
         # Version vectors equalized
-        assert updated.internal_version_id == updated.external_version_id == updated.last_sync_version_id
+        assert (
+            updated.internal_version_id
+            == updated.external_version_id
+            == updated.last_sync_version_id
+        )
         print(f"  Version vectors equalized: iv=ev=lsv={updated.internal_version_id}")
 
         # Direction is OUTBOUND
@@ -377,7 +393,11 @@ class TestVendorSyncLifecycle:
         print(f"  New name: {qbo_vendor_data['name']}")
 
         # Record version vectors before sync
-        v_before = (updated.internal_version_id, updated.external_version_id, updated.last_sync_version_id)
+        v_before = (
+            updated.internal_version_id,
+            updated.external_version_id,
+            updated.last_sync_version_id,
+        )
         print(f"  Version vectors before: iv={v_before[0]}, ev={v_before[1]}, lsv={v_before[2]}")
 
         # 3. Run sync
@@ -388,7 +408,10 @@ class TestVendorSyncLifecycle:
         # 4. Verify
         _section("Verify results")
         after = await state_repo.get_record_by_external_id(
-            CLIENT_ID, INTEGRATION_ID, "vendor", updated.external_record_id,
+            CLIENT_ID,
+            INTEGRATION_ID,
+            "vendor",
+            updated.external_record_id,
         )
         assert after is not None, "State record should still exist"
         _show_state("After sync", after)
@@ -404,7 +427,9 @@ class TestVendorSyncLifecycle:
 
         # Metadata updated with QBO data
         after_name = (after.metadata or {}).get("data", {}).get("name", "")
-        assert "Updated in QBO" in after_name, f"Metadata should reflect QBO change, got: {after_name}"
+        assert "Updated in QBO" in after_name, (
+            f"Metadata should reflect QBO change, got: {after_name}"
+        )
         print(f"  Metadata updated: name={after_name}")
 
         assert after.is_in_sync is True
@@ -443,12 +468,14 @@ class TestVendorSyncLifecycle:
         # a) Internal change: bump internal_version_id
         v_synced = after_inbound.internal_version_id
         after_inbound.internal_version_id = v_synced + 1
-        after_inbound.metadata = {"data": {
-            "name": "Acme Manufacturing — OUR INTERNAL UPDATE",
-            "email_address": "internal@acme.com",
-            "phone": "(555) 111-2222",
-            "status": "ACTIVE",
-        }}
+        after_inbound.metadata = {
+            "data": {
+                "name": "Acme Manufacturing — OUR INTERNAL UPDATE",
+                "email_address": "internal@acme.com",
+                "phone": "(555) 111-2222",
+                "status": "ACTIVE",
+            }
+        }
         await state_repo.upsert_record(after_inbound)
         print(f"  Internal change: iv bumped to {after_inbound.internal_version_id}")
         print(f"  Internal name: {after_inbound.metadata['data']['name']}")
@@ -471,7 +498,9 @@ class TestVendorSyncLifecycle:
         # Confirm conflict
         assert after_inbound.needs_outbound_sync is True
         assert after_inbound.needs_inbound_sync is True
-        print(f"  Conflict detected: needs_outbound={after_inbound.needs_outbound_sync}, needs_inbound={after_inbound.needs_inbound_sync}")
+        print(
+            f"  Conflict detected: needs_outbound={after_inbound.needs_outbound_sync}, needs_inbound={after_inbound.needs_inbound_sync}"
+        )
 
         # 3. Run sync
         _section("Execute bidirectional sync job")
@@ -481,7 +510,10 @@ class TestVendorSyncLifecycle:
         # 4. Verify
         _section("Verify results")
         final = await state_repo.get_record_by_external_id(
-            CLIENT_ID, INTEGRATION_ID, "vendor", after_inbound.external_record_id,
+            CLIENT_ID,
+            INTEGRATION_ID,
+            "vendor",
+            after_inbound.external_record_id,
         )
         assert final is not None, "State record should still exist"
         _show_state("After sync", final)
@@ -490,7 +522,7 @@ class TestVendorSyncLifecycle:
         assert final.sync_direction == SyncDirection.INBOUND, (
             f"External should win — expected INBOUND, got {final.sync_direction}"
         )
-        print(f"  Winner: QBO (sync_direction = INBOUND)")
+        print("  Winner: QBO (sync_direction = INBOUND)")
 
         # Version vectors equalized
         assert final.internal_version_id == final.external_version_id == final.last_sync_version_id

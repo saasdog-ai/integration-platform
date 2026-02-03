@@ -1,8 +1,5 @@
 """Tests for configuration module."""
 
-import os
-from unittest.mock import patch
-
 import pytest
 
 from app.core.config import Settings, get_settings
@@ -13,9 +10,7 @@ class TestSettings:
 
     def test_default_settings(self):
         """Test default settings values."""
-        settings = Settings(
-            database_url="postgresql+asyncpg://test:test@localhost:5432/test"
-        )
+        settings = Settings(database_url="postgresql+asyncpg://test:test@localhost:5432/test")
 
         assert settings.app_env == "development"
         assert settings.auth_enabled is False
@@ -44,9 +39,7 @@ class TestSettings:
 
     def test_database_url_sync_property(self):
         """Test database_url_sync property."""
-        settings = Settings(
-            database_url="postgresql+asyncpg://test:test@localhost:5432/test"
-        )
+        settings = Settings(database_url="postgresql+asyncpg://test:test@localhost:5432/test")
 
         assert settings.database_url_sync == "postgresql://test:test@localhost:5432/test"
         assert "+asyncpg" not in settings.database_url_sync

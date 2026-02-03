@@ -37,9 +37,7 @@ class AdapterFactory(AdapterFactoryInterface):
             # Fall back to mock adapter for development
             from app.infrastructure.adapters.mock.client import MockAdapter
 
-            logger.warning(
-                f"No adapter registered for {integration.name}, using mock adapter"
-            )
+            logger.warning(f"No adapter registered for {integration.name}, using mock adapter")
             return MockAdapter(
                 integration_name=integration.name,
                 access_token=access_token,

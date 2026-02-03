@@ -1,7 +1,7 @@
 """Tests for API endpoints."""
 
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -43,7 +43,7 @@ def sample_client_id():
 @pytest.fixture
 def sample_available_integration(sample_integration_id):
     """Create a sample available integration."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return AvailableIntegration(
         id=sample_integration_id,
         name="QuickBooks Online",
@@ -64,7 +64,7 @@ def sample_available_integration(sample_integration_id):
 @pytest.fixture
 def sample_user_integration(sample_integration_id, sample_client_id, sample_available_integration):
     """Create a sample user integration."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return UserIntegration(
         id=uuid4(),
         client_id=sample_client_id,
@@ -83,7 +83,7 @@ def sample_user_integration(sample_integration_id, sample_client_id, sample_avai
 @pytest.fixture
 def sample_sync_job(sample_integration_id, sample_client_id):
     """Create a sample sync job."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return SyncJob(
         id=uuid4(),
         client_id=sample_client_id,
@@ -406,7 +406,7 @@ class TestSyncJobsEndpoints:
         from app.domain.entities import IntegrationHistoryRecord
         from app.domain.enums import RecordSyncStatus
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         mock_records = [
             IntegrationHistoryRecord(
                 id=uuid4(),

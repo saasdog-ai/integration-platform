@@ -40,9 +40,7 @@ def get_encryption_service() -> EncryptionServiceInterface:
 
     elif settings.cloud_provider == "gcp":
         # GCP Cloud KMS would go here
-        logger.warning(
-            "GCP Cloud KMS not implemented, falling back to local encryption"
-        )
+        logger.warning("GCP Cloud KMS not implemented, falling back to local encryption")
         from app.infrastructure.encryption.local_encryption import (
             LocalEncryptionService,
         )

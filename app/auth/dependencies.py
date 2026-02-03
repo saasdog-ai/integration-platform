@@ -6,7 +6,7 @@ from uuid import UUID
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from app.auth.jwt import JWTPayload, verify_token
+from app.auth.jwt import verify_token
 from app.core.config import get_settings
 from app.core.logging import get_logger
 
@@ -19,7 +19,9 @@ bearer_scheme = HTTPBearer(auto_error=False)
 class AuthenticatedClient:
     """Represents an authenticated client from JWT token."""
 
-    def __init__(self, client_id: UUID, user_id: str | None = None, scopes: list[str] | None = None):
+    def __init__(
+        self, client_id: UUID, user_id: str | None = None, scopes: list[str] | None = None
+    ):
         self.client_id = client_id
         self.user_id = user_id
         self.scopes = scopes or []
@@ -41,7 +43,9 @@ async def get_current_client(
         # Use a consistent test client ID in development
         # This is safer than random UUID - at least data is consistent
         test_client_id = UUID("cccccccc-cccc-cccc-cccc-cccccccccccc")
-        logger.debug("Auth disabled, using test client_id", extra={"client_id": str(test_client_id)})
+        logger.debug(
+            "Auth disabled, using test client_id", extra={"client_id": str(test_client_id)}
+        )
         return AuthenticatedClient(client_id=test_client_id)
 
     # Production mode: require valid token
@@ -60,7 +64,7 @@ async def get_current_client(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(e),
             headers={"WWW-Authenticate": "Bearer"},
-        )
+        ) from e
 
     # Extract client_id from token
     if not payload.client_id:

@@ -1,6 +1,6 @@
 """Mock adapters for external system testing."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -41,7 +41,9 @@ class MockIntegrationAdapter(IntegrationAdapterInterface):
         # Track API calls for assertions
         self.authenticate_calls: list[tuple[str, str]] = []
         self.refresh_token_calls: list[str] = []
-        self.fetch_records_calls: list[tuple[str, datetime | None, str | None, list[str] | None]] = []
+        self.fetch_records_calls: list[
+            tuple[str, datetime | None, str | None, list[str] | None]
+        ] = []
         self.get_record_calls: list[tuple[str, str]] = []
         self.create_record_calls: list[tuple[str, dict]] = []
         self.update_record_calls: list[tuple[str, str, dict]] = []
@@ -68,14 +70,16 @@ class MockIntegrationAdapter(IntegrationAdapterInterface):
             entity_type=entity_type,
             data=data,
             version=version or "1",
-            updated_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(UTC),
         )
         if entity_type not in self._records:
             self._records[entity_type] = {}
         self._records[entity_type][external_id] = record
         return record
 
-    async def authenticate(self, auth_code: str, redirect_uri: str, oauth_config=None) -> OAuthTokens:
+    async def authenticate(
+        self, auth_code: str, redirect_uri: str, oauth_config=None
+    ) -> OAuthTokens:
         """Mock OAuth authentication."""
         self.authenticate_calls.append((auth_code, redirect_uri))
 
@@ -87,7 +91,7 @@ class MockIntegrationAdapter(IntegrationAdapterInterface):
             refresh_token=f"mock_refresh_token_{uuid4().hex[:8]}",
             token_type="Bearer",
             expires_in=3600,
-            expires_at=datetime.now(timezone.utc) + timedelta(seconds=3600),
+            expires_at=datetime.now(UTC) + timedelta(seconds=3600),
         )
 
     async def refresh_token(self, refresh_token: str, oauth_config=None) -> OAuthTokens:
@@ -102,7 +106,7 @@ class MockIntegrationAdapter(IntegrationAdapterInterface):
             refresh_token=f"mock_refresh_token_{uuid4().hex[:8]}",
             token_type="Bearer",
             expires_in=3600,
-            expires_at=datetime.now(timezone.utc) + timedelta(seconds=3600),
+            expires_at=datetime.now(UTC) + timedelta(seconds=3600),
         )
 
     async def fetch_records(
@@ -170,7 +174,7 @@ class MockIntegrationAdapter(IntegrationAdapterInterface):
             entity_type=entity_type,
             data=data,
             version="1",
-            updated_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(UTC),
         )
 
         if entity_type not in self._records:
@@ -200,7 +204,7 @@ class MockIntegrationAdapter(IntegrationAdapterInterface):
             entity_type=entity_type,
             data={**existing.data, **data},
             version=new_version,
-            updated_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(UTC),
         )
         entity_records[external_id] = record
 
@@ -241,9 +245,7 @@ class MockAdapterFactory(AdapterFactoryInterface):
     def __init__(self) -> None:
         self._adapters: dict[str, MockIntegrationAdapter] = {}
 
-    def register_adapter(
-        self, integration_name: str, adapter: MockIntegrationAdapter
-    ) -> None:
+    def register_adapter(self, integration_name: str, adapter: MockIntegrationAdapter) -> None:
         """Register a mock adapter for an integration."""
         self._adapters[integration_name] = adapter
 

@@ -1,6 +1,6 @@
 """Mock adapter for development and testing."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -44,7 +44,9 @@ class MockAdapter(IntegrationAdapterInterface):
             extra={"external_account_id": external_account_id},
         )
 
-    async def authenticate(self, auth_code: str, redirect_uri: str, oauth_config: OAuthConfig | None = None) -> OAuthTokens:
+    async def authenticate(
+        self, auth_code: str, redirect_uri: str, oauth_config: OAuthConfig | None = None
+    ) -> OAuthTokens:
         """Mock OAuth authentication."""
         logger.info(
             "Mock authentication",
@@ -59,10 +61,12 @@ class MockAdapter(IntegrationAdapterInterface):
             refresh_token=f"mock_refresh_{uuid4().hex[:16]}",
             token_type="Bearer",
             expires_in=3600,
-            expires_at=datetime.now(timezone.utc),
+            expires_at=datetime.now(UTC),
         )
 
-    async def refresh_token(self, refresh_token: str, oauth_config: OAuthConfig | None = None) -> OAuthTokens:
+    async def refresh_token(
+        self, refresh_token: str, oauth_config: OAuthConfig | None = None
+    ) -> OAuthTokens:
         """Mock token refresh."""
         logger.info(
             "Mock token refresh",
@@ -74,7 +78,7 @@ class MockAdapter(IntegrationAdapterInterface):
             refresh_token=f"mock_refresh_{uuid4().hex[:16]}",
             token_type="Bearer",
             expires_in=3600,
-            expires_at=datetime.now(timezone.utc),
+            expires_at=datetime.now(UTC),
         )
 
     async def fetch_records(
@@ -154,7 +158,7 @@ class MockAdapter(IntegrationAdapterInterface):
             entity_type=entity_type,
             data=data,
             version="1",
-            updated_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(UTC),
         )
 
         if entity_type not in self._records:
@@ -191,7 +195,7 @@ class MockAdapter(IntegrationAdapterInterface):
             entity_type=entity_type,
             data={**existing.data, **data},
             version=new_version,
-            updated_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(UTC),
         )
         entity_records[external_id] = record
 
@@ -221,7 +225,7 @@ class MockAdapter(IntegrationAdapterInterface):
     def seed_records(self, entity_type: str, count: int = 10) -> list[ExternalRecord]:
         """Seed mock records for testing."""
         records = []
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         if entity_type not in self._records:
             self._records[entity_type] = {}

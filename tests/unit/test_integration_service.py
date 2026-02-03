@@ -1,8 +1,8 @@
 """Tests for integration service."""
 
 import json
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock
+from datetime import UTC, datetime
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
@@ -11,7 +11,6 @@ from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.domain.entities import (
     AvailableIntegration,
     OAuthConfig,
-    OAuthTokens,
     UserIntegration,
 )
 from app.domain.enums import IntegrationStatus
@@ -78,7 +77,7 @@ def sample_integration(mock_repo) -> AvailableIntegration:
 @pytest.fixture
 def sample_user_integration(sample_client_id, sample_integration) -> UserIntegration:
     """Create a sample user integration."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return UserIntegration(
         id=uuid4(),
         client_id=sample_client_id,
@@ -151,9 +150,7 @@ class TestIntegrationServiceBasics:
         """Test getting a specific user integration."""
         await mock_repo.create_user_integration(sample_user_integration)
 
-        integration = await service.get_user_integration(
-            sample_client_id, sample_integration.id
-        )
+        integration = await service.get_user_integration(sample_client_id, sample_integration.id)
         assert integration.id == sample_user_integration.id
 
     async def test_get_user_integration_not_found(
@@ -167,9 +164,7 @@ class TestIntegrationServiceBasics:
 class TestOAuthFlow:
     """Test OAuth connection flow."""
 
-    async def test_get_oauth_authorization_url(
-        self, service, sample_client_id, sample_integration
-    ):
+    async def test_get_oauth_authorization_url(self, service, sample_client_id, sample_integration):
         """Test generating OAuth authorization URL."""
         auth_url = await service.get_oauth_authorization_url(
             client_id=sample_client_id,
@@ -255,7 +250,7 @@ class TestOAuthFlow:
     ):
         """Test completing OAuth callback updates existing integration."""
         # Create existing pending integration
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         existing = UserIntegration(
             id=uuid4(),
             client_id=sample_client_id,
@@ -291,16 +286,12 @@ class TestDisconnect:
         """Test disconnecting an integration."""
         await mock_repo.create_user_integration(sample_user_integration)
 
-        result = await service.disconnect_integration(
-            sample_client_id, sample_integration.id
-        )
+        result = await service.disconnect_integration(sample_client_id, sample_integration.id)
 
         assert result is True
 
         # Verify status updated
-        updated = await mock_repo.get_user_integration(
-            sample_client_id, sample_integration.id
-        )
+        updated = await mock_repo.get_user_integration(sample_client_id, sample_integration.id)
         assert updated.status == IntegrationStatus.REVOKED
         assert updated.credentials_encrypted is None
 
@@ -320,15 +311,17 @@ class TestCredentialManagement:
     ):
         """Test getting decrypted credentials."""
         # Create user integration with encrypted credentials
-        now = datetime.now(timezone.utc)
-        creds_json = json.dumps({
-            "access_token": "test_access_token",
-            "refresh_token": "test_refresh_token",
-            "token_type": "Bearer",
-            "expires_in": 3600,
-            "expires_at": now.isoformat(),
-            "scope": "read write",
-        })
+        now = datetime.now(UTC)
+        creds_json = json.dumps(
+            {
+                "access_token": "test_access_token",
+                "refresh_token": "test_refresh_token",
+                "token_type": "Bearer",
+                "expires_in": 3600,
+                "expires_at": now.isoformat(),
+                "scope": "read write",
+            }
+        )
         encrypted, key_id = await mock_encryption.encrypt(creds_json.encode())
 
         user_integration = UserIntegration(
@@ -344,9 +337,7 @@ class TestCredentialManagement:
         await mock_repo.create_user_integration(user_integration)
 
         # Get decrypted credentials
-        tokens = await service.get_decrypted_credentials(
-            sample_client_id, sample_integration.id
-        )
+        tokens = await service.get_decrypted_credentials(sample_client_id, sample_integration.id)
 
         assert tokens.access_token == "test_access_token"
         assert tokens.refresh_token == "test_refresh_token"
@@ -355,7 +346,7 @@ class TestCredentialManagement:
         self, service, mock_repo, sample_client_id, sample_integration
     ):
         """Test error when integration not connected."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         user_integration = UserIntegration(
             id=uuid4(),
             client_id=sample_client_id,
@@ -367,15 +358,13 @@ class TestCredentialManagement:
         await mock_repo.create_user_integration(user_integration)
 
         with pytest.raises(ValidationError):
-            await service.get_decrypted_credentials(
-                sample_client_id, sample_integration.id
-            )
+            await service.get_decrypted_credentials(sample_client_id, sample_integration.id)
 
     async def test_get_decrypted_credentials_no_credentials(
         self, service, mock_repo, sample_client_id, sample_integration
     ):
         """Test error when no credentials stored."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         user_integration = UserIntegration(
             id=uuid4(),
             client_id=sample_client_id,
@@ -389,6 +378,4 @@ class TestCredentialManagement:
         await mock_repo.create_user_integration(user_integration)
 
         with pytest.raises(ValidationError):
-            await service.get_decrypted_credentials(
-                sample_client_id, sample_integration.id
-            )
+            await service.get_decrypted_credentials(sample_client_id, sample_integration.id)

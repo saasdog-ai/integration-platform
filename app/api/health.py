@@ -1,6 +1,6 @@
 """Health check endpoints."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, status
 
@@ -23,7 +23,7 @@ async def health_check() -> HealthResponse:
     return HealthResponse(
         status="healthy",
         version="0.1.0",
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
     )
 
 
@@ -58,7 +58,7 @@ async def readiness_check() -> HealthDetailResponse:
     try:
         from app.infrastructure.queue.factory import get_message_queue
 
-        queue = get_message_queue()
+        get_message_queue()
         # Queue is healthy if it's instantiated
     except Exception as e:
         logger.error("Queue health check failed", extra={"error": str(e)})
@@ -68,22 +68,20 @@ async def readiness_check() -> HealthDetailResponse:
     try:
         from app.infrastructure.encryption.factory import get_encryption_service
 
-        encryption = get_encryption_service()
+        get_encryption_service()
         # Encryption is healthy if it's instantiated
     except Exception as e:
         logger.error("Encryption health check failed", extra={"error": str(e)})
         encryption_status = f"unhealthy: {e}"
 
     overall_status = "healthy"
-    if any(
-        s.startswith("unhealthy") for s in [db_status, queue_status, encryption_status]
-    ):
+    if any(s.startswith("unhealthy") for s in [db_status, queue_status, encryption_status]):
         overall_status = "degraded"
 
     return HealthDetailResponse(
         status=overall_status,
         version="0.1.0",
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         database=db_status,
         queue=queue_status,
         encryption=encryption_status,

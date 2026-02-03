@@ -1,26 +1,23 @@
 """Tests for QuickBooks integration — mappers, strategy ordering, adapter helpers."""
 
-from datetime import datetime, timezone
-
-import pytest
+from datetime import UTC, datetime
 
 from app.domain.entities import SyncRule
 from app.domain.enums import SyncDirection
 from app.integrations.quickbooks.constants import INBOUND_ENTITY_ORDER, OUTBOUND_ENTITY_ORDER
 from app.integrations.quickbooks.mappers import (
+    _map_address_inbound,
+    _map_address_outbound,
+    _parse_qbo_timestamp,
+    _safe_json,
     map_bill_inbound,
     map_bill_outbound,
     map_invoice_inbound,
     map_invoice_outbound,
     map_vendor_inbound,
     map_vendor_outbound,
-    _map_address_inbound,
-    _map_address_outbound,
-    _parse_qbo_timestamp,
-    _safe_json,
 )
 from app.integrations.quickbooks.strategy import QuickBooksSyncStrategy
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -201,7 +198,11 @@ class TestBillMappers:
             "TotalAmt": 100,
             "Balance": 100,
             "Line": [
-                {"Amount": 100, "Description": "Work", "DetailType": "AccountBasedExpenseLineDetail"},
+                {
+                    "Amount": 100,
+                    "Description": "Work",
+                    "DetailType": "AccountBasedExpenseLineDetail",
+                },
                 {"Amount": 100, "DetailType": "SubTotalLineDetail"},
             ],
         }
@@ -211,7 +212,7 @@ class TestBillMappers:
     def test_outbound(self):
         internal = {
             "bill_number": "B-002",
-            "date": datetime(2024, 6, 1, tzinfo=timezone.utc),
+            "date": datetime(2024, 6, 1, tzinfo=UTC),
             "due_date": "2024-07-01",
             "currency": "USD",
             "vendor_external_id": "42",
@@ -287,7 +288,7 @@ class TestInvoiceMappers:
     def test_outbound(self):
         internal = {
             "invoice_number": "INV-002",
-            "issue_date": datetime(2024, 6, 1, tzinfo=timezone.utc),
+            "issue_date": datetime(2024, 6, 1, tzinfo=UTC),
             "due_date": "2024-07-01",
             "currency": "CAD",
             "memo": "Test memo",

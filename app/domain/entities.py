@@ -37,7 +37,9 @@ class SyncRule(BaseModel):
     entity_type: str  # NOT an enum - configurable string from DB
     direction: SyncDirection
     enabled: bool = True
-    master_if_conflict: ConflictResolution = ConflictResolution.EXTERNAL  # Default to external as master
+    master_if_conflict: ConflictResolution = (
+        ConflictResolution.EXTERNAL
+    )  # Default to external as master
     field_mappings: dict[str, str] | None = None  # internal_field -> external_field
 
 
@@ -155,11 +157,7 @@ class IntegrationStateRecord(BaseEntity):
     @property
     def is_in_sync(self) -> bool:
         """Check if all version vectors match (fully synced)."""
-        return (
-            self.internal_version_id
-            == self.external_version_id
-            == self.last_sync_version_id
-        )
+        return self.internal_version_id == self.external_version_id == self.last_sync_version_id
 
     @property
     def needs_outbound_sync(self) -> bool:
@@ -248,4 +246,6 @@ class SyncJobMessage(BaseModel):
     integration_id: UUID
     job_type: SyncJobType
     entity_types: list[str] | None = None  # Simple list of entity types (sync all records)
-    entity_requests: list[EntitySyncRequest] | None = None  # Detailed requests with optional record IDs
+    entity_requests: list[EntitySyncRequest] | None = (
+        None  # Detailed requests with optional record IDs
+    )

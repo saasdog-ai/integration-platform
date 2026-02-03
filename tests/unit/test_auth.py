@@ -1,6 +1,6 @@
 """Tests for authentication modules."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
@@ -33,7 +33,7 @@ class TestJWTPayload:
     def test_create_payload_with_all_fields(self):
         """Test creating payload with all fields."""
         client_id = uuid4()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         payload = JWTPayload(
             sub="user-123",
@@ -160,7 +160,7 @@ class TestVerifyToken:
 
     def test_verify_token_missing_client_id(self, mock_settings):
         """Test verifying token without client_id claim."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         payload = {
             "sub": "user-123",
             "exp": (now + timedelta(hours=1)).timestamp(),
@@ -182,7 +182,7 @@ class TestVerifyToken:
 
     def test_verify_token_invalid_client_id_format(self, mock_settings):
         """Test verifying token with invalid client_id format."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         payload = {
             "client_id": "not-a-uuid",
             "exp": (now + timedelta(hours=1)).timestamp(),
@@ -216,9 +216,7 @@ class TestVerifyToken:
     def test_verify_token_parses_scopes(self, mock_settings, sample_client_id):
         """Test that scopes are correctly parsed."""
         with patch("app.auth.jwt.get_settings", return_value=mock_settings):
-            token = create_token(
-                sample_client_id, scopes=["read", "write", "admin"]
-            )
+            token = create_token(sample_client_id, scopes=["read", "write", "admin"])
             payload = verify_token(token)
 
         assert payload.scopes == ["read", "write", "admin"]
@@ -242,7 +240,7 @@ class TestJWTIntegration:
         assert payload.client_id == sample_client_id
         assert payload.sub == "user-integration-test"
         assert "integrations:*" in payload.scopes
-        assert payload.exp > datetime.now(timezone.utc)
+        assert payload.exp > datetime.now(UTC)
 
     def test_token_roundtrip_preserves_data(self, mock_settings, sample_client_id):
         """Test that data survives a create/verify roundtrip."""

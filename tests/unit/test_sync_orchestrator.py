@@ -1,6 +1,6 @@
 """Tests for sync orchestrator service."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -22,6 +22,7 @@ from app.domain.enums import (
     SyncJobTrigger,
     SyncJobType,
 )
+from app.infrastructure.queue.memory_queue import InMemoryQueue
 from app.services.sync_orchestrator import SyncOrchestrator
 from tests.mocks.adapters import MockAdapterFactory
 from tests.mocks.encryption import MockEncryptionService
@@ -30,7 +31,6 @@ from tests.mocks.repositories import (
     MockIntegrationStateRepository,
     MockSyncJobRepository,
 )
-from app.infrastructure.queue.memory_queue import InMemoryQueue
 
 
 @pytest.fixture
@@ -126,7 +126,7 @@ async def connected_user_integration(
     mock_integration_repo, sample_client_id, sample_integration
 ) -> UserIntegration:
     """Create a connected user integration."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     user_integration = UserIntegration(
         id=uuid4(),
         client_id=sample_client_id,
@@ -171,9 +171,7 @@ class TestTriggerSync:
         assert job.id is not None
         assert job.triggered_by == SyncJobTrigger.USER
 
-    async def test_trigger_sync_integration_not_found(
-        self, orchestrator, sample_client_id
-    ):
+    async def test_trigger_sync_integration_not_found(self, orchestrator, sample_client_id):
         """Test error when integration doesn't exist."""
         with pytest.raises(NotFoundError):
             await orchestrator.trigger_sync(
@@ -186,7 +184,7 @@ class TestTriggerSync:
     ):
         """Test error when integration not connected."""
         # Create pending user integration
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         user_integration = UserIntegration(
             id=uuid4(),
             client_id=sample_client_id,
@@ -214,7 +212,7 @@ class TestTriggerSync:
     ):
         """Test error when job already running."""
         # Create running job
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         running_job = SyncJob(
             id=uuid4(),
             client_id=sample_client_id,
@@ -246,7 +244,7 @@ class TestTriggerSync:
     ):
         """Test error when job already pending (queued but not yet running)."""
         # Create pending job
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         pending_job = SyncJob(
             id=uuid4(),
             client_id=sample_client_id,
@@ -276,7 +274,7 @@ class TestTriggerSync:
         connected_user_integration,
     ):
         """Test that new job can be created after previous job completes."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Create a completed job
         completed_job = SyncJob(
@@ -311,7 +309,7 @@ class TestTriggerSync:
         connected_user_integration,
     ):
         """Test that jobs for different integrations don't conflict."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Create another integration and connect it
         other_integration = mock_integration_repo.seed_available_integration(
@@ -399,7 +397,7 @@ class TestCancelSyncJob:
         sample_integration,
     ):
         """Test canceling a pending job."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         job = SyncJob(
             id=uuid4(),
             client_id=sample_client_id,
@@ -424,7 +422,7 @@ class TestCancelSyncJob:
         sample_integration,
     ):
         """Test canceling a running job."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         job = SyncJob(
             id=uuid4(),
             client_id=sample_client_id,
@@ -442,9 +440,7 @@ class TestCancelSyncJob:
 
         assert cancelled_job.status == SyncJobStatus.CANCELLED
 
-    async def test_cancel_job_not_found(
-        self, orchestrator, sample_client_id
-    ):
+    async def test_cancel_job_not_found(self, orchestrator, sample_client_id):
         """Test error when job doesn't exist."""
         with pytest.raises(NotFoundError):
             await orchestrator.cancel_sync_job(sample_client_id, uuid4())
@@ -457,7 +453,7 @@ class TestCancelSyncJob:
         sample_integration,
     ):
         """Test error when job belongs to different client."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         job = SyncJob(
             id=uuid4(),
             client_id=uuid4(),  # Different client
@@ -481,7 +477,7 @@ class TestCancelSyncJob:
         sample_integration,
     ):
         """Test error when trying to cancel completed job."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         job = SyncJob(
             id=uuid4(),
             client_id=sample_client_id,
@@ -511,7 +507,7 @@ class TestGetJobs:
         sample_integration,
     ):
         """Test getting a specific job."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         job = SyncJob(
             id=uuid4(),
             client_id=sample_client_id,
@@ -528,9 +524,7 @@ class TestGetJobs:
 
         assert retrieved_job.id == job.id
 
-    async def test_get_job_not_found(
-        self, orchestrator, sample_client_id
-    ):
+    async def test_get_job_not_found(self, orchestrator, sample_client_id):
         """Test error when job not found."""
         with pytest.raises(NotFoundError):
             await orchestrator.get_job(sample_client_id, uuid4())
@@ -543,8 +537,8 @@ class TestGetJobs:
         sample_integration,
     ):
         """Test getting all jobs for a client."""
-        now = datetime.now(timezone.utc)
-        for i in range(3):
+        now = datetime.now(UTC)
+        for _i in range(3):
             job = SyncJob(
                 id=uuid4(),
                 client_id=sample_client_id,
@@ -569,7 +563,7 @@ class TestGetJobs:
         sample_integration,
     ):
         """Test filtering jobs by status."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Create jobs with different statuses
         pending_job = SyncJob(
@@ -597,9 +591,7 @@ class TestGetJobs:
         await mock_job_repo.create_job(completed_job)
 
         # Get only pending jobs
-        pending_jobs = await orchestrator.get_jobs(
-            sample_client_id, status=SyncJobStatus.PENDING
-        )
+        pending_jobs = await orchestrator.get_jobs(sample_client_id, status=SyncJobStatus.PENDING)
 
         assert len(pending_jobs) == 1
         assert pending_jobs[0].status == SyncJobStatus.PENDING
@@ -616,9 +608,9 @@ class TestGetJobsPaginated:
         sample_integration,
     ):
         """Test getting paginated jobs."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         # Create multiple jobs
-        for i in range(15):
+        for _i in range(15):
             job = SyncJob(
                 id=uuid4(),
                 client_id=sample_client_id,
@@ -632,9 +624,7 @@ class TestGetJobsPaginated:
             await mock_job_repo.create_job(job)
 
         # Get first page
-        jobs, total = await orchestrator.get_jobs_paginated(
-            sample_client_id, page=1, page_size=10
-        )
+        jobs, total = await orchestrator.get_jobs_paginated(sample_client_id, page=1, page_size=10)
 
         assert len(jobs) == 10
         assert total == 15
@@ -655,10 +645,10 @@ class TestGetJobsPaginated:
         sample_integration,
     ):
         """Test paginated jobs with status filter."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Create jobs with different statuses
-        for i in range(5):
+        for _i in range(5):
             job = SyncJob(
                 id=uuid4(),
                 client_id=sample_client_id,
@@ -671,7 +661,7 @@ class TestGetJobsPaginated:
             )
             await mock_job_repo.create_job(job)
 
-        for i in range(3):
+        for _i in range(3):
             job = SyncJob(
                 id=uuid4(),
                 client_id=sample_client_id,
@@ -710,7 +700,7 @@ class TestGetJobRecords:
         from app.domain.entities import IntegrationHistoryRecord
         from app.domain.enums import RecordSyncStatus
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         job = SyncJob(
             id=uuid4(),
             client_id=sample_client_id,
@@ -762,7 +752,7 @@ class TestGetJobRecords:
         from app.domain.entities import IntegrationHistoryRecord
         from app.domain.enums import RecordSyncStatus
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         job = SyncJob(
             id=uuid4(),
             client_id=sample_client_id,
@@ -828,7 +818,7 @@ class TestGetJobRecords:
         from app.domain.entities import IntegrationHistoryRecord
         from app.domain.enums import RecordSyncStatus
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         job = SyncJob(
             id=uuid4(),
             client_id=sample_client_id,
@@ -891,7 +881,7 @@ class TestExecuteSyncJob:
         connected_user_integration,
     ):
         """Test job execution fails gracefully without settings."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         job = SyncJob(
             id=uuid4(),
             client_id=sample_client_id,
@@ -934,7 +924,7 @@ class TestExecuteSyncJob:
             sample_client_id, sample_integration.id, settings
         )
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         job = SyncJob(
             id=uuid4(),
             client_id=sample_client_id,
@@ -974,7 +964,7 @@ class TestExecuteSyncJob:
             sample_client_id, sample_integration.id, settings
         )
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         job = SyncJob(
             id=uuid4(),
             client_id=sample_client_id,
@@ -1082,16 +1072,12 @@ class TestResolveRequestedEntityTypes:
 
     def test_empty_entity_types_list(self):
         """Empty entity_types list treated as no filtering."""
-        result = SyncOrchestrator._resolve_requested_entity_types(
-            {"entity_types": []}
-        )
+        result = SyncOrchestrator._resolve_requested_entity_types({"entity_types": []})
         assert result is None
 
     def test_empty_entity_requests_list(self):
         """Empty entity_requests list treated as no filtering."""
-        result = SyncOrchestrator._resolve_requested_entity_types(
-            {"entity_requests": []}
-        )
+        result = SyncOrchestrator._resolve_requested_entity_types({"entity_requests": []})
         assert result is None
 
 
@@ -1129,7 +1115,7 @@ class TestEntityTypeFiltering:
                 {"name": f"Test {rule.entity_type}"},
             )
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         job = SyncJob(
             id=uuid4(),
             client_id=sample_client_id,
@@ -1161,8 +1147,12 @@ class TestEntityTypeFiltering:
             SyncRule(entity_type="vendor", direction=SyncDirection.INBOUND, enabled=True),
         ]
         job, adapter = await self._setup_rules_and_job(
-            mock_integration_repo, mock_job_repo, mock_adapter_factory,
-            sample_client_id, sample_integration, rules,
+            mock_integration_repo,
+            mock_job_repo,
+            mock_adapter_factory,
+            sample_client_id,
+            sample_integration,
+            rules,
             job_params=None,
         )
 
@@ -1189,8 +1179,12 @@ class TestEntityTypeFiltering:
             SyncRule(entity_type="vendor", direction=SyncDirection.INBOUND, enabled=True),
         ]
         job, adapter = await self._setup_rules_and_job(
-            mock_integration_repo, mock_job_repo, mock_adapter_factory,
-            sample_client_id, sample_integration, rules,
+            mock_integration_repo,
+            mock_job_repo,
+            mock_adapter_factory,
+            sample_client_id,
+            sample_integration,
+            rules,
             job_params={"entity_types": ["vendor"]},
         )
 
@@ -1215,8 +1209,12 @@ class TestEntityTypeFiltering:
             SyncRule(entity_type="bill", direction=SyncDirection.INBOUND, enabled=True),
         ]
         job, adapter = await self._setup_rules_and_job(
-            mock_integration_repo, mock_job_repo, mock_adapter_factory,
-            sample_client_id, sample_integration, rules,
+            mock_integration_repo,
+            mock_job_repo,
+            mock_adapter_factory,
+            sample_client_id,
+            sample_integration,
+            rules,
             job_params={"entity_types": ["vendor"]},
         )
 
@@ -1242,8 +1240,12 @@ class TestEntityTypeFiltering:
             SyncRule(entity_type="vendor", direction=SyncDirection.INBOUND, enabled=True),
         ]
         job, adapter = await self._setup_rules_and_job(
-            mock_integration_repo, mock_job_repo, mock_adapter_factory,
-            sample_client_id, sample_integration, rules,
+            mock_integration_repo,
+            mock_job_repo,
+            mock_adapter_factory,
+            sample_client_id,
+            sample_integration,
+            rules,
             job_params={
                 "entity_requests": [
                     {"entity_type": "vendor", "record_ids": ["v-1"]},
@@ -1273,8 +1275,12 @@ class TestEntityTypeFiltering:
             SyncRule(entity_type="vendor", direction=SyncDirection.INBOUND, enabled=False),
         ]
         job, adapter = await self._setup_rules_and_job(
-            mock_integration_repo, mock_job_repo, mock_adapter_factory,
-            sample_client_id, sample_integration, rules,
+            mock_integration_repo,
+            mock_job_repo,
+            mock_adapter_factory,
+            sample_client_id,
+            sample_integration,
+            rules,
             job_params={"entity_types": ["bill", "vendor"]},
         )
 
@@ -1299,12 +1305,16 @@ class TestEntityTypeFiltering:
             SyncRule(entity_type="vendor", direction=SyncDirection.OUTBOUND, enabled=True),
         ]
         job, adapter = await self._setup_rules_and_job(
-            mock_integration_repo, mock_job_repo, mock_adapter_factory,
-            sample_client_id, sample_integration, rules,
+            mock_integration_repo,
+            mock_job_repo,
+            mock_adapter_factory,
+            sample_client_id,
+            sample_integration,
+            rules,
             job_params={"entity_types": ["vendor"]},
         )
 
-        result = await orchestrator.execute_sync_job(job)
+        await orchestrator.execute_sync_job(job)
 
         # Outbound rules don't call fetch_records (that's inbound only);
         # job may fail in strategy path but the key point is no inbound fetch
@@ -1343,11 +1353,13 @@ class TestEnsureValidToken:
         creds = {
             "access_token": "valid_token",
             "refresh_token": "rt",
-            "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            "expires_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
         }
 
         result = await orchestrator._ensure_valid_token(
-            sample_client_id, sample_integration.id, creds,
+            sample_client_id,
+            sample_integration.id,
+            creds,
         )
 
         assert result == "valid_token"
@@ -1365,7 +1377,9 @@ class TestEnsureValidToken:
         }
 
         result = await orchestrator._ensure_valid_token(
-            sample_client_id, sample_integration.id, creds,
+            sample_client_id,
+            sample_integration.id,
+            creds,
         )
 
         assert result == "legacy_token"
@@ -1384,7 +1398,9 @@ class TestEnsureValidToken:
         }
 
         result = await orchestrator._ensure_valid_token(
-            sample_client_id, sample_integration.id, creds,
+            sample_client_id,
+            sample_integration.id,
+            creds,
         )
 
         assert result == "old_token"
@@ -1399,25 +1415,26 @@ class TestEnsureValidToken:
         creds = {
             "access_token": "expired_token",
             "refresh_token": "rt",
-            "expires_at": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+            "expires_at": (datetime.now(UTC) - timedelta(hours=1)).isoformat(),
         }
 
         mock_tokens = MagicMock()
         mock_tokens.access_token = "refreshed_token"
 
-        with patch(
-            "app.services.sync_orchestrator.IntegrationService"
-        ) as MockSvc:
+        with patch("app.services.sync_orchestrator.IntegrationService") as MockSvc:
             instance = MockSvc.return_value
             instance.refresh_integration_token = AsyncMock(return_value=mock_tokens)
 
             result = await orchestrator._ensure_valid_token(
-                sample_client_id, sample_integration.id, creds,
+                sample_client_id,
+                sample_integration.id,
+                creds,
             )
 
         assert result == "refreshed_token"
         instance.refresh_integration_token.assert_awaited_once_with(
-            sample_client_id, sample_integration.id,
+            sample_client_id,
+            sample_integration.id,
         )
 
     async def test_token_expiring_within_buffer(
@@ -1430,20 +1447,20 @@ class TestEnsureValidToken:
         creds = {
             "access_token": "almost_expired",
             "refresh_token": "rt",
-            "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=3)).isoformat(),
+            "expires_at": (datetime.now(UTC) + timedelta(minutes=3)).isoformat(),
         }
 
         mock_tokens = MagicMock()
         mock_tokens.access_token = "new_token"
 
-        with patch(
-            "app.services.sync_orchestrator.IntegrationService"
-        ) as MockSvc:
+        with patch("app.services.sync_orchestrator.IntegrationService") as MockSvc:
             instance = MockSvc.return_value
             instance.refresh_integration_token = AsyncMock(return_value=mock_tokens)
 
             result = await orchestrator._ensure_valid_token(
-                sample_client_id, sample_integration.id, creds,
+                sample_client_id,
+                sample_integration.id,
+                creds,
             )
 
         assert result == "new_token"
@@ -1461,12 +1478,10 @@ class TestEnsureValidToken:
         creds = {
             "access_token": "expired_token",
             "refresh_token": "rt",
-            "expires_at": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+            "expires_at": (datetime.now(UTC) - timedelta(hours=1)).isoformat(),
         }
 
-        with patch(
-            "app.services.sync_orchestrator.IntegrationService"
-        ) as MockSvc:
+        with patch("app.services.sync_orchestrator.IntegrationService") as MockSvc:
             instance = MockSvc.return_value
             instance.refresh_integration_token = AsyncMock(
                 side_effect=IntegrationError("QBO", "No refresh token"),
@@ -1474,7 +1489,9 @@ class TestEnsureValidToken:
 
             with pytest.raises(SyncError, match="Token refresh failed after 2 attempts"):
                 await orchestrator._ensure_valid_token(
-                    sample_client_id, sample_integration.id, creds,
+                    sample_client_id,
+                    sample_integration.id,
+                    creds,
                 )
 
         assert instance.refresh_integration_token.await_count == 2
@@ -1499,9 +1516,12 @@ class TestSplitSyncCursors:
 
     @pytest.fixture
     async def generic_connected(
-        self, mock_integration_repo, sample_client_id, generic_integration,
+        self,
+        mock_integration_repo,
+        sample_client_id,
+        generic_integration,
     ) -> UserIntegration:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         ui = UserIntegration(
             id=uuid4(),
             client_id=sample_client_id,
@@ -1542,15 +1562,19 @@ class TestSplitSyncCursors:
             ],
         )
         await mock_integration_repo.upsert_user_settings(
-            sample_client_id, integration.id, settings,
+            sample_client_id,
+            integration.id,
+            settings,
         )
 
         adapter = mock_adapter_factory.get_adapter(
-            integration, "mock_token", "ext-123",
+            integration,
+            "mock_token",
+            "ext-123",
         )
 
         if seed_records:
-            ts = custom_updated_at or datetime(2026, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+            ts = custom_updated_at or datetime(2026, 1, 15, 12, 0, 0, tzinfo=UTC)
             record = ExternalRecord(
                 id="ext-bill-1",
                 entity_type="bill",
@@ -1561,11 +1585,11 @@ class TestSplitSyncCursors:
             adapter._records.setdefault("bill", {})["ext-bill-1"] = record
 
         if preset_entity_status is not None:
-            mock_state_repo._entity_sync_status[
-                (sample_client_id, integration.id, "bill")
-            ] = preset_entity_status
+            mock_state_repo._entity_sync_status[(sample_client_id, integration.id, "bill")] = (
+                preset_entity_status
+            )
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         job = SyncJob(
             id=uuid4(),
             client_id=sample_client_id,
@@ -1595,12 +1619,17 @@ class TestSplitSyncCursors:
         generic_connected,
     ):
         """Inbound sync sets last_inbound_sync_at to max external timestamp."""
-        qbo_ts = datetime(2026, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+        qbo_ts = datetime(2026, 1, 15, 12, 0, 0, tzinfo=UTC)
 
         await self._run_inbound_job(
-            mock_integration_repo, mock_job_repo, mock_adapter_factory,
-            mock_state_repo, orchestrator, sample_client_id,
-            generic_integration, custom_updated_at=qbo_ts,
+            mock_integration_repo,
+            mock_job_repo,
+            mock_adapter_factory,
+            mock_state_repo,
+            orchestrator,
+            sample_client_id,
+            generic_integration,
+            custom_updated_at=qbo_ts,
         )
 
         entity_status = mock_state_repo._entity_sync_status.get(
@@ -1624,8 +1653,8 @@ class TestSplitSyncCursors:
         from app.domain.entities import EntitySyncStatus, IntegrationStateRecord
         from app.domain.enums import RecordSyncStatus
 
-        qbo_ts = datetime(2026, 1, 10, 8, 0, 0, tzinfo=timezone.utc)
-        now = datetime.now(timezone.utc)
+        qbo_ts = datetime(2026, 1, 10, 8, 0, 0, tzinfo=UTC)
+        now = datetime.now(UTC)
 
         entity_status = EntitySyncStatus(
             id=uuid4(),
@@ -1639,9 +1668,9 @@ class TestSplitSyncCursors:
             created_at=now,
             updated_at=now,
         )
-        mock_state_repo._entity_sync_status[
-            (sample_client_id, generic_integration.id, "bill")
-        ] = entity_status
+        mock_state_repo._entity_sync_status[(sample_client_id, generic_integration.id, "bill")] = (
+            entity_status
+        )
 
         settings = UserIntegrationSettings(
             sync_rules=[
@@ -1649,7 +1678,9 @@ class TestSplitSyncCursors:
             ],
         )
         await mock_integration_repo.upsert_user_settings(
-            sample_client_id, generic_integration.id, settings,
+            sample_client_id,
+            generic_integration.id,
+            settings,
         )
 
         # Pending record for outbound sync
@@ -1668,8 +1699,10 @@ class TestSplitSyncCursors:
         )
         mock_state_repo._records[(sample_client_id, pending.id)] = pending
 
-        adapter = mock_adapter_factory.get_adapter(
-            generic_integration, "mock_token", "ext-123",
+        mock_adapter_factory.get_adapter(
+            generic_integration,
+            "mock_token",
+            "ext-123",
         )
 
         job = SyncJob(
@@ -1705,9 +1738,9 @@ class TestSplitSyncCursors:
         """Incremental inbound sync uses last_inbound_sync_at (not last_successful_sync_at)."""
         from app.domain.entities import EntitySyncStatus
 
-        inbound_ts = datetime(2026, 1, 10, 8, 0, 0, tzinfo=timezone.utc)
-        outbound_ts = datetime(2026, 1, 12, 14, 0, 0, tzinfo=timezone.utc)
-        now = datetime.now(timezone.utc)
+        inbound_ts = datetime(2026, 1, 10, 8, 0, 0, tzinfo=UTC)
+        outbound_ts = datetime(2026, 1, 12, 14, 0, 0, tzinfo=UTC)
+        now = datetime.now(UTC)
 
         entity_status = EntitySyncStatus(
             id=uuid4(),
@@ -1721,9 +1754,9 @@ class TestSplitSyncCursors:
             created_at=now,
             updated_at=now,
         )
-        mock_state_repo._entity_sync_status[
-            (sample_client_id, generic_integration.id, "bill")
-        ] = entity_status
+        mock_state_repo._entity_sync_status[(sample_client_id, generic_integration.id, "bill")] = (
+            entity_status
+        )
 
         settings = UserIntegrationSettings(
             sync_rules=[
@@ -1731,11 +1764,15 @@ class TestSplitSyncCursors:
             ],
         )
         await mock_integration_repo.upsert_user_settings(
-            sample_client_id, generic_integration.id, settings,
+            sample_client_id,
+            generic_integration.id,
+            settings,
         )
 
         adapter = mock_adapter_factory.get_adapter(
-            generic_integration, "mock_token", "ext-123",
+            generic_integration,
+            "mock_token",
+            "ext-123",
         )
 
         job = SyncJob(
@@ -1770,8 +1807,8 @@ class TestSplitSyncCursors:
         """When last_inbound_sync_at is None, falls back to last_successful_sync_at."""
         from app.domain.entities import EntitySyncStatus
 
-        outbound_ts = datetime(2026, 1, 12, 14, 0, 0, tzinfo=timezone.utc)
-        now = datetime.now(timezone.utc)
+        outbound_ts = datetime(2026, 1, 12, 14, 0, 0, tzinfo=UTC)
+        now = datetime.now(UTC)
 
         entity_status = EntitySyncStatus(
             id=uuid4(),
@@ -1785,9 +1822,9 @@ class TestSplitSyncCursors:
             created_at=now,
             updated_at=now,
         )
-        mock_state_repo._entity_sync_status[
-            (sample_client_id, generic_integration.id, "bill")
-        ] = entity_status
+        mock_state_repo._entity_sync_status[(sample_client_id, generic_integration.id, "bill")] = (
+            entity_status
+        )
 
         settings = UserIntegrationSettings(
             sync_rules=[
@@ -1795,11 +1832,15 @@ class TestSplitSyncCursors:
             ],
         )
         await mock_integration_repo.upsert_user_settings(
-            sample_client_id, generic_integration.id, settings,
+            sample_client_id,
+            generic_integration.id,
+            settings,
         )
 
         adapter = mock_adapter_factory.get_adapter(
-            generic_integration, "mock_token", "ext-123",
+            generic_integration,
+            "mock_token",
+            "ext-123",
         )
 
         job = SyncJob(
@@ -1834,8 +1875,8 @@ class TestSplitSyncCursors:
         """When adapter returns 0 records, last_inbound_sync_at stays unchanged."""
         from app.domain.entities import EntitySyncStatus
 
-        original_inbound_ts = datetime(2026, 1, 10, 8, 0, 0, tzinfo=timezone.utc)
-        now = datetime.now(timezone.utc)
+        original_inbound_ts = datetime(2026, 1, 10, 8, 0, 0, tzinfo=UTC)
+        now = datetime.now(UTC)
 
         entity_status = EntitySyncStatus(
             id=uuid4(),
@@ -1849,14 +1890,19 @@ class TestSplitSyncCursors:
             created_at=now,
             updated_at=now,
         )
-        mock_state_repo._entity_sync_status[
-            (sample_client_id, generic_integration.id, "bill")
-        ] = entity_status
+        mock_state_repo._entity_sync_status[(sample_client_id, generic_integration.id, "bill")] = (
+            entity_status
+        )
 
         await self._run_inbound_job(
-            mock_integration_repo, mock_job_repo, mock_adapter_factory,
-            mock_state_repo, orchestrator, sample_client_id,
-            generic_integration, seed_records=False,
+            mock_integration_repo,
+            mock_job_repo,
+            mock_adapter_factory,
+            mock_state_repo,
+            orchestrator,
+            sample_client_id,
+            generic_integration,
+            seed_records=False,
             preset_entity_status=entity_status,
         )
 

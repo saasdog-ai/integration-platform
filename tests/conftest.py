@@ -2,7 +2,7 @@
 
 import asyncio
 from collections.abc import AsyncGenerator, Generator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -120,7 +120,7 @@ def sample_user_integration(
     sample_available_integration: AvailableIntegration,
 ) -> UserIntegration:
     """Create a sample user integration."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return UserIntegration(
         id=uuid4(),
         client_id=sample_client_id,
@@ -142,7 +142,7 @@ def sample_sync_job(
     sample_available_integration: AvailableIntegration,
 ) -> SyncJob:
     """Create a sample sync job."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return SyncJob(
         id=uuid4(),
         client_id=sample_client_id,

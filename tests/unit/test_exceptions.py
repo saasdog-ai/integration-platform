@@ -2,8 +2,6 @@
 
 from uuid import uuid4
 
-import pytest
-
 from app.core.exceptions import (
     ApplicationError,
     AuthenticationError,

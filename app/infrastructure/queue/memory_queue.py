@@ -1,11 +1,10 @@
 """In-memory message queue for local development and testing."""
 
 import asyncio
-import json
 import uuid
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from app.core.logging import get_logger
@@ -63,7 +62,7 @@ class InMemoryQueue(MessageQueueInterface):
         """Send a message to the queue."""
         async with self._lock:
             message_id = str(uuid.uuid4())
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             visible_at = now + timedelta(seconds=delay_seconds)
 
             message = InternalMessage(
@@ -90,12 +89,12 @@ class InMemoryQueue(MessageQueueInterface):
         wait_time_seconds: int = 20,
     ) -> list[QueueMessage]:
         """Receive messages from the queue with long polling simulation."""
-        end_time = datetime.now(timezone.utc) + timedelta(seconds=wait_time_seconds)
+        end_time = datetime.now(UTC) + timedelta(seconds=wait_time_seconds)
         received: list[QueueMessage] = []
 
-        while datetime.now(timezone.utc) < end_time and len(received) < max_messages:
+        while datetime.now(UTC) < end_time and len(received) < max_messages:
             async with self._lock:
-                now = datetime.now(timezone.utc)
+                now = datetime.now(UTC)
                 messages_to_deliver: list[InternalMessage] = []
 
                 # Find visible messages
@@ -118,7 +117,9 @@ class InMemoryQueue(MessageQueueInterface):
 
                     # Check if message exceeded max receive count - move to DLQ
                     if msg.receive_count > self._max_receive_count:
-                        msg.attributes["DLQReason"] = f"MaxReceiveCount ({self._max_receive_count}) exceeded"
+                        msg.attributes["DLQReason"] = (
+                            f"MaxReceiveCount ({self._max_receive_count}) exceeded"
+                        )
                         msg.attributes["MovedToDLQAt"] = str(int(now.timestamp() * 1000))
                         self._dlq.append(msg)
                         logger.warning(
@@ -179,9 +180,7 @@ class InMemoryQueue(MessageQueueInterface):
         async with self._lock:
             if receipt_handle in self._in_flight:
                 msg = self._in_flight[receipt_handle]
-                msg.visible_at = datetime.now(timezone.utc) + timedelta(
-                    seconds=visibility_timeout
-                )
+                msg.visible_at = datetime.now(UTC) + timedelta(seconds=visibility_timeout)
                 logger.debug(
                     "Message visibility changed",
                     extra={
@@ -198,7 +197,7 @@ class InMemoryQueue(MessageQueueInterface):
     async def return_in_flight_messages(self) -> None:
         """Return all in-flight messages to the queue (for testing)."""
         async with self._lock:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             for msg in self._in_flight.values():
                 msg.visible_at = now
                 self._messages.append(msg)
@@ -233,7 +232,7 @@ class InMemoryQueue(MessageQueueInterface):
     ) -> str:
         """Send a failed message to the dead letter queue."""
         async with self._lock:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
 
             # Remove from in-flight if present
             if message.receipt_handle in self._in_flight:

@@ -31,7 +31,11 @@ class NotFoundError(ApplicationError):
         super().__init__(
             message=f"{resource_type} not found: {resource_id}",
             code="NOT_FOUND",
-            details={"resource_type": resource_type, "resource_id": str(resource_id), **(details or {})},
+            details={
+                "resource_type": resource_type,
+                "resource_id": str(resource_id),
+                **(details or {}),
+            },
         )
 
 
@@ -63,7 +67,9 @@ class ConflictError(ApplicationError):
         super().__init__(
             message=message,
             code="CONFLICT",
-            details={"resource_type": resource_type, **(details or {})} if resource_type else details,
+            details={"resource_type": resource_type, **(details or {})}
+            if resource_type
+            else details,
         )
 
 

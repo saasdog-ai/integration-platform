@@ -3,6 +3,7 @@
 import base64
 from typing import ClassVar
 
+from app.core.exceptions import EncryptionError
 from app.domain.interfaces import EncryptionServiceInterface
 
 
@@ -27,7 +28,7 @@ class MockEncryptionService(EncryptionServiceInterface):
         self.encrypt_calls.append(plaintext)
 
         if self.should_fail_encrypt:
-            raise Exception("Mock encryption failure")
+            raise EncryptionError("Mock encryption failure")
 
         # Simple base64 "encryption" for testing
         ciphertext = base64.b64encode(plaintext)

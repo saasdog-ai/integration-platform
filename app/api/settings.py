@@ -84,7 +84,7 @@ async def get_settings(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Integration not found: {integration_id}",
-        )
+        ) from None
 
 
 @router.put(
@@ -101,20 +101,18 @@ async def update_settings(
     """Update user's integration settings."""
     try:
         settings = _from_settings_request(request)
-        updated = await service.update_user_settings(
-            client_id, integration_id, settings
-        )
+        updated = await service.update_user_settings(client_id, integration_id, settings)
         return _to_settings_response(updated)
     except NotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Integration not found: {integration_id}",
-        )
+        ) from None
     except ValidationError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
-        )
+        ) from e
 
 
 @router.get(
@@ -142,7 +140,7 @@ async def get_default_settings(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Integration not found: {integration_id}",
-        )
+        ) from None
 
 
 @router.put(
@@ -158,17 +156,15 @@ async def update_default_settings(
     """Update system default settings for an integration."""
     try:
         settings = _from_settings_request(request)
-        updated = await service.update_system_settings(
-            integration_id, settings
-        )
+        updated = await service.update_system_settings(integration_id, settings)
         return _to_settings_response(updated)
     except NotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Integration not found: {integration_id}",
-        )
+        ) from None
     except ValidationError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
-        )
+        ) from e

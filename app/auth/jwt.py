@@ -1,6 +1,6 @@
 """JWT token verification."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -63,11 +63,11 @@ def verify_token(token: str) -> JWTPayload:
             raise ValueError("Token missing required claim: client_id")
 
     except ExpiredSignatureError:
-        raise ValueError("Token has expired")
+        raise ValueError("Token has expired") from None
     except JWTClaimsError as e:
-        raise ValueError(f"Invalid token claims: {e}")
+        raise ValueError(f"Invalid token claims: {e}") from e
     except JWTError as e:
-        raise ValueError(f"Invalid token: {e}")
+        raise ValueError(f"Invalid token: {e}") from e
 
     # Parse client_id as UUID
     client_id_str = payload.get("client_id")
@@ -76,17 +76,17 @@ def verify_token(token: str) -> JWTPayload:
         try:
             client_id = UUID(client_id_str)
         except (ValueError, TypeError):
-            raise ValueError("Invalid client_id format in token")
+            raise ValueError("Invalid client_id format in token") from None
 
     # Parse expiration time
     exp = None
     if payload.get("exp"):
-        exp = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
+        exp = datetime.fromtimestamp(payload["exp"], tz=UTC)
 
     # Parse issued at time
     iat = None
     if payload.get("iat"):
-        iat = datetime.fromtimestamp(payload["iat"], tz=timezone.utc)
+        iat = datetime.fromtimestamp(payload["iat"], tz=UTC)
 
     return JWTPayload(
         sub=payload.get("sub"),
@@ -118,12 +118,12 @@ def create_token(
         Encoded JWT token.
     """
     settings = get_settings()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     payload: dict[str, Any] = {
         "client_id": str(client_id),
         "iat": now,
-        "exp": datetime.fromtimestamp(now.timestamp() + expires_in_seconds, tz=timezone.utc),
+        "exp": datetime.fromtimestamp(now.timestamp() + expires_in_seconds, tz=UTC),
     }
 
     if user_id:

@@ -2,6 +2,7 @@
 
 import pytest
 
+from app.core.exceptions import EncryptionError
 from app.infrastructure.encryption.local_encryption import LocalEncryptionService
 from tests.mocks.encryption import MockEncryptionService
 
@@ -27,9 +28,7 @@ class TestLocalEncryptionService:
         assert decrypted == plaintext
 
     @pytest.mark.asyncio
-    async def test_decrypt_with_wrong_key_id_fails(
-        self, service: LocalEncryptionService
-    ):
+    async def test_decrypt_with_wrong_key_id_fails(self, service: LocalEncryptionService):
         """Test that decryption fails with wrong key ID."""
         from app.core.exceptions import EncryptionError
 
@@ -96,7 +95,7 @@ class TestMockEncryptionService:
         """Test configurable failure mode."""
         service.should_fail_encrypt = True
 
-        with pytest.raises(Exception):
+        with pytest.raises(EncryptionError):
             await service.encrypt(b"Test")
 
     @pytest.mark.asyncio

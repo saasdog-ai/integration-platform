@@ -1,6 +1,7 @@
 """Unit tests for adapters."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from uuid import uuid4
 
 import pytest
 
@@ -62,9 +63,7 @@ class TestMockAdapter:
         assert len(records1) == 10
         assert next_token is not None
 
-        records2, next_token2 = await adapter.fetch_records(
-            "invoice", page_token=next_token
-        )
+        records2, next_token2 = await adapter.fetch_records("invoice", page_token=next_token)
         assert len(records2) == 5
         assert next_token2 is None
 
@@ -144,9 +143,8 @@ class TestMockAdapterFactory:
     def test_get_adapter_creates_new(self, factory: MockAdapterFactory):
         """Test that get_adapter creates a new adapter if not registered."""
         from app.domain.entities import AvailableIntegration
-        from datetime import datetime, timezone
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         integration = AvailableIntegration(
             id=uuid4(),
             name="New Integration",
@@ -163,9 +161,8 @@ class TestMockAdapterFactory:
     def test_register_and_get_adapter(self, factory: MockAdapterFactory):
         """Test registering and getting an adapter."""
         from app.domain.entities import AvailableIntegration
-        from datetime import datetime, timezone
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         mock_adapter = MockIntegrationAdapter(integration_name="Test")
         factory.register_adapter("Test", mock_adapter)
 
@@ -181,7 +178,3 @@ class TestMockAdapterFactory:
 
         adapter = factory.get_adapter(integration, "token")
         assert adapter is mock_adapter
-
-
-# Import uuid4 for use in tests
-from uuid import uuid4

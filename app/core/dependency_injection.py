@@ -27,11 +27,11 @@ class DependencyContainer:
         self._settings = get_settings()
 
         # Lazy-loaded dependencies
-        self._integration_repo: "IntegrationRepositoryInterface | None" = None
-        self._sync_job_repo: "SyncJobRepositoryInterface | None" = None
-        self._integration_state_repo: "IntegrationStateRepositoryInterface | None" = None
-        self._message_queue: "MessageQueueInterface | None" = None
-        self._encryption_service: "EncryptionServiceInterface | None" = None
+        self._integration_repo: IntegrationRepositoryInterface | None = None
+        self._sync_job_repo: SyncJobRepositoryInterface | None = None
+        self._integration_state_repo: IntegrationStateRepositoryInterface | None = None
+        self._message_queue: MessageQueueInterface | None = None
+        self._encryption_service: EncryptionServiceInterface | None = None
 
     @property
     def integration_repository(self) -> "IntegrationRepositoryInterface":
@@ -78,15 +78,11 @@ class DependencyContainer:
             self._encryption_service = get_encryption_service()
         return self._encryption_service
 
-    def override_integration_repository(
-        self, repo: "IntegrationRepositoryInterface"
-    ) -> None:
+    def override_integration_repository(self, repo: "IntegrationRepositoryInterface") -> None:
         """Override integration repository (for testing)."""
         self._integration_repo = repo
 
-    def override_sync_job_repository(
-        self, repo: "SyncJobRepositoryInterface"
-    ) -> None:
+    def override_sync_job_repository(self, repo: "SyncJobRepositoryInterface") -> None:
         """Override sync job repository (for testing)."""
         self._sync_job_repo = repo
 
@@ -100,9 +96,7 @@ class DependencyContainer:
         """Override message queue (for testing)."""
         self._message_queue = queue
 
-    def override_encryption_service(
-        self, service: "EncryptionServiceInterface"
-    ) -> None:
+    def override_encryption_service(self, service: "EncryptionServiceInterface") -> None:
         """Override encryption service (for testing)."""
         self._encryption_service = service
 

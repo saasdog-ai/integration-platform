@@ -7,12 +7,18 @@ The orchestrator delegates to this strategy for QBO-specific sync logic
 while retaining responsibility for state tracking, history, and error handling.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
 from app.core.logging import get_logger
-from app.domain.entities import ExternalRecord, IntegrationHistoryRecord, IntegrationStateRecord, SyncJob, SyncRule
+from app.domain.entities import (
+    ExternalRecord,
+    IntegrationHistoryRecord,
+    IntegrationStateRecord,
+    SyncJob,
+    SyncRule,
+)
 from app.domain.enums import ConflictResolution, RecordSyncStatus, SyncDirection
 from app.domain.interfaces import (
     IntegrationAdapterInterface,
@@ -22,10 +28,9 @@ from app.integrations.quickbooks.constants import (
     ENTITY_DISPLAY_NAMES,
     INBOUND_ENTITY_ORDER,
     OUTBOUND_ENTITY_ORDER,
-    QBO_ENTITY_NAMES,
 )
 from app.integrations.quickbooks.internal_repo import InternalDataRepository
-from app.integrations.quickbooks.mappers import INBOUND_MAPPERS, OUTBOUND_MAPPERS, map_vendor_inbound
+from app.integrations.quickbooks.mappers import INBOUND_MAPPERS, map_vendor_inbound
 
 logger = get_logger(__name__)
 
@@ -51,9 +56,7 @@ class QuickBooksSyncStrategy:
             return list(OUTBOUND_ENTITY_ORDER)
         return list(INBOUND_ENTITY_ORDER)
 
-    def get_ordered_rules(
-        self, rules: list[SyncRule], direction: SyncDirection
-    ) -> list[SyncRule]:
+    def get_ordered_rules(self, rules: list[SyncRule], direction: SyncDirection) -> list[SyncRule]:
         """Sort enabled rules according to QBO entity dependency order."""
         order = self.get_entity_order(direction)
         order_map = {et: idx for idx, et in enumerate(order)}
@@ -116,8 +119,7 @@ class QuickBooksSyncStrategy:
 
             for record in records:
                 if record.updated_at and (
-                    max_external_updated_at is None
-                    or record.updated_at > max_external_updated_at
+                    max_external_updated_at is None or record.updated_at > max_external_updated_at
                 ):
                     max_external_updated_at = record.updated_at
 
@@ -201,7 +203,10 @@ class QuickBooksSyncStrategy:
         # Resolve vendor dependency before bill upsert
         if entity_type == "bill" and mapped_data.get("vendor_external_id") and adapter:
             await self._ensure_vendor_synced(
-                job, mapped_data["vendor_external_id"], adapter, state_repo,
+                job,
+                mapped_data["vendor_external_id"],
+                adapter,
+                state_repo,
             )
 
         # 2. Write to internal database
@@ -213,7 +218,7 @@ class QuickBooksSyncStrategy:
             job.client_id, job.integration_id, entity_type, record.id
         )
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         if existing:
             # Preserve internal_record_id — never null it out (upsert guard)
@@ -306,15 +311,18 @@ class QuickBooksSyncStrategy:
 
         # 1. Find records needing outbound sync via state repo
         synced_records = await state_repo.get_records_by_status(
-            job.client_id, job.integration_id, entity_type, RecordSyncStatus.SYNCED,
+            job.client_id,
+            job.integration_id,
+            entity_type,
+            RecordSyncStatus.SYNCED,
         )
         pending_records = await state_repo.get_records_by_status(
-            job.client_id, job.integration_id, entity_type, RecordSyncStatus.PENDING,
+            job.client_id,
+            job.integration_id,
+            entity_type,
+            RecordSyncStatus.PENDING,
         )
-        outbound_records = [
-            r for r in (synced_records + pending_records)
-            if r.needs_outbound_sync
-        ]
+        outbound_records = [r for r in (synced_records + pending_records) if r.needs_outbound_sync]
         result["records_fetched"] = len(outbound_records)
 
         if not outbound_records:
@@ -325,7 +333,7 @@ class QuickBooksSyncStrategy:
             return result
 
         # 2. Process each record
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         successful_states: list[IntegrationStateRecord] = []
 
         for state in outbound_records:
@@ -411,7 +419,7 @@ class QuickBooksSyncStrategy:
             "records_failed": 0,
         }
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Track which state record IDs we've already processed
         processed_state_ids: set[UUID] = set()
@@ -432,8 +440,7 @@ class QuickBooksSyncStrategy:
 
             for record in records:
                 if record.updated_at and (
-                    max_external_updated_at is None
-                    or record.updated_at > max_external_updated_at
+                    max_external_updated_at is None or record.updated_at > max_external_updated_at
                 ):
                     max_external_updated_at = record.updated_at
                 external_records.append(record)
@@ -558,12 +565,18 @@ class QuickBooksSyncStrategy:
         # 3. Handle internal-only records (state with needs_outbound_sync
         #    but not seen in the external fetch above)
         synced_records = await state_repo.get_records_by_status(
-            job.client_id, job.integration_id, entity_type, RecordSyncStatus.SYNCED,
+            job.client_id,
+            job.integration_id,
+            entity_type,
+            RecordSyncStatus.SYNCED,
         )
         pending_records = await state_repo.get_records_by_status(
-            job.client_id, job.integration_id, entity_type, RecordSyncStatus.PENDING,
+            job.client_id,
+            job.integration_id,
+            entity_type,
+            RecordSyncStatus.PENDING,
         )
-        for state in (synced_records + pending_records):
+        for state in synced_records + pending_records:
             if state.id in processed_state_ids:
                 continue
             if not state.needs_outbound_sync:
@@ -649,29 +662,29 @@ class QuickBooksSyncStrategy:
             )
             external_id = existing_external_id
         else:
-            external_record = await adapter.create_record(
-                entity_type, qbo_payload
-            )
+            external_record = await adapter.create_record(entity_type, qbo_payload)
             external_id = external_record.id
 
             # Update external_id in internal database
             table = InternalDataRepository.ENTITY_TABLE_MAP.get(entity_type)
             if table:
-                await self._internal_repo.set_external_id(
-                    table, internal_id, external_id
-                )
+                await self._internal_repo.set_external_id(table, internal_id, external_id)
 
         # 3. Build / update IntegrationStateRecord
         existing_state = await state_repo.get_record(
-            job.client_id, job.integration_id, entity_type,
+            job.client_id,
+            job.integration_id,
+            entity_type,
             internal_record_id=internal_id,
         )
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         if existing_state:
             existing_state.external_record_id = external_id
-            existing_state.internal_version_id = max(existing_state.internal_version_id, existing_state.external_version_id)
+            existing_state.internal_version_id = max(
+                existing_state.internal_version_id, existing_state.external_version_id
+            )
             existing_state.external_version_id = existing_state.internal_version_id
             existing_state.last_sync_version_id = existing_state.internal_version_id
             existing_state.sync_status = RecordSyncStatus.SYNCED
@@ -716,7 +729,10 @@ class QuickBooksSyncStrategy:
     ) -> None:
         """Auto-fetch and sync a vendor if not already present in integration state."""
         existing = await state_repo.get_record_by_external_id(
-            job.client_id, job.integration_id, "vendor", vendor_external_id,
+            job.client_id,
+            job.integration_id,
+            "vendor",
+            vendor_external_id,
         )
         if existing:
             return
@@ -750,7 +766,7 @@ class QuickBooksSyncStrategy:
     ) -> None:
         """Write history snapshots for a batch of state records."""
         try:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             entries = [
                 IntegrationHistoryRecord(
                     id=uuid4(),

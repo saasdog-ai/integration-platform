@@ -2,8 +2,8 @@
 
 import time
 import uuid
+from collections.abc import Callable
 from contextvars import ContextVar
-from typing import Callable
 
 from fastapi import Request, Response, status
 from fastapi.responses import JSONResponse
@@ -263,8 +263,6 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # Add rate limit headers to response
         response = await call_next(request)
         response.headers["X-RateLimit-Remaining"] = str(remaining)
-        response.headers["X-RateLimit-Limit"] = str(
-            settings.rate_limit_requests_per_minute
-        )
+        response.headers["X-RateLimit-Limit"] = str(settings.rate_limit_requests_per_minute)
 
         return response

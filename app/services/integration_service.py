@@ -2,7 +2,7 @@
 
 import json
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from urllib.parse import urlencode
 from uuid import UUID, uuid4
 
@@ -17,7 +17,6 @@ from app.domain.entities import (
     AvailableIntegration,
     OAuthTokens,
     UserIntegration,
-    UserIntegrationSettings,
 )
 from app.domain.enums import IntegrationStatus
 from app.domain.interfaces import (
@@ -42,6 +41,7 @@ TRANSIENT_ERROR_PATTERNS = [
     r"ssl.*error",
 ]
 
+
 def _is_transient_error(error: Exception) -> bool:
     """Check if an error is transient (network/temporary) vs permanent."""
     error_msg = str(error).lower()
@@ -62,14 +62,14 @@ def _sanitize_error_for_log(error: Exception) -> str:
     # Pattern matches common token formats
     sanitized = re.sub(
         r'(token|bearer|key|secret|password|credential|auth)["\s:=]+[^\s"\'&]{10,}',
-        r'\1=[REDACTED]',
+        r"\1=[REDACTED]",
         error_msg,
         flags=re.IGNORECASE,
     )
     # Also redact long base64-like strings that could be tokens
     sanitized = re.sub(
-        r'[A-Za-z0-9+/=]{40,}',
-        '[REDACTED_TOKEN]',
+        r"[A-Za-z0-9+/=]{40,}",
+        "[REDACTED_TOKEN]",
         sanitized,
     )
     return sanitized
@@ -102,9 +102,7 @@ class IntegrationService:
         """Get all available integrations."""
         return await self._repo.get_available_integrations(active_only=active_only)
 
-    async def get_available_integration(
-        self, integration_id: UUID
-    ) -> AvailableIntegration:
+    async def get_available_integration(self, integration_id: UUID) -> AvailableIntegration:
         """Get a specific available integration."""
         integration = await self._repo.get_available_integration(integration_id)
         if not integration:
@@ -115,9 +113,7 @@ class IntegrationService:
         """Get all integrations for a user."""
         return await self._repo.get_user_integrations(client_id)
 
-    async def get_user_integration(
-        self, client_id: UUID, integration_id: UUID
-    ) -> UserIntegration:
+    async def get_user_integration(self, client_id: UUID, integration_id: UUID) -> UserIntegration:
         """Get a user's specific integration."""
         integration = await self._repo.get_user_integration(client_id, integration_id)
         if not integration:
@@ -148,9 +144,7 @@ class IntegrationService:
         integration = await self.get_available_integration(integration_id)
 
         if not integration.oauth_config:
-            raise ValidationError(
-                f"Integration {integration.name} does not support OAuth"
-            )
+            raise ValidationError(f"Integration {integration.name} does not support OAuth")
 
         # Validate redirect_uri against whitelist if provided
         if allowed_redirect_uris:
@@ -162,7 +156,7 @@ class IntegrationService:
         # Validate state parameter format if provided (prevent injection)
         if state:
             # State should be alphanumeric with limited special chars
-            if not re.match(r'^[a-zA-Z0-9_\-\.:]{1,256}$', state):
+            if not re.match(r"^[a-zA-Z0-9_\-\.:]{1,256}$", state):
                 raise ValidationError(
                     "Invalid state parameter. Must be alphanumeric with max 128 characters."
                 )
@@ -252,7 +246,7 @@ class IntegrationService:
             raise IntegrationError(
                 integration.name,
                 f"OAuth authentication failed: {sanitized_error}",
-            )
+            ) from e
 
         # Encrypt and store credentials
         credentials_json = json.dumps(
@@ -265,11 +259,9 @@ class IntegrationService:
                 "scope": tokens.scope,
             }
         )
-        encrypted_creds, key_id = await self._encryption.encrypt(
-            credentials_json.encode()
-        )
+        encrypted_creds, key_id = await self._encryption.encrypt(credentials_json.encode())
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         if existing:
             existing.status = IntegrationStatus.CONNECTED
@@ -335,7 +327,7 @@ class IntegrationService:
         existing.credentials_encrypted = None
         existing.credentials_key_id = None
         existing.external_account_id = None
-        existing.disconnected_at = datetime.now(timezone.utc)
+        existing.disconnected_at = datetime.now(UTC)
         existing.updated_by = user_id
         await self._repo.update_user_integration(existing)
 
@@ -421,7 +413,9 @@ class IntegrationService:
                 current_tokens.access_token,
                 user_integration.external_account_id,
             )
-            new_tokens = await adapter.refresh_token(current_tokens.refresh_token, integration.oauth_config)
+            new_tokens = await adapter.refresh_token(
+                current_tokens.refresh_token, integration.oauth_config
+            )
         except Exception as e:
             # Sanitize error to avoid credential exposure in logs
             sanitized_error = _sanitize_error_for_log(e)
@@ -446,7 +440,7 @@ class IntegrationService:
             raise IntegrationError(
                 integration.name,
                 f"Token refresh failed: {sanitized_error}",
-            )
+            ) from e
 
         # Encrypt and store new credentials
         credentials_json = json.dumps(
@@ -459,9 +453,7 @@ class IntegrationService:
                 "scope": new_tokens.scope,
             }
         )
-        encrypted_creds, key_id = await self._encryption.encrypt(
-            credentials_json.encode()
-        )
+        encrypted_creds, key_id = await self._encryption.encrypt(credentials_json.encode())
 
         user_integration.credentials_encrypted = encrypted_creds
         user_integration.credentials_key_id = key_id

@@ -1,8 +1,8 @@
 """Tests for sync job runner."""
 
 import asyncio
-from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import UTC, datetime, timedelta
+from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -101,7 +101,7 @@ async def connected_user_integration(
     mock_integration_repo, sample_client_id, sample_integration
 ) -> UserIntegration:
     """Create a connected user integration."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     user_integration = UserIntegration(
         id=uuid4(),
         client_id=sample_client_id,
@@ -207,7 +207,7 @@ class TestProcessMessage:
     ):
         """Test processing a valid sync job message."""
         # Create a pending job
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         job = SyncJob(
             id=uuid4(),
             client_id=sample_client_id,
@@ -315,7 +315,7 @@ class TestProcessMessage:
         sample_integration,
     ):
         """Test processing a message for job that's not pending."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         # Create a completed job
         job = SyncJob(
             id=uuid4(),
@@ -379,7 +379,7 @@ class TestStuckJobHandling:
     ):
         """Test that stuck jobs are terminated."""
         # Create a stuck job (running for too long)
-        stuck_time = datetime.now(timezone.utc) - timedelta(hours=2)
+        stuck_time = datetime.now(UTC) - timedelta(hours=2)
         job = SyncJob(
             id=uuid4(),
             client_id=sample_client_id,
@@ -467,7 +467,7 @@ class TestPollAndProcess:
     ):
         """Test polling with available messages."""
         # Create a pending job
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         job = SyncJob(
             id=uuid4(),
             client_id=sample_client_id,
@@ -481,12 +481,14 @@ class TestPollAndProcess:
         await mock_job_repo.create_job(job)
 
         # Send message to queue
-        await mock_queue.send_message({
-            "job_id": str(job.id),
-            "client_id": str(sample_client_id),
-            "integration_id": str(sample_integration.id),
-            "job_type": "full_sync",
-        })
+        await mock_queue.send_message(
+            {
+                "job_id": str(job.id),
+                "client_id": str(sample_client_id),
+                "integration_id": str(sample_integration.id),
+                "job_type": "full_sync",
+            }
+        )
 
         # Initialize semaphore
         job_runner._semaphore = asyncio.Semaphore(2)
@@ -509,7 +511,7 @@ class TestGlobalDisable:
         sample_integration,
     ):
         """Test that global disable flag prevents job processing."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         job = SyncJob(
             id=uuid4(),
             client_id=sample_client_id,

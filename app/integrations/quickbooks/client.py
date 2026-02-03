@@ -1,7 +1,7 @@
 """QuickBooks Online adapter — real HTTP calls to the QBO API."""
 
 import base64
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from app.core.config import get_settings
@@ -119,13 +119,17 @@ class QuickBooksAdapter(IntegrationAdapterInterface):
     # OAuth
     # ------------------------------------------------------------------
 
-    async def authenticate(self, auth_code: str, redirect_uri: str, oauth_config: OAuthConfig | None = None) -> OAuthTokens:
+    async def authenticate(
+        self, auth_code: str, redirect_uri: str, oauth_config: OAuthConfig | None = None
+    ) -> OAuthTokens:
         """Exchange authorization code for access/refresh tokens."""
         client_id = oauth_config.client_id if oauth_config else None
         client_secret = oauth_config.client_secret if oauth_config else None
 
         if not client_id or not client_secret:
-            raise Exception("QBO client_id and client_secret must be configured in the integration's OAuth config")
+            raise Exception(
+                "QBO client_id and client_secret must be configured in the integration's OAuth config"
+            )
 
         # QBO uses HTTP Basic auth for the token endpoint
         credentials = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
@@ -155,9 +159,7 @@ class QuickBooksAdapter(IntegrationAdapterInterface):
                     "redirect_uri": redirect_uri,
                 },
             )
-            raise Exception(
-                f"QBO token exchange failed ({response.status_code}): {error_body}"
-            )
+            raise Exception(f"QBO token exchange failed ({response.status_code}): {error_body}")
 
         token_data = response.json()
 
@@ -167,17 +169,21 @@ class QuickBooksAdapter(IntegrationAdapterInterface):
             refresh_token=token_data.get("refresh_token"),
             token_type=token_data.get("token_type", "Bearer"),
             expires_in=expires_in,
-            expires_at=datetime.now(timezone.utc) + timedelta(seconds=expires_in),
+            expires_at=datetime.now(UTC) + timedelta(seconds=expires_in),
             scope=token_data.get("scope"),
         )
 
-    async def refresh_token(self, refresh_token: str, oauth_config: OAuthConfig | None = None) -> OAuthTokens:
+    async def refresh_token(
+        self, refresh_token: str, oauth_config: OAuthConfig | None = None
+    ) -> OAuthTokens:
         """Refresh an expired access token."""
         client_id = oauth_config.client_id if oauth_config else None
         client_secret = oauth_config.client_secret if oauth_config else None
 
         if not client_id or not client_secret:
-            raise Exception("QBO client_id and client_secret must be configured in the integration's OAuth config")
+            raise Exception(
+                "QBO client_id and client_secret must be configured in the integration's OAuth config"
+            )
 
         credentials = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
 
@@ -204,7 +210,7 @@ class QuickBooksAdapter(IntegrationAdapterInterface):
             refresh_token=token_data.get("refresh_token", refresh_token),
             token_type=token_data.get("token_type", "Bearer"),
             expires_in=expires_in,
-            expires_at=datetime.now(timezone.utc) + timedelta(seconds=expires_in),
+            expires_at=datetime.now(UTC) + timedelta(seconds=expires_in),
             scope=token_data.get("scope"),
         )
 
@@ -265,9 +271,7 @@ class QuickBooksAdapter(IntegrationAdapterInterface):
         raw_records = query_response.get(qbo_entity, [])
         total_count = query_response.get("totalCount", len(raw_records))
 
-        records = [
-            self._to_external_record(entity_type, r) for r in raw_records
-        ]
+        records = [self._to_external_record(entity_type, r) for r in raw_records]
 
         # Determine next page token
         next_position = start_position + len(raw_records)

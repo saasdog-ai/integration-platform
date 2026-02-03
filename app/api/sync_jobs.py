@@ -14,10 +14,9 @@ from app.api.dto import (
 )
 from app.auth import get_client_id
 from app.core.exceptions import ConflictError, NotFoundError, SyncError
-from app.domain.enums import RecordSyncStatus
 from app.core.logging import get_logger
 from app.domain.entities import SyncJob
-from app.domain.enums import SyncJobStatus, SyncJobTrigger
+from app.domain.enums import RecordSyncStatus, SyncJobStatus, SyncJobTrigger
 from app.services.sync_orchestrator import SyncOrchestrator
 
 logger = get_logger(__name__)
@@ -91,17 +90,17 @@ async def trigger_sync(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e),
-        )
+        ) from e
     except SyncError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
-        )
+        ) from e
     except ConflictError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(e),
-        )
+        ) from e
 
 
 @router.get(
@@ -155,7 +154,7 @@ async def get_sync_job(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Sync job not found: {job_id}",
-        )
+        ) from None
 
 
 @router.post(
@@ -176,12 +175,12 @@ async def cancel_sync_job(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Sync job not found: {job_id}",
-        )
+        ) from None
     except SyncError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
-        )
+        ) from e
 
 
 @router.post(
@@ -216,12 +215,12 @@ async def execute_sync_job(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Sync job not found: {job_id}",
-        )
+        ) from None
     except SyncError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
-        )
+        ) from e
 
 
 @router.get(
@@ -251,7 +250,7 @@ async def get_job_records(
     """
     try:
         # Verify job exists and belongs to client
-        job = await orchestrator.get_job(client_id, job_id)
+        await orchestrator.get_job(client_id, job_id)
 
         # Get records for this job
         records, total = await orchestrator.get_job_records(
@@ -273,7 +272,9 @@ async def get_job_records(
                     internal_record_id=r.internal_record_id,
                     external_record_id=r.external_record_id,
                     sync_direction=r.sync_direction,
-                    sync_status=r.sync_status.value if hasattr(r.sync_status, 'value') else r.sync_status,
+                    sync_status=r.sync_status.value
+                    if hasattr(r.sync_status, "value")
+                    else r.sync_status,
                     is_success=(r.sync_status == RecordSyncStatus.SYNCED),
                     updated_at=r.created_at,
                     error_code=r.error_code,
@@ -292,4 +293,4 @@ async def get_job_records(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Sync job not found: {job_id}",
-        )
+        ) from None

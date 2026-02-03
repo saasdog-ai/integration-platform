@@ -74,7 +74,9 @@ class Settings(BaseSettings):
     # Job Runner
     job_runner_max_workers: int = Field(default=5)
     job_runner_enabled: bool = Field(default=True)
-    job_stuck_timeout_minutes: int = Field(default=360)  # 6 hours - jobs running longer are considered stuck
+    job_stuck_timeout_minutes: int = Field(
+        default=360
+    )  # 6 hours - jobs running longer are considered stuck
     job_termination_enabled: bool = Field(default=True)  # Enable automatic stuck job termination
     integration_history_retention_days: int = Field(default=90)
 
@@ -184,7 +186,8 @@ class Settings(BaseSettings):
 
         if errors:
             raise ValueError(
-                "Production configuration validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
+                "Production configuration validation failed:\n"
+                + "\n".join(f"  - {e}" for e in errors)
             )
 
 

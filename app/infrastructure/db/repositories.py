@@ -1,6 +1,6 @@
 """Repository implementations for database access."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -244,9 +244,7 @@ class IntegrationRepository(IntegrationRepositoryInterface):
             models = result.scalars().all()
             return [_model_to_available_integration(m) for m in models]
 
-    async def get_available_integration(
-        self, integration_id: UUID
-    ) -> AvailableIntegration | None:
+    async def get_available_integration(self, integration_id: UUID) -> AvailableIntegration | None:
         async with get_session_context() as session:
             result = await session.execute(
                 select(AvailableIntegrationModel).where(
@@ -256,14 +254,10 @@ class IntegrationRepository(IntegrationRepositoryInterface):
             model = result.scalar_one_or_none()
             return _model_to_available_integration(model) if model else None
 
-    async def get_available_integration_by_name(
-        self, name: str
-    ) -> AvailableIntegration | None:
+    async def get_available_integration_by_name(self, name: str) -> AvailableIntegration | None:
         async with get_session_context() as session:
             result = await session.execute(
-                select(AvailableIntegrationModel).where(
-                    AvailableIntegrationModel.name == name
-                )
+                select(AvailableIntegrationModel).where(AvailableIntegrationModel.name == name)
             )
             model = result.scalar_one_or_none()
             return _model_to_available_integration(model) if model else None
@@ -312,9 +306,7 @@ class IntegrationRepository(IntegrationRepositoryInterface):
             models = result.scalars().all()
             return [_model_to_user_integration(m) for m in models]
 
-    async def create_user_integration(
-        self, integration: UserIntegration
-    ) -> UserIntegration:
+    async def create_user_integration(self, integration: UserIntegration) -> UserIntegration:
         async with get_session_context() as session:
             model = UserIntegrationModel(
                 id=integration.id,
@@ -333,9 +325,7 @@ class IntegrationRepository(IntegrationRepositoryInterface):
             await session.refresh(model)
             return _model_to_user_integration(model)
 
-    async def update_user_integration(
-        self, integration: UserIntegration
-    ) -> UserIntegration:
+    async def update_user_integration(self, integration: UserIntegration) -> UserIntegration:
         async with get_session_context() as session:
             await session.execute(
                 update(UserIntegrationModel)
@@ -353,13 +343,9 @@ class IntegrationRepository(IntegrationRepositoryInterface):
             # Commit before reading back so new session can see changes
             await session.commit()
         # Read from a new session after commit
-        return await self.get_user_integration(
-            integration.client_id, integration.integration_id
-        )
+        return await self.get_user_integration(integration.client_id, integration.integration_id)
 
-    async def delete_user_integration(
-        self, client_id: UUID, integration_id: UUID
-    ) -> bool:
+    async def delete_user_integration(self, client_id: UUID, integration_id: UUID) -> bool:
         async with get_session_context() as session:
             result = await session.execute(
                 select(UserIntegrationModel).where(
@@ -422,9 +408,7 @@ class IntegrationRepository(IntegrationRepositoryInterface):
             await session.flush()
             return settings
 
-    async def get_system_settings(
-        self, integration_id: UUID
-    ) -> UserIntegrationSettings | None:
+    async def get_system_settings(self, integration_id: UUID) -> UserIntegrationSettings | None:
         async with get_session_context() as session:
             result = await session.execute(
                 select(SystemIntegrationSettingsModel).where(
@@ -582,7 +566,7 @@ class SyncJobRepository(SyncJobRepositoryInterface):
         entities_processed: dict[str, Any] | None = None,
     ) -> SyncJob:
         async with get_session_context() as session:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             values: dict[str, Any] = {"status": status.value}
 
             if status == SyncJobStatus.RUNNING:
@@ -609,9 +593,7 @@ class SyncJobRepository(SyncJobRepositoryInterface):
 
             return await self.get_job(job_id)
 
-    async def get_running_jobs(
-        self, client_id: UUID, integration_id: UUID
-    ) -> list[SyncJob]:
+    async def get_running_jobs(self, client_id: UUID, integration_id: UUID) -> list[SyncJob]:
         async with get_session_context() as session:
             result = await session.execute(
                 select(SyncJobModel).where(
@@ -625,9 +607,7 @@ class SyncJobRepository(SyncJobRepositoryInterface):
             models = result.scalars().all()
             return [_model_to_sync_job(m) for m in models]
 
-    async def create_job_if_no_running(
-        self, job: SyncJob
-    ) -> tuple[SyncJob | None, SyncJob | None]:
+    async def create_job_if_no_running(self, job: SyncJob) -> tuple[SyncJob | None, SyncJob | None]:
         """
         Atomically check for running jobs and create a new job if none exist.
 
@@ -644,10 +624,12 @@ class SyncJobRepository(SyncJobRepositoryInterface):
                         and_(
                             SyncJobModel.client_id == job.client_id,
                             SyncJobModel.integration_id == job.integration_id,
-                            SyncJobModel.status.in_([
-                                SyncJobStatus.RUNNING.value,
-                                SyncJobStatus.PENDING.value,
-                            ]),
+                            SyncJobModel.status.in_(
+                                [
+                                    SyncJobStatus.RUNNING.value,
+                                    SyncJobStatus.PENDING.value,
+                                ]
+                            ),
                         )
                     )
                 )
@@ -694,7 +676,7 @@ class SyncJobRepository(SyncJobRepositoryInterface):
         from datetime import timedelta
 
         async with get_session_context() as session:
-            cutoff_time = datetime.now(timezone.utc) - timedelta(seconds=stale_seconds)
+            cutoff_time = datetime.now(UTC) - timedelta(seconds=stale_seconds)
 
             result = await session.execute(
                 select(SyncJobModel)
@@ -717,7 +699,7 @@ class SyncJobRepository(SyncJobRepositoryInterface):
         from datetime import timedelta
 
         async with get_session_context() as session:
-            cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=stuck_threshold_minutes)
+            cutoff_time = datetime.now(UTC) - timedelta(minutes=stuck_threshold_minutes)
 
             result = await session.execute(
                 select(SyncJobModel)
@@ -754,7 +736,7 @@ class SyncJobRepository(SyncJobRepositoryInterface):
             if not model:
                 return None
 
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             model.status = SyncJobStatus.FAILED.value
             model.completed_at = now
             model.error_code = "JOB_TIMEOUT"
@@ -858,9 +840,7 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
             client_id, integration_id, entity_type, RecordSyncStatus.PENDING, limit
         )
 
-    async def upsert_record(
-        self, record: IntegrationStateRecord
-    ) -> IntegrationStateRecord:
+    async def upsert_record(self, record: IntegrationStateRecord) -> IntegrationStateRecord:
         async with get_session_context() as session:
             model = None
 
@@ -897,7 +877,9 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
                     model.internal_record_id = record.internal_record_id
                 model.external_record_id = record.external_record_id
                 model.sync_status = record.sync_status.value
-                model.sync_direction = record.sync_direction.value if record.sync_direction else None
+                model.sync_direction = (
+                    record.sync_direction.value if record.sync_direction else None
+                )
                 model.internal_version_id = record.internal_version_id
                 model.external_version_id = record.external_version_id
                 model.last_sync_version_id = record.last_sync_version_id
@@ -981,7 +963,7 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
             model = result.scalar_one_or_none()
             if model:
                 model.sync_status = RecordSyncStatus.SYNCED.value
-                model.last_synced_at = datetime.now(timezone.utc)
+                model.last_synced_at = datetime.now(UTC)
                 model.last_sync_version_id = max(
                     model.internal_version_id, model.external_version_id
                 )
@@ -995,7 +977,9 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
                 await session.flush()  # Ensure changes are queued before commit
 
     async def list_entity_sync_statuses(
-        self, client_id: UUID, integration_id: UUID,
+        self,
+        client_id: UUID,
+        integration_id: UUID,
     ) -> list[EntitySyncStatus]:
         async with get_session_context() as session:
             result = await session.execute(
@@ -1048,7 +1032,7 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
                 )
             )
             model = result.scalar_one_or_none()
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
 
             if model:
                 model.last_successful_sync_at = now
@@ -1141,7 +1125,8 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
                                     IntegrationStateModel.client_id == record.client_id,
                                     IntegrationStateModel.integration_id == record.integration_id,
                                     IntegrationStateModel.entity_type == record.entity_type,
-                                    IntegrationStateModel.internal_record_id == record.internal_record_id,
+                                    IntegrationStateModel.internal_record_id
+                                    == record.internal_record_id,
                                 )
                             )
                         )
@@ -1154,7 +1139,8 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
                                     IntegrationStateModel.client_id == record.client_id,
                                     IntegrationStateModel.integration_id == record.integration_id,
                                     IntegrationStateModel.entity_type == record.entity_type,
-                                    IntegrationStateModel.external_record_id == record.external_record_id,
+                                    IntegrationStateModel.external_record_id
+                                    == record.external_record_id,
                                 )
                             )
                         )
@@ -1166,7 +1152,9 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
                             model.internal_record_id = record.internal_record_id
                         model.external_record_id = record.external_record_id
                         model.sync_status = record.sync_status.value
-                        model.sync_direction = record.sync_direction.value if record.sync_direction else None
+                        model.sync_direction = (
+                            record.sync_direction.value if record.sync_direction else None
+                        )
                         model.internal_version_id = record.internal_version_id
                         model.external_version_id = record.external_version_id
                         model.last_sync_version_id = record.last_sync_version_id
@@ -1187,7 +1175,9 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
                             internal_record_id=record.internal_record_id,
                             external_record_id=record.external_record_id,
                             sync_status=record.sync_status.value,
-                            sync_direction=record.sync_direction.value if record.sync_direction else None,
+                            sync_direction=record.sync_direction.value
+                            if record.sync_direction
+                            else None,
                             internal_version_id=record.internal_version_id,
                             external_version_id=record.external_version_id,
                             last_sync_version_id=record.last_sync_version_id,
@@ -1255,7 +1245,7 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
         updates: list[tuple[UUID, UUID, str | None]],
     ) -> None:
         """Internal method to perform batch mark synced operations."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         for record_id, client_id, external_record_id in updates:
             result = await session.execute(
@@ -1319,11 +1309,7 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
                 conditions.append(IntegrationStateModel.sync_status == status.value)
 
             # Count total
-            count_query = (
-                select(func.count())
-                .select_from(IntegrationStateModel)
-                .where(*conditions)
-            )
+            count_query = select(func.count()).select_from(IntegrationStateModel).where(*conditions)
             count_result = await session.execute(count_query)
             total = count_result.scalar() or 0
 
@@ -1365,9 +1351,7 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
             await session.refresh(model)
             return _model_to_integration_history(model)
 
-    async def batch_create_history(
-        self, entries: list[IntegrationHistoryRecord]
-    ) -> None:
+    async def batch_create_history(self, entries: list[IntegrationHistoryRecord]) -> None:
         if not entries:
             return
 
@@ -1413,9 +1397,7 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
                 conditions.append(IntegrationHistoryModel.sync_status == status.value)
 
             count_query = (
-                select(func.count())
-                .select_from(IntegrationHistoryModel)
-                .where(*conditions)
+                select(func.count()).select_from(IntegrationHistoryModel).where(*conditions)
             )
             count_result = await session.execute(count_query)
             total = count_result.scalar() or 0
@@ -1438,7 +1420,7 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
         retention_days: int,
         batch_size: int = 10000,
     ) -> int:
-        cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+        cutoff = datetime.now(UTC) - timedelta(days=retention_days)
         total_deleted = 0
 
         while True:
@@ -1450,13 +1432,10 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
                     .limit(batch_size)
                 ).subquery()
 
-                stmt = (
-                    delete(IntegrationHistoryModel)
-                    .where(
-                        and_(
-                            IntegrationHistoryModel.client_id == subq.c.client_id,
-                            IntegrationHistoryModel.id == subq.c.id,
-                        )
+                stmt = delete(IntegrationHistoryModel).where(
+                    and_(
+                        IntegrationHistoryModel.client_id == subq.c.client_id,
+                        IntegrationHistoryModel.id == subq.c.id,
                     )
                 )
                 result = await session.execute(stmt)

@@ -1,7 +1,7 @@
 """Sync orchestration service."""
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -12,7 +12,6 @@ from app.core.exceptions import (
     NotFoundError,
     SyncError,
 )
-from app.services.integration_service import IntegrationService
 from app.core.logging import get_logger
 from app.domain.entities import (
     EntitySyncRequest,
@@ -39,6 +38,7 @@ from app.domain.interfaces import (
     MessageQueueInterface,
     SyncJobRepositoryInterface,
 )
+from app.services.integration_service import IntegrationService
 
 logger = get_logger(__name__)
 
@@ -57,6 +57,7 @@ def _init_strategies() -> None:
         return
     try:
         from app.integrations.quickbooks.strategy import QuickBooksSyncStrategy
+
         register_sync_strategy("QuickBooks Online", QuickBooksSyncStrategy)
     except ImportError:
         pass
@@ -98,7 +99,7 @@ class SyncOrchestrator:
     ) -> None:
         """Write history snapshots for a batch of state records."""
         try:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             entries = [
                 IntegrationHistoryRecord(
                     id=uuid4(),
@@ -170,8 +171,7 @@ class SyncOrchestrator:
                 if entity_status:
                     # Inbound: prefer QBO-clock cursor, fall back to our clock for pre-migration rows
                     inbound_since = (
-                        entity_status.last_inbound_sync_at
-                        or entity_status.last_successful_sync_at
+                        entity_status.last_inbound_sync_at or entity_status.last_successful_sync_at
                     )
                     # Outbound: always our clock
                     outbound_since = entity_status.last_successful_sync_at
@@ -212,8 +212,11 @@ class SyncOrchestrator:
                 total_synced = result.get("records_created", 0) + result.get("records_updated", 0)
                 if total_synced > 0:
                     await self._state_repo.update_entity_sync_status(
-                        job.client_id, job.integration_id, entity_type,
-                        job.id, total_synced,
+                        job.client_id,
+                        job.integration_id,
+                        entity_type,
+                        job.id,
+                        total_synced,
                         last_inbound_sync_at=result.get("max_external_updated_at"),
                     )
 
@@ -272,9 +275,7 @@ class SyncOrchestrator:
             )
 
         # Verify integration exists and is connected
-        integration = await self._integration_repo.get_available_integration(
-            integration_id
-        )
+        integration = await self._integration_repo.get_available_integration(integration_id)
         if not integration:
             raise NotFoundError("Integration", integration_id)
 
@@ -289,14 +290,10 @@ class SyncOrchestrator:
             client_id, integration_id
         )
         if not user_integration:
-            raise NotFoundError(
-                "UserIntegration", f"{client_id}/{integration_id}"
-            )
+            raise NotFoundError("UserIntegration", f"{client_id}/{integration_id}")
 
         if user_integration.status != IntegrationStatus.CONNECTED:
-            raise SyncError(
-                f"Integration is not connected (status: {user_integration.status})"
-            )
+            raise SyncError(f"Integration is not connected (status: {user_integration.status})")
 
         # Validate entity types if provided
         if entity_types:
@@ -313,12 +310,10 @@ class SyncOrchestrator:
         if entity_types:
             job_params["entity_types"] = entity_types
         if entity_requests:
-            job_params["entity_requests"] = [
-                req.model_dump(mode="json") for req in entity_requests
-            ]
+            job_params["entity_requests"] = [req.model_dump(mode="json") for req in entity_requests]
 
         # Create sync job with job_params (atomic check-and-create to prevent race conditions)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         job = SyncJob(
             id=uuid4(),
             client_id=client_id,
@@ -339,7 +334,10 @@ class SyncOrchestrator:
             raise ConflictError(
                 "A sync job is already running or pending for this integration",
                 resource_type="SyncJob",
-                details={"existing_job_id": str(existing_job.id), "status": existing_job.status.value},
+                details={
+                    "existing_job_id": str(existing_job.id),
+                    "status": existing_job.status.value,
+                },
             )
 
         job = created_job
@@ -353,7 +351,9 @@ class SyncOrchestrator:
             entity_types=job_params.get("entity_types") if job_params else None,
             entity_requests=[
                 EntitySyncRequest(**req) for req in job_params.get("entity_requests", [])
-            ] if job_params and job_params.get("entity_requests") else None,
+            ]
+            if job_params and job_params.get("entity_requests")
+            else None,
         )
         await self._queue.send_message(message.model_dump(mode="json"))
 
@@ -398,7 +398,10 @@ class SyncOrchestrator:
         return None
 
     async def _ensure_valid_token(
-        self, client_id: UUID, integration_id: UUID, creds_dict: dict,
+        self,
+        client_id: UUID,
+        integration_id: UUID,
+        creds_dict: dict,
     ) -> str:
         """Return a valid access token, refreshing if expired or about to expire.
 
@@ -429,7 +432,7 @@ class SyncOrchestrator:
             return access_token
 
         buffer = timedelta(minutes=5)
-        if datetime.now(timezone.utc) < expires_at - buffer:
+        if datetime.now(UTC) < expires_at - buffer:
             return access_token
 
         # Token expired or about to expire — refresh
@@ -444,7 +447,8 @@ class SyncOrchestrator:
         for attempt in range(1, max_attempts + 1):
             try:
                 new_tokens = await integration_service.refresh_integration_token(
-                    client_id, integration_id,
+                    client_id,
+                    integration_id,
                 )
                 logger.info(
                     "Token refreshed successfully",
@@ -467,13 +471,13 @@ class SyncOrchestrator:
                     },
                 )
 
-        raise SyncError(f"Token refresh failed after {max_attempts} attempts: {last_error}")
+        raise SyncError(
+            f"Token refresh failed after {max_attempts} attempts: {last_error}"
+        ) from last_error
 
     async def _get_enabled_rules_for_job(self, job: SyncJob) -> list[SyncRule]:
         """Load user settings and return enabled sync rules, filtered by job_params."""
-        settings = await self._integration_repo.get_user_settings(
-            job.client_id, job.integration_id
-        )
+        settings = await self._integration_repo.get_user_settings(job.client_id, job.integration_id)
 
         if not settings or not settings.sync_rules:
             raise SyncError("No sync rules configured")
@@ -484,10 +488,7 @@ class SyncOrchestrator:
 
         requested_entity_types = self._resolve_requested_entity_types(job.job_params)
         if requested_entity_types is not None:
-            enabled_rules = [
-                r for r in enabled_rules
-                if r.entity_type in requested_entity_types
-            ]
+            enabled_rules = [r for r in enabled_rules if r.entity_type in requested_entity_types]
             if not enabled_rules:
                 raise SyncError(
                     f"Requested entity types are not enabled in sync settings: "
@@ -497,15 +498,14 @@ class SyncOrchestrator:
         return enabled_rules
 
     async def _resolve_adapter_for_job(
-        self, job: SyncJob,
+        self,
+        job: SyncJob,
     ) -> tuple[Any, type | None, dict[str, list[str]]]:
         """Resolve adapter, strategy class, and record_ids_by_entity for a job."""
         user_integration = await self._integration_repo.get_user_integration(
             job.client_id, job.integration_id
         )
-        integration = await self._integration_repo.get_available_integration(
-            job.integration_id
-        )
+        integration = await self._integration_repo.get_available_integration(job.integration_id)
 
         # Get credentials - allow mock token in development mode
         settings = get_settings()
@@ -519,11 +519,13 @@ class SyncOrchestrator:
                 )
                 creds_dict = json.loads(credentials.decode())
                 access_token = await self._ensure_valid_token(
-                    job.client_id, job.integration_id, creds_dict,
+                    job.client_id,
+                    job.integration_id,
+                    creds_dict,
                 )
             except Exception as e:
                 if settings.app_env != "development":
-                    raise SyncError(f"Failed to decrypt credentials: {e}")
+                    raise SyncError(f"Failed to decrypt credentials: {e}") from e
                 logger.warning(
                     "Using mock token - credential decryption failed in dev mode",
                     extra={"error": str(e)},
@@ -563,7 +565,10 @@ class SyncOrchestrator:
 
         if strategy_class:
             entities_processed, errors = await self._execute_with_strategy(
-                strategy_class, job, enabled_rules, adapter,
+                strategy_class,
+                job,
+                enabled_rules,
+                adapter,
                 record_ids_by_entity,
             )
         else:
@@ -582,9 +587,7 @@ class SyncOrchestrator:
                             "error": str(e),
                         },
                     )
-                    errors.append(
-                        {"entity_type": rule.entity_type, "error": str(e)}
-                    )
+                    errors.append({"entity_type": rule.entity_type, "error": str(e)})
 
         return entities_processed, errors
 
@@ -652,10 +655,17 @@ class SyncOrchestrator:
             enabled_rules = await self._get_enabled_rules_for_job(job)
             adapter, strategy_class, record_ids_by_entity = await self._resolve_adapter_for_job(job)
             entities_processed, errors = await self._execute_entity_sync_loop(
-                job, enabled_rules, adapter, strategy_class, record_ids_by_entity,
+                job,
+                enabled_rules,
+                adapter,
+                strategy_class,
+                record_ids_by_entity,
             )
             job = await self._finalize_job_status(
-                job, entities_processed, errors, len(enabled_rules),
+                job,
+                entities_processed,
+                errors,
+                len(enabled_rules),
             )
         except Exception as e:
             logger.error(
@@ -688,10 +698,7 @@ class SyncOrchestrator:
             return None, None
 
         # Inbound: prefer QBO-clock cursor, fall back to our clock for pre-migration rows
-        inbound_since = (
-            entity_status.last_inbound_sync_at
-            or entity_status.last_successful_sync_at
-        )
+        inbound_since = entity_status.last_inbound_sync_at or entity_status.last_successful_sync_at
         # Outbound: always our clock
         outbound_since = entity_status.last_successful_sync_at
         return inbound_since, outbound_since
@@ -719,7 +726,7 @@ class SyncOrchestrator:
             state.last_job_id = job.id
             return state, False
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         state = IntegrationStateRecord(
             id=uuid4(),
             client_id=job.client_id,
@@ -807,14 +814,15 @@ class SyncOrchestrator:
             for record in records:
                 # Track max external updated_at for inbound cursor
                 if record.updated_at and (
-                    max_external_updated_at is None
-                    or record.updated_at > max_external_updated_at
+                    max_external_updated_at is None or record.updated_at > max_external_updated_at
                 ):
                     max_external_updated_at = record.updated_at
 
                 try:
                     state, is_new = await self._prepare_inbound_state_record(
-                        job, entity_type, record,
+                        job,
+                        entity_type,
+                        record,
                     )
                     records_to_upsert.append(state)
                     if is_new:
@@ -825,8 +833,12 @@ class SyncOrchestrator:
                     # Flush batch when it reaches size limit
                     if len(records_to_upsert) >= BATCH_SIZE:
                         created, updated = await self._flush_inbound_batch(
-                            records_to_upsert, batch_created, batch_updated,
-                            result, job, entity_type,
+                            records_to_upsert,
+                            batch_created,
+                            batch_updated,
+                            result,
+                            job,
+                            entity_type,
                         )
                         result["records_created"] += created
                         result["records_updated"] += updated
@@ -852,8 +864,12 @@ class SyncOrchestrator:
 
         # Flush any remaining records
         created, updated = await self._flush_inbound_batch(
-            records_to_upsert, batch_created, batch_updated,
-            result, job, entity_type,
+            records_to_upsert,
+            batch_created,
+            batch_updated,
+            result,
+            job,
+            entity_type,
         )
         result["records_created"] += created
         result["records_updated"] += updated
@@ -893,9 +909,7 @@ class SyncOrchestrator:
             # Fallback: try individual updates to salvage what we can
             for record_id, client_id_param, external_id in successful_syncs:
                 try:
-                    await self._state_repo.mark_synced(
-                        record_id, client_id_param, external_id
-                    )
+                    await self._state_repo.mark_synced(record_id, client_id_param, external_id)
                     result["records_updated"] += 1
                 except Exception as individual_err:
                     logger.error(
@@ -931,9 +945,7 @@ class SyncOrchestrator:
 
                 if state.external_record_id:
                     # Update existing external record
-                    await adapter.update_record(
-                        entity_type, state.external_record_id, data
-                    )
+                    await adapter.update_record(entity_type, state.external_record_id, data)
                 else:
                     # Create new external record
                     external_record = await adapter.create_record(entity_type, data)
@@ -958,9 +970,7 @@ class SyncOrchestrator:
                         # Continue - we'll try to mark as synced in batch
 
                 # Collect for batch update
-                successful_syncs.append(
-                    (state.id, job.client_id, state.external_record_id)
-                )
+                successful_syncs.append((state.id, job.client_id, state.external_record_id))
                 successful_records.append(state)
 
             except Exception as e:
@@ -988,7 +998,11 @@ class SyncOrchestrator:
         # Batch mark all successful syncs in a single transaction with advisory lock
         if successful_syncs:
             await self._batch_mark_synced_with_fallback(
-                successful_syncs, successful_records, job, entity_type, result,
+                successful_syncs,
+                successful_records,
+                job,
+                entity_type,
+                result,
             )
 
     async def _sync_entity(
@@ -1022,14 +1036,20 @@ class SyncOrchestrator:
         }
 
         inbound_since, outbound_since = await self._resolve_sync_cursors(
-            job, entity_type, full_sync,
+            job,
+            entity_type,
+            full_sync,
         )
 
         max_external_updated_at: datetime | None = None
 
         if direction in (SyncDirection.INBOUND, SyncDirection.BIDIRECTIONAL):
             max_external_updated_at = await self._sync_entity_inbound(
-                job, entity_type, adapter, inbound_since, result,
+                job,
+                entity_type,
+                adapter,
+                inbound_since,
+                result,
             )
 
         if direction in (SyncDirection.OUTBOUND, SyncDirection.BIDIRECTIONAL):
@@ -1039,7 +1059,11 @@ class SyncOrchestrator:
         total_synced = result["records_created"] + result["records_updated"]
         if total_synced > 0:
             await self._state_repo.update_entity_sync_status(
-                job.client_id, job.integration_id, entity_type, job.id, total_synced,
+                job.client_id,
+                job.integration_id,
+                entity_type,
+                job.id,
+                total_synced,
                 last_inbound_sync_at=max_external_updated_at,
             )
 

@@ -2,8 +2,6 @@
 
 import base64
 import hashlib
-import os
-import secrets
 from typing import ClassVar
 
 from cryptography.fernet import Fernet
@@ -64,7 +62,7 @@ class LocalEncryptionService(EncryptionServiceInterface):
             return ciphertext, self.KEY_ID
         except Exception as e:
             logger.error("Encryption failed", extra={"error": str(e)})
-            raise EncryptionError(f"Encryption failed: {e}")
+            raise EncryptionError(f"Encryption failed: {e}") from e
 
     async def decrypt(self, ciphertext: bytes, key_id: str) -> bytes:
         """
@@ -85,4 +83,4 @@ class LocalEncryptionService(EncryptionServiceInterface):
             return plaintext
         except Exception as e:
             logger.error("Decryption failed", extra={"error": str(e)})
-            raise EncryptionError(f"Decryption failed: {e}")
+            raise EncryptionError(f"Decryption failed: {e}") from e

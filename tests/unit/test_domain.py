@@ -1,12 +1,9 @@
 """Unit tests for domain layer."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
-import pytest
-
 from app.domain.entities import (
-    AvailableIntegration,
     IntegrationHistoryRecord,
     IntegrationStateRecord,
     SyncJob,
@@ -60,7 +57,7 @@ class TestIntegrationStateRecord:
 
     def test_is_in_sync_when_all_versions_match(self):
         """Test is_in_sync when all version IDs match."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         record = IntegrationStateRecord(
             id=uuid4(),
             client_id=uuid4(),
@@ -78,7 +75,7 @@ class TestIntegrationStateRecord:
 
     def test_is_in_sync_when_versions_differ(self):
         """Test is_in_sync when version IDs differ."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         record = IntegrationStateRecord(
             id=uuid4(),
             client_id=uuid4(),
@@ -96,7 +93,7 @@ class TestIntegrationStateRecord:
 
     def test_needs_outbound_sync(self):
         """Test needs_outbound_sync when internal is ahead."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         record = IntegrationStateRecord(
             id=uuid4(),
             client_id=uuid4(),
@@ -114,7 +111,7 @@ class TestIntegrationStateRecord:
 
     def test_needs_inbound_sync(self):
         """Test needs_inbound_sync when external is ahead."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         record = IntegrationStateRecord(
             id=uuid4(),
             client_id=uuid4(),
@@ -132,7 +129,7 @@ class TestIntegrationStateRecord:
 
     def test_nullable_internal_record_id(self):
         """Test IntegrationStateRecord accepts internal_record_id=None for inbound records."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         record = IntegrationStateRecord(
             id=uuid4(),
             client_id=uuid4(),
@@ -154,7 +151,7 @@ class TestIntegrationStateRecord:
 
     def test_default_internal_record_id_is_none(self):
         """Test IntegrationStateRecord defaults internal_record_id to None."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         record = IntegrationStateRecord(
             id=uuid4(),
             client_id=uuid4(),
@@ -224,7 +221,7 @@ class TestSyncJob:
 
     def test_sync_job_creation(self):
         """Test SyncJob creation."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         job = SyncJob(
             id=uuid4(),
             client_id=uuid4(),
@@ -247,7 +244,7 @@ class TestIntegrationHistoryRecord:
 
     def test_creation(self):
         """Test IntegrationHistoryRecord creation with required fields."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         record = IntegrationHistoryRecord(
             id=uuid4(),
             client_id=uuid4(),
@@ -272,7 +269,7 @@ class TestIntegrationHistoryRecord:
 
     def test_nullable_fields(self):
         """Test IntegrationHistoryRecord with nullable fields set to None."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         record = IntegrationHistoryRecord(
             id=uuid4(),
             client_id=uuid4(),

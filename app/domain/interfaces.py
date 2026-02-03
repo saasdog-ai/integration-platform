@@ -20,7 +20,6 @@ from app.domain.entities import (
 )
 from app.domain.enums import RecordSyncStatus, SyncJobStatus
 
-
 # =============================================================================
 # Repository Interfaces (All DB Access)
 # =============================================================================
@@ -37,16 +36,12 @@ class IntegrationRepositoryInterface(ABC):
         pass
 
     @abstractmethod
-    async def get_available_integration(
-        self, integration_id: UUID
-    ) -> AvailableIntegration | None:
+    async def get_available_integration(self, integration_id: UUID) -> AvailableIntegration | None:
         """Get a specific available integration by ID."""
         pass
 
     @abstractmethod
-    async def get_available_integration_by_name(
-        self, name: str
-    ) -> AvailableIntegration | None:
+    async def get_available_integration_by_name(self, name: str) -> AvailableIntegration | None:
         """Get a specific available integration by name."""
         pass
 
@@ -58,9 +53,7 @@ class IntegrationRepositoryInterface(ABC):
         pass
 
     @abstractmethod
-    async def get_user_integrations(
-        self, client_id: UUID
-    ) -> list[UserIntegration]:
+    async def get_user_integrations(self, client_id: UUID) -> list[UserIntegration]:
         """Get all integrations for a user."""
         pass
 
@@ -70,23 +63,17 @@ class IntegrationRepositoryInterface(ABC):
         pass
 
     @abstractmethod
-    async def create_user_integration(
-        self, integration: UserIntegration
-    ) -> UserIntegration:
+    async def create_user_integration(self, integration: UserIntegration) -> UserIntegration:
         """Create a new user integration connection."""
         pass
 
     @abstractmethod
-    async def update_user_integration(
-        self, integration: UserIntegration
-    ) -> UserIntegration:
+    async def update_user_integration(self, integration: UserIntegration) -> UserIntegration:
         """Update an existing user integration."""
         pass
 
     @abstractmethod
-    async def delete_user_integration(
-        self, client_id: UUID, integration_id: UUID
-    ) -> bool:
+    async def delete_user_integration(self, client_id: UUID, integration_id: UUID) -> bool:
         """Delete a user integration connection."""
         pass
 
@@ -105,15 +92,15 @@ class IntegrationRepositoryInterface(ABC):
         pass
 
     @abstractmethod
-    async def get_system_settings(
-        self, integration_id: UUID
-    ) -> UserIntegrationSettings | None:
+    async def get_system_settings(self, integration_id: UUID) -> UserIntegrationSettings | None:
         """Get system default settings for an integration."""
         pass
 
     @abstractmethod
     async def upsert_system_settings(
-        self, integration_id: UUID, settings: UserIntegrationSettings,
+        self,
+        integration_id: UUID,
+        settings: UserIntegrationSettings,
     ) -> UserIntegrationSettings:
         """Create or update system default settings for an integration."""
         pass
@@ -158,16 +145,12 @@ class SyncJobRepositoryInterface(ABC):
         pass
 
     @abstractmethod
-    async def get_running_jobs(
-        self, client_id: UUID, integration_id: UUID
-    ) -> list[SyncJob]:
+    async def get_running_jobs(self, client_id: UUID, integration_id: UUID) -> list[SyncJob]:
         """Get currently running jobs for a client/integration."""
         pass
 
     @abstractmethod
-    async def create_job_if_no_running(
-        self, job: SyncJob
-    ) -> tuple[SyncJob | None, SyncJob | None]:
+    async def create_job_if_no_running(self, job: SyncJob) -> tuple[SyncJob | None, SyncJob | None]:
         """
         Atomically check for running jobs and create a new job if none exist.
 
@@ -279,9 +262,7 @@ class IntegrationStateRepositoryInterface(ABC):
         pass
 
     @abstractmethod
-    async def upsert_record(
-        self, record: IntegrationStateRecord
-    ) -> IntegrationStateRecord:
+    async def upsert_record(self, record: IntegrationStateRecord) -> IntegrationStateRecord:
         """Create or update a record's sync state."""
         pass
 
@@ -321,7 +302,9 @@ class IntegrationStateRepositoryInterface(ABC):
 
     @abstractmethod
     async def list_entity_sync_statuses(
-        self, client_id: UUID, integration_id: UUID,
+        self,
+        client_id: UUID,
+        integration_id: UUID,
     ) -> list[EntitySyncStatus]:
         """Get all entity sync statuses for a client+integration."""
         pass
@@ -426,9 +409,7 @@ class IntegrationStateRepositoryInterface(ABC):
         pass
 
     @abstractmethod
-    async def batch_create_history(
-        self, entries: list[IntegrationHistoryRecord]
-    ) -> None:
+    async def batch_create_history(self, entries: list[IntegrationHistoryRecord]) -> None:
         """Create multiple history entries in a single transaction."""
         pass
 
@@ -599,12 +580,16 @@ class IntegrationAdapterInterface(ABC):
     """
 
     @abstractmethod
-    async def authenticate(self, auth_code: str, redirect_uri: str, oauth_config: OAuthConfig | None = None) -> OAuthTokens:
+    async def authenticate(
+        self, auth_code: str, redirect_uri: str, oauth_config: OAuthConfig | None = None
+    ) -> OAuthTokens:
         """Exchange auth code for tokens."""
         pass
 
     @abstractmethod
-    async def refresh_token(self, refresh_token: str, oauth_config: OAuthConfig | None = None) -> OAuthTokens:
+    async def refresh_token(
+        self, refresh_token: str, oauth_config: OAuthConfig | None = None
+    ) -> OAuthTokens:
         """Refresh expired access token."""
         pass
 

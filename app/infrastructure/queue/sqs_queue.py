@@ -77,7 +77,9 @@ class SQSQueue(MessageQueueInterface):
                 session = boto3.Session(**session_kwargs)
                 self._client = session.client("sqs", **client_kwargs)
             except ImportError:
-                raise QueueError("boto3 is required for SQS. Install with: pip install boto3")
+                raise QueueError(
+                    "boto3 is required for SQS. Install with: pip install boto3"
+                ) from None
 
         return self._client
 
@@ -118,7 +120,7 @@ class SQSQueue(MessageQueueInterface):
                 "Failed to send message to SQS",
                 extra={"error": str(e), "queue_url": self._queue_url},
             )
-            raise QueueError(f"Failed to send message: {e}")
+            raise QueueError(f"Failed to send message: {e}") from e
 
     async def receive_messages(
         self,
@@ -172,7 +174,7 @@ class SQSQueue(MessageQueueInterface):
                 "Failed to receive messages from SQS",
                 extra={"error": str(e), "queue_url": self._queue_url},
             )
-            raise QueueError(f"Failed to receive messages: {e}")
+            raise QueueError(f"Failed to receive messages: {e}") from e
 
     async def delete_message(self, receipt_handle: str) -> None:
         """Delete a message from SQS."""
@@ -200,7 +202,7 @@ class SQSQueue(MessageQueueInterface):
                 "Failed to delete message from SQS",
                 extra={"error": str(e), "queue_url": self._queue_url},
             )
-            raise QueueError(f"Failed to delete message: {e}")
+            raise QueueError(f"Failed to delete message: {e}") from e
 
     async def change_visibility(
         self,
@@ -237,7 +239,7 @@ class SQSQueue(MessageQueueInterface):
                 "Failed to change message visibility",
                 extra={"error": str(e), "queue_url": self._queue_url},
             )
-            raise QueueError(f"Failed to change visibility: {e}")
+            raise QueueError(f"Failed to change visibility: {e}") from e
 
     def _get_dlq_url(self) -> str:
         """Get the DLQ URL by convention (main queue URL + '-dlq')."""
@@ -293,7 +295,7 @@ class SQSQueue(MessageQueueInterface):
                 "Failed to send message to DLQ",
                 extra={"error": str(e), "dlq_url": self._get_dlq_url()},
             )
-            raise QueueError(f"Failed to send to DLQ: {e}")
+            raise QueueError(f"Failed to send to DLQ: {e}") from e
 
     async def get_dlq_messages(
         self,
@@ -345,4 +347,4 @@ class SQSQueue(MessageQueueInterface):
                 "Failed to get messages from DLQ",
                 extra={"error": str(e), "dlq_url": self._get_dlq_url()},
             )
-            raise QueueError(f"Failed to get DLQ messages: {e}")
+            raise QueueError(f"Failed to get DLQ messages: {e}") from e

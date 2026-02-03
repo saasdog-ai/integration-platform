@@ -1,7 +1,7 @@
 """Tests for health check endpoints."""
 
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import datetime
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -106,8 +106,12 @@ class TestReadinessCheck:
         mock_engine = MagicMock()
 
         with patch("app.infrastructure.db.database.get_engine", return_value=mock_engine):
-            with patch("app.infrastructure.queue.factory.get_message_queue", return_value=MagicMock()):
-                with patch("app.infrastructure.encryption.factory.get_encryption_service") as mock_encryption:
+            with patch(
+                "app.infrastructure.queue.factory.get_message_queue", return_value=MagicMock()
+            ):
+                with patch(
+                    "app.infrastructure.encryption.factory.get_encryption_service"
+                ) as mock_encryption:
                     mock_encryption.side_effect = Exception("Encryption unavailable")
 
                     response = client.get("/health/ready")

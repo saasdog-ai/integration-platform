@@ -1,13 +1,11 @@
 """Tests for middleware components."""
 
-import asyncio
 import time
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from httpx import ASGITransport, AsyncClient
 from starlette.testclient import TestClient
 
 from app.core.middleware import (

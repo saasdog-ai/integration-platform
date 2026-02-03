@@ -75,9 +75,7 @@ class UserIntegrationModel(Base, TimestampMixin):
     """User's connected integrations with encrypted credentials."""
 
     __tablename__ = "user_integrations"
-    __table_args__ = (
-        Index("ix_user_integrations_client_id", "client_id"),
-    )
+    __table_args__ = (Index("ix_user_integrations_client_id", "client_id"),)
 
     id: Mapped[UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -93,17 +91,13 @@ class UserIntegrationModel(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="pending"
     )  # pending, connected, error, revoked
-    credentials_encrypted: Mapped[bytes | None] = mapped_column(
-        LargeBinary, nullable=True
-    )
+    credentials_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     credentials_key_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     external_account_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     last_connected_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    disconnected_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    disconnected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relationships
     integration: Mapped["AvailableIntegrationModel"] = relationship(
@@ -144,9 +138,7 @@ class UserIntegrationSettingsModel(Base, TimestampMixin):
         ForeignKey("available_integrations.id"),
         nullable=False,
     )
-    settings: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, server_default="{}"
-    )
+    settings: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
 
     # Relationships
     user_integration: Mapped["UserIntegrationModel | None"] = relationship(
@@ -183,9 +175,7 @@ class SystemIntegrationSettingsModel(Base, TimestampMixin):
         nullable=False,
         unique=True,
     )
-    settings: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, server_default="{}"
-    )
+    settings: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
 
     # Relationships
     integration: Mapped["AvailableIntegrationModel"] = relationship(
@@ -244,15 +234,9 @@ class SyncJobModel(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="pending"
     )  # pending, running, succeeded, failed, cancelled
-    started_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    completed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    entities_processed: Mapped[dict[str, Any] | None] = mapped_column(
-        JSONB, nullable=True
-    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    entities_processed: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_details: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
@@ -377,21 +361,15 @@ class IntegrationStateModel(Base):
     )  # inbound, outbound
     internal_version_id: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     external_version_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    last_sync_version_id: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=0
-    )
-    last_synced_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    last_sync_version_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_job_id: Mapped[UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True
     )  # Links record to the sync job that last modified it
     error_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_details: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
-    metadata_: Mapped[dict[str, Any] | None] = mapped_column(
-        "metadata", JSONB, nullable=True
-    )
+    metadata_: Mapped[dict[str, Any] | None] = mapped_column("metadata", JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -443,12 +421,8 @@ class IntegrationHistoryModel(Base):
     entity_type: Mapped[str] = mapped_column(String(50), nullable=False)
     internal_record_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     external_record_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    sync_status: Mapped[str] = mapped_column(
-        String(20), nullable=False
-    )
-    sync_direction: Mapped[str | None] = mapped_column(
-        String(10), nullable=True
-    )
+    sync_status: Mapped[str] = mapped_column(String(20), nullable=False)
+    sync_direction: Mapped[str | None] = mapped_column(String(10), nullable=True)
     job_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     error_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)

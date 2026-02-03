@@ -7,7 +7,7 @@ strategy only depends on the public methods defined here.
 """
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -61,7 +61,7 @@ class InternalDataRepository:
     async def upsert_vendor(self, client_id: UUID, data: dict[str, Any]) -> str:
         """Create or update a vendor. Returns the internal record ID."""
         factory = _get_session_factory()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         async with factory() as session:
             # Check if vendor already exists by external_id
@@ -69,7 +69,9 @@ class InternalDataRepository:
             existing = None
             if external_id:
                 result = await session.execute(
-                    text("SELECT id FROM sample_vendors WHERE client_id = :client_id AND external_id = :ext_id"),
+                    text(
+                        "SELECT id FROM sample_vendors WHERE client_id = :client_id AND external_id = :ext_id"
+                    ),
                     {"client_id": str(client_id), "ext_id": external_id},
                 )
                 existing = result.first()
@@ -177,14 +179,16 @@ class InternalDataRepository:
     async def upsert_bill(self, client_id: UUID, data: dict[str, Any]) -> str:
         """Create or update a bill. Returns the internal record ID."""
         factory = _get_session_factory()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         async with factory() as session:
             external_id = data.get("_external_id")
             existing = None
             if external_id:
                 result = await session.execute(
-                    text("SELECT id FROM sample_bills WHERE client_id = :client_id AND external_id = :ext_id"),
+                    text(
+                        "SELECT id FROM sample_bills WHERE client_id = :client_id AND external_id = :ext_id"
+                    ),
                     {"client_id": str(client_id), "ext_id": external_id},
                 )
                 existing = result.first()
@@ -228,7 +232,9 @@ class InternalDataRepository:
                 vendor_id = data.get("vendor_id")
                 if not vendor_id and data.get("vendor_external_id"):
                     vresult = await session.execute(
-                        text("SELECT id FROM sample_vendors WHERE client_id = :cid AND external_id = :ext_id"),
+                        text(
+                            "SELECT id FROM sample_vendors WHERE client_id = :cid AND external_id = :ext_id"
+                        ),
                         {"cid": str(client_id), "ext_id": data["vendor_external_id"]},
                     )
                     vrow = vresult.first()
@@ -302,14 +308,16 @@ class InternalDataRepository:
     async def upsert_invoice(self, client_id: UUID, data: dict[str, Any]) -> str:
         """Create or update an invoice. Returns the internal record ID."""
         factory = _get_session_factory()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         async with factory() as session:
             external_id = data.get("_external_id")
             existing = None
             if external_id:
                 result = await session.execute(
-                    text("SELECT id FROM sample_invoices WHERE client_id = :client_id AND external_id = :ext_id"),
+                    text(
+                        "SELECT id FROM sample_invoices WHERE client_id = :client_id AND external_id = :ext_id"
+                    ),
                     {"client_id": str(client_id), "ext_id": external_id},
                 )
                 existing = result.first()
@@ -359,7 +367,9 @@ class InternalDataRepository:
                 contact_id = data.get("contact_id")
                 if not contact_id and data.get("contact_external_id"):
                     cresult = await session.execute(
-                        text("SELECT id FROM sample_vendors WHERE client_id = :cid AND external_id = :ext_id"),
+                        text(
+                            "SELECT id FROM sample_vendors WHERE client_id = :cid AND external_id = :ext_id"
+                        ),
                         {"cid": str(client_id), "ext_id": data["contact_external_id"]},
                     )
                     crow = cresult.first()
@@ -438,14 +448,16 @@ class InternalDataRepository:
     async def upsert_chart_of_accounts(self, client_id: UUID, data: dict[str, Any]) -> str:
         """Create or update a chart of accounts record. Returns the internal record ID."""
         factory = _get_session_factory()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         async with factory() as session:
             external_id = data.get("_external_id")
             existing = None
             if external_id:
                 result = await session.execute(
-                    text("SELECT id FROM sample_chart_of_accounts WHERE client_id = :client_id AND external_id = :ext_id"),
+                    text(
+                        "SELECT id FROM sample_chart_of_accounts WHERE client_id = :client_id AND external_id = :ext_id"
+                    ),
                     {"client_id": str(client_id), "ext_id": external_id},
                 )
                 existing = result.first()
@@ -528,14 +540,19 @@ class InternalDataRepository:
         external_id: str,
     ) -> None:
         """Set the external_id on an internal record after successful outbound sync."""
-        if table not in ("sample_vendors", "sample_bills", "sample_invoices", "sample_chart_of_accounts"):
+        if table not in (
+            "sample_vendors",
+            "sample_bills",
+            "sample_invoices",
+            "sample_chart_of_accounts",
+        ):
             raise ValueError(f"Invalid table: {table}")
 
         factory = _get_session_factory()
         async with factory() as session:
             await session.execute(
                 text(f"UPDATE {table} SET external_id = :ext_id, updated_at = :now WHERE id = :id"),
-                {"ext_id": external_id, "now": datetime.now(timezone.utc), "id": record_id},
+                {"ext_id": external_id, "now": datetime.now(UTC), "id": record_id},
             )
             await session.commit()
 

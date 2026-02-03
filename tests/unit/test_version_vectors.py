@@ -7,7 +7,7 @@ These tests target a `sync_entity_bidirectional()` method on QuickBooksSyncStrat
 that does not yet exist, so bidirectional tests will fail until implemented.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -22,13 +22,11 @@ from app.domain.enums import (
     SyncJobType,
 )
 from app.integrations.quickbooks.strategy import QuickBooksSyncStrategy
-from tests.mocks.adapters import MockIntegrationAdapter
-from tests.mocks.repositories import MockIntegrationStateRepository
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def make_state(
     internal_v: int,
@@ -42,7 +40,7 @@ def make_state(
     entity_type: str = "vendor",
 ) -> IntegrationStateRecord:
     """Create an IntegrationStateRecord pre-seeded with explicit version vectors."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return IntegrationStateRecord(
         id=uuid4(),
         client_id=client_id or uuid4(),
@@ -65,11 +63,16 @@ def make_state(
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 class _MockInternalRepo:
     """Stub internal data repository for unit tests (no real DB needed)."""
 
-    ENTITY_TABLE_MAP = {"vendor": "sample_vendors", "bill": "sample_bills",
-                        "invoice": "sample_invoices", "chart_of_accounts": "sample_chart_of_accounts"}
+    ENTITY_TABLE_MAP = {
+        "vendor": "sample_vendors",
+        "bill": "sample_bills",
+        "invoice": "sample_invoices",
+        "chart_of_accounts": "sample_chart_of_accounts",
+    }
 
     async def upsert_vendor(self, client_id, data):
         return str(uuid4())
@@ -108,7 +111,7 @@ def strategy():
 @pytest.fixture
 def sample_job():
     """Create a sample SyncJob for bidirectional tests."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     client_id = uuid4()
     integration_id = uuid4()
     return SyncJob(
@@ -127,6 +130,7 @@ def sample_job():
 # Class 1 — Bidirectional Change Detection
 # ===========================================================================
 
+
 class TestBidirectionalChangeDetection:
     """Tests that version bumps and direction classification work correctly."""
 
@@ -135,7 +139,9 @@ class TestBidirectionalChangeDetection:
     ):
         """When only the internal record changed, it should be classified outbound."""
         state = make_state(
-            internal_v=5, external_v=5, last_sync_v=5,
+            internal_v=5,
+            external_v=5,
+            last_sync_v=5,
             client_id=sample_job.client_id,
             integration_id=sample_job.integration_id,
         )
@@ -151,7 +157,7 @@ class TestBidirectionalChangeDetection:
         mock_adapter.seed_record("vendor", state.external_record_id, {"name": "Vendor"})
         await mock_state_repo.upsert_record(state)
 
-        result = await strategy.sync_entity_bidirectional(
+        await strategy.sync_entity_bidirectional(
             job=sample_job,
             entity_type="vendor",
             adapter=mock_adapter,
@@ -160,8 +166,10 @@ class TestBidirectionalChangeDetection:
         )
 
         updated = await mock_state_repo.get_record(
-            sample_job.client_id, sample_job.integration_id,
-            "vendor", internal_record_id=state.internal_record_id,
+            sample_job.client_id,
+            sample_job.integration_id,
+            "vendor",
+            internal_record_id=state.internal_record_id,
         )
         assert updated is not None
         assert updated.sync_direction == SyncDirection.OUTBOUND
@@ -171,7 +179,9 @@ class TestBidirectionalChangeDetection:
     ):
         """When only the external record changed, it should be classified inbound."""
         state = make_state(
-            internal_v=5, external_v=5, last_sync_v=5,
+            internal_v=5,
+            external_v=5,
+            last_sync_v=5,
             client_id=sample_job.client_id,
             integration_id=sample_job.integration_id,
         )
@@ -187,7 +197,7 @@ class TestBidirectionalChangeDetection:
         mock_adapter.seed_record("vendor", state.external_record_id, {"name": "Vendor"})
         await mock_state_repo.upsert_record(state)
 
-        result = await strategy.sync_entity_bidirectional(
+        await strategy.sync_entity_bidirectional(
             job=sample_job,
             entity_type="vendor",
             adapter=mock_adapter,
@@ -196,8 +206,10 @@ class TestBidirectionalChangeDetection:
         )
 
         updated = await mock_state_repo.get_record(
-            sample_job.client_id, sample_job.integration_id,
-            "vendor", internal_record_id=state.internal_record_id,
+            sample_job.client_id,
+            sample_job.integration_id,
+            "vendor",
+            internal_record_id=state.internal_record_id,
         )
         assert updated is not None
         assert updated.sync_direction == SyncDirection.INBOUND
@@ -207,7 +219,9 @@ class TestBidirectionalChangeDetection:
     ):
         """When both changed and master=external, classified inbound (external wins)."""
         state = make_state(
-            internal_v=5, external_v=5, last_sync_v=5,
+            internal_v=5,
+            external_v=5,
+            last_sync_v=5,
             client_id=sample_job.client_id,
             integration_id=sample_job.integration_id,
         )
@@ -224,7 +238,7 @@ class TestBidirectionalChangeDetection:
         mock_adapter.seed_record("vendor", state.external_record_id, {"name": "Vendor"})
         await mock_state_repo.upsert_record(state)
 
-        result = await strategy.sync_entity_bidirectional(
+        await strategy.sync_entity_bidirectional(
             job=sample_job,
             entity_type="vendor",
             adapter=mock_adapter,
@@ -233,8 +247,10 @@ class TestBidirectionalChangeDetection:
         )
 
         updated = await mock_state_repo.get_record(
-            sample_job.client_id, sample_job.integration_id,
-            "vendor", internal_record_id=state.internal_record_id,
+            sample_job.client_id,
+            sample_job.integration_id,
+            "vendor",
+            internal_record_id=state.internal_record_id,
         )
         assert updated is not None
         # External wins: direction should be inbound
@@ -245,7 +261,9 @@ class TestBidirectionalChangeDetection:
     ):
         """When both changed and master=our_system, classified outbound (our system wins)."""
         state = make_state(
-            internal_v=5, external_v=5, last_sync_v=5,
+            internal_v=5,
+            external_v=5,
+            last_sync_v=5,
             client_id=sample_job.client_id,
             integration_id=sample_job.integration_id,
         )
@@ -262,7 +280,7 @@ class TestBidirectionalChangeDetection:
         mock_adapter.seed_record("vendor", state.external_record_id, {"name": "Vendor"})
         await mock_state_repo.upsert_record(state)
 
-        result = await strategy.sync_entity_bidirectional(
+        await strategy.sync_entity_bidirectional(
             job=sample_job,
             entity_type="vendor",
             adapter=mock_adapter,
@@ -271,19 +289,21 @@ class TestBidirectionalChangeDetection:
         )
 
         updated = await mock_state_repo.get_record(
-            sample_job.client_id, sample_job.integration_id,
-            "vendor", internal_record_id=state.internal_record_id,
+            sample_job.client_id,
+            sample_job.integration_id,
+            "vendor",
+            internal_record_id=state.internal_record_id,
         )
         assert updated is not None
         # Our system wins: direction should be outbound
         assert updated.sync_direction == SyncDirection.OUTBOUND
 
-    async def test_no_change_skipped(
-        self, strategy, sample_job, mock_state_repo, mock_adapter
-    ):
+    async def test_no_change_skipped(self, strategy, sample_job, mock_state_repo, mock_adapter):
         """When neither side changed, the record should not be synced."""
         state = make_state(
-            internal_v=5, external_v=5, last_sync_v=5,
+            internal_v=5,
+            external_v=5,
+            last_sync_v=5,
             client_id=sample_job.client_id,
             integration_id=sample_job.integration_id,
         )
@@ -296,7 +316,7 @@ class TestBidirectionalChangeDetection:
 
         await mock_state_repo.upsert_record(state)
 
-        result = await strategy.sync_entity_bidirectional(
+        await strategy.sync_entity_bidirectional(
             job=sample_job,
             entity_type="vendor",
             adapter=mock_adapter,
@@ -305,8 +325,10 @@ class TestBidirectionalChangeDetection:
         )
 
         updated = await mock_state_repo.get_record(
-            sample_job.client_id, sample_job.integration_id,
-            "vendor", internal_record_id=state.internal_record_id,
+            sample_job.client_id,
+            sample_job.integration_id,
+            "vendor",
+            internal_record_id=state.internal_record_id,
         )
         assert updated is not None
         # Versions unchanged
@@ -367,6 +389,7 @@ class TestBidirectionalChangeDetection:
 # Class 2 — Bidirectional Sync Execution
 # ===========================================================================
 
+
 class TestBidirectionalSyncExecution:
     """Tests that data transfer and version equalization work."""
 
@@ -375,7 +398,9 @@ class TestBidirectionalSyncExecution:
     ):
         """After outbound sync, iv=ev=lsv=6 and adapter.update_record called."""
         state = make_state(
-            internal_v=6, external_v=5, last_sync_v=5,
+            internal_v=6,
+            external_v=5,
+            last_sync_v=5,
             client_id=sample_job.client_id,
             integration_id=sample_job.integration_id,
         )
@@ -399,8 +424,10 @@ class TestBidirectionalSyncExecution:
         )
 
         updated = await mock_state_repo.get_record(
-            sample_job.client_id, sample_job.integration_id,
-            "vendor", internal_record_id=state.internal_record_id,
+            sample_job.client_id,
+            sample_job.integration_id,
+            "vendor",
+            internal_record_id=state.internal_record_id,
         )
         assert updated is not None
         assert updated.internal_version_id == 6
@@ -413,7 +440,9 @@ class TestBidirectionalSyncExecution:
     ):
         """After inbound sync, iv=ev=lsv=6 and internal repo updated."""
         state = make_state(
-            internal_v=5, external_v=6, last_sync_v=5,
+            internal_v=5,
+            external_v=6,
+            last_sync_v=5,
             client_id=sample_job.client_id,
             integration_id=sample_job.integration_id,
         )
@@ -436,8 +465,10 @@ class TestBidirectionalSyncExecution:
         )
 
         updated = await mock_state_repo.get_record(
-            sample_job.client_id, sample_job.integration_id,
-            "vendor", internal_record_id=state.internal_record_id,
+            sample_job.client_id,
+            sample_job.integration_id,
+            "vendor",
+            internal_record_id=state.internal_record_id,
         )
         assert updated is not None
         assert updated.internal_version_id == 6
@@ -449,7 +480,9 @@ class TestBidirectionalSyncExecution:
     ):
         """Conflict with master=our_system: outbound sync, versions equalized to 6."""
         state = make_state(
-            internal_v=6, external_v=6, last_sync_v=5,
+            internal_v=6,
+            external_v=6,
+            last_sync_v=5,
             client_id=sample_job.client_id,
             integration_id=sample_job.integration_id,
         )
@@ -472,8 +505,10 @@ class TestBidirectionalSyncExecution:
         )
 
         updated = await mock_state_repo.get_record(
-            sample_job.client_id, sample_job.integration_id,
-            "vendor", internal_record_id=state.internal_record_id,
+            sample_job.client_id,
+            sample_job.integration_id,
+            "vendor",
+            internal_record_id=state.internal_record_id,
         )
         assert updated is not None
         assert updated.internal_version_id == 6
@@ -486,7 +521,9 @@ class TestBidirectionalSyncExecution:
     ):
         """Conflict with master=external: inbound sync, versions equalized to 6."""
         state = make_state(
-            internal_v=6, external_v=6, last_sync_v=5,
+            internal_v=6,
+            external_v=6,
+            last_sync_v=5,
             client_id=sample_job.client_id,
             integration_id=sample_job.integration_id,
         )
@@ -509,8 +546,10 @@ class TestBidirectionalSyncExecution:
         )
 
         updated = await mock_state_repo.get_record(
-            sample_job.client_id, sample_job.integration_id,
-            "vendor", internal_record_id=state.internal_record_id,
+            sample_job.client_id,
+            sample_job.integration_id,
+            "vendor",
+            internal_record_id=state.internal_record_id,
         )
         assert updated is not None
         assert updated.internal_version_id == 6
@@ -522,7 +561,9 @@ class TestBidirectionalSyncExecution:
     ):
         """A new internal record (iv=1, ev=0, lsv=0) should create in external system."""
         state = make_state(
-            internal_v=1, external_v=0, last_sync_v=0,
+            internal_v=1,
+            external_v=0,
+            last_sync_v=0,
             internal_id="int-new",
             external_id=None,
             client_id=sample_job.client_id,
@@ -548,8 +589,10 @@ class TestBidirectionalSyncExecution:
         assert len(mock_adapter.create_record_calls) >= 1
 
         updated = await mock_state_repo.get_record(
-            sample_job.client_id, sample_job.integration_id,
-            "vendor", internal_record_id="int-new",
+            sample_job.client_id,
+            sample_job.integration_id,
+            "vendor",
+            internal_record_id="int-new",
         )
         assert updated is not None
         assert updated.internal_version_id == 1
@@ -561,7 +604,9 @@ class TestBidirectionalSyncExecution:
     ):
         """A new external record (iv=0, ev=1, lsv=0) should create in internal system."""
         state = make_state(
-            internal_v=0, external_v=1, last_sync_v=0,
+            internal_v=0,
+            external_v=1,
+            last_sync_v=0,
             internal_id=None,
             external_id="ext-new",
             client_id=sample_job.client_id,
@@ -586,8 +631,10 @@ class TestBidirectionalSyncExecution:
         )
 
         updated = await mock_state_repo.get_record_by_external_id(
-            sample_job.client_id, sample_job.integration_id,
-            "vendor", "ext-new",
+            sample_job.client_id,
+            sample_job.integration_id,
+            "vendor",
+            "ext-new",
         )
         assert updated is not None
         assert updated.internal_version_id == 1
@@ -603,25 +650,37 @@ class TestBidirectionalSyncExecution:
 
         # Record 1: internal changed → outbound
         outbound_state = make_state(
-            internal_v=6, external_v=5, last_sync_v=5,
-            internal_id="int-out", external_id="ext-out",
-            client_id=cid, integration_id=iid,
+            internal_v=6,
+            external_v=5,
+            last_sync_v=5,
+            internal_id="int-out",
+            external_id="ext-out",
+            client_id=cid,
+            integration_id=iid,
         )
         mock_adapter.seed_record("vendor", "ext-out", {"name": "Outbound Vendor"})
 
         # Record 2: external changed → inbound
         inbound_state = make_state(
-            internal_v=5, external_v=6, last_sync_v=5,
-            internal_id="int-in", external_id="ext-in",
-            client_id=cid, integration_id=iid,
+            internal_v=5,
+            external_v=6,
+            last_sync_v=5,
+            internal_id="int-in",
+            external_id="ext-in",
+            client_id=cid,
+            integration_id=iid,
         )
         mock_adapter.seed_record("vendor", "ext-in", {"name": "Inbound Vendor"})
 
         # Record 3: both changed → conflict (master=external → inbound)
         conflict_state = make_state(
-            internal_v=6, external_v=6, last_sync_v=5,
-            internal_id="int-conf", external_id="ext-conf",
-            client_id=cid, integration_id=iid,
+            internal_v=6,
+            external_v=6,
+            last_sync_v=5,
+            internal_id="int-conf",
+            external_id="ext-conf",
+            client_id=cid,
+            integration_id=iid,
         )
         mock_adapter.seed_record("vendor", "ext-conf", {"name": "Conflict Vendor"})
 
@@ -644,13 +703,22 @@ class TestBidirectionalSyncExecution:
         )
 
         out = await mock_state_repo.get_record(
-            cid, iid, "vendor", internal_record_id="int-out",
+            cid,
+            iid,
+            "vendor",
+            internal_record_id="int-out",
         )
         inp = await mock_state_repo.get_record(
-            cid, iid, "vendor", internal_record_id="int-in",
+            cid,
+            iid,
+            "vendor",
+            internal_record_id="int-in",
         )
         conf = await mock_state_repo.get_record(
-            cid, iid, "vendor", internal_record_id="int-conf",
+            cid,
+            iid,
+            "vendor",
+            internal_record_id="int-conf",
         )
 
         # All should be equalized
@@ -668,6 +736,7 @@ class TestBidirectionalSyncExecution:
 # Class 3 — Inbound-Only Version Vectors
 # ===========================================================================
 
+
 class TestInboundOnlyVersionVectors:
     """Tests that inbound-only sync properly manages version vectors."""
 
@@ -676,7 +745,9 @@ class TestInboundOnlyVersionVectors:
     ):
         """After inbound sync, all three versions should be equal."""
         state = make_state(
-            internal_v=5, external_v=5, last_sync_v=5,
+            internal_v=5,
+            external_v=5,
+            last_sync_v=5,
             client_id=sample_job.client_id,
             integration_id=sample_job.integration_id,
         )
@@ -693,8 +764,10 @@ class TestInboundOnlyVersionVectors:
         )
 
         updated = await mock_state_repo.get_record_by_external_id(
-            sample_job.client_id, sample_job.integration_id,
-            "vendor", state.external_record_id,
+            sample_job.client_id,
+            sample_job.integration_id,
+            "vendor",
+            state.external_record_id,
         )
         assert updated is not None
         # After inbound sync, all three versions should be equal
@@ -706,7 +779,9 @@ class TestInboundOnlyVersionVectors:
     ):
         """Inbound-only sync should NOT push internal changes outbound."""
         state = make_state(
-            internal_v=7, external_v=5, last_sync_v=5,
+            internal_v=7,
+            external_v=5,
+            last_sync_v=5,
             client_id=sample_job.client_id,
             integration_id=sample_job.integration_id,
         )
@@ -739,8 +814,10 @@ class TestInboundOnlyVersionVectors:
         )
 
         created = await mock_state_repo.get_record_by_external_id(
-            sample_job.client_id, sample_job.integration_id,
-            "vendor", "ext-brand-new",
+            sample_job.client_id,
+            sample_job.integration_id,
+            "vendor",
+            "ext-brand-new",
         )
         assert created is not None
         assert created.internal_version_id == 1
@@ -752,6 +829,7 @@ class TestInboundOnlyVersionVectors:
 # Class 4 — Outbound-Only Version Vectors
 # ===========================================================================
 
+
 class TestOutboundOnlyVersionVectors:
     """Tests that outbound-only sync properly manages version vectors."""
 
@@ -760,7 +838,9 @@ class TestOutboundOnlyVersionVectors:
     ):
         """After outbound sync, all three versions should be equal."""
         state = make_state(
-            internal_v=6, external_v=5, last_sync_v=5,
+            internal_v=6,
+            external_v=5,
+            last_sync_v=5,
             client_id=sample_job.client_id,
             integration_id=sample_job.integration_id,
         )
@@ -775,8 +855,10 @@ class TestOutboundOnlyVersionVectors:
         )
 
         updated = await mock_state_repo.get_record(
-            sample_job.client_id, sample_job.integration_id,
-            "vendor", internal_record_id=state.internal_record_id,
+            sample_job.client_id,
+            sample_job.integration_id,
+            "vendor",
+            internal_record_id=state.internal_record_id,
         )
         assert updated is not None
         assert updated.internal_version_id == updated.external_version_id
@@ -787,7 +869,9 @@ class TestOutboundOnlyVersionVectors:
     ):
         """Outbound-only sync should NOT pull external changes inbound."""
         state = make_state(
-            internal_v=5, external_v=7, last_sync_v=5,
+            internal_v=5,
+            external_v=7,
+            last_sync_v=5,
             client_id=sample_job.client_id,
             integration_id=sample_job.integration_id,
         )
@@ -806,8 +890,10 @@ class TestOutboundOnlyVersionVectors:
         # (outbound reads from internal DB, not external)
         # The external version bump should NOT cause an inbound sync
         updated = await mock_state_repo.get_record(
-            sample_job.client_id, sample_job.integration_id,
-            "vendor", internal_record_id=state.internal_record_id,
+            sample_job.client_id,
+            sample_job.integration_id,
+            "vendor",
+            internal_record_id=state.internal_record_id,
         )
         # External changes should not have been pulled in
         assert updated is not None
@@ -817,7 +903,9 @@ class TestOutboundOnlyVersionVectors:
     ):
         """A new internal record synced outbound should end with iv=ev=lsv=1."""
         state = make_state(
-            internal_v=1, external_v=0, last_sync_v=0,
+            internal_v=1,
+            external_v=0,
+            last_sync_v=0,
             internal_id="int-brand-new",
             external_id=None,
             client_id=sample_job.client_id,
@@ -833,8 +921,10 @@ class TestOutboundOnlyVersionVectors:
         )
 
         updated = await mock_state_repo.get_record(
-            sample_job.client_id, sample_job.integration_id,
-            "vendor", internal_record_id="int-brand-new",
+            sample_job.client_id,
+            sample_job.integration_id,
+            "vendor",
+            internal_record_id="int-brand-new",
         )
         assert updated is not None
         assert updated.internal_version_id == 1
@@ -845,6 +935,7 @@ class TestOutboundOnlyVersionVectors:
 # ===========================================================================
 # Class 5 — Version Vector Properties (Domain Model)
 # ===========================================================================
+
 
 class TestVersionVectorProperties:
     """Tests for IntegrationStateRecord helper properties.
@@ -895,6 +986,7 @@ class TestVersionVectorProperties:
 # Class 6 — master_if_conflict Settings Validation
 # ===========================================================================
 
+
 class TestMasterIfConflictSettingsValidation:
     """Tests that master_if_conflict is only relevant for bidirectional rules."""
 
@@ -903,7 +995,9 @@ class TestMasterIfConflictSettingsValidation:
     ):
         """Bidirectional sync should apply master_if_conflict when both sides changed."""
         state = make_state(
-            internal_v=6, external_v=6, last_sync_v=5,
+            internal_v=6,
+            external_v=6,
+            last_sync_v=5,
             client_id=sample_job.client_id,
             integration_id=sample_job.integration_id,
         )
@@ -926,8 +1020,10 @@ class TestMasterIfConflictSettingsValidation:
         )
 
         updated = await mock_state_repo.get_record(
-            sample_job.client_id, sample_job.integration_id,
-            "vendor", internal_record_id=state.internal_record_id,
+            sample_job.client_id,
+            sample_job.integration_id,
+            "vendor",
+            internal_record_id=state.internal_record_id,
         )
         assert updated is not None
         assert updated.sync_direction == SyncDirection.INBOUND  # external master
@@ -937,7 +1033,9 @@ class TestMasterIfConflictSettingsValidation:
     ):
         """Inbound-only sync should not consult master_if_conflict."""
         state = make_state(
-            internal_v=6, external_v=6, last_sync_v=5,
+            internal_v=6,
+            external_v=6,
+            last_sync_v=5,
             client_id=sample_job.client_id,
             integration_id=sample_job.integration_id,
         )
@@ -953,8 +1051,10 @@ class TestMasterIfConflictSettingsValidation:
         )
 
         updated = await mock_state_repo.get_record_by_external_id(
-            sample_job.client_id, sample_job.integration_id,
-            "vendor", state.external_record_id,
+            sample_job.client_id,
+            sample_job.integration_id,
+            "vendor",
+            state.external_record_id,
         )
         assert updated is not None
         assert updated.sync_direction == SyncDirection.INBOUND
@@ -964,7 +1064,9 @@ class TestMasterIfConflictSettingsValidation:
     ):
         """Outbound-only sync should not consult master_if_conflict."""
         state = make_state(
-            internal_v=6, external_v=6, last_sync_v=5,
+            internal_v=6,
+            external_v=6,
+            last_sync_v=5,
             client_id=sample_job.client_id,
             integration_id=sample_job.integration_id,
         )

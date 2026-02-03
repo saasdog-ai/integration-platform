@@ -2,7 +2,6 @@
 
 import asyncio
 from contextlib import asynccontextmanager
-from typing import Any
 
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -193,9 +192,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(ValidationError)
-    async def validation_handler(
-        request: Request, exc: ValidationError
-    ) -> JSONResponse:
+    async def validation_handler(request: Request, exc: ValidationError) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
             content={
@@ -217,9 +214,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(AuthenticationError)
-    async def auth_error_handler(
-        request: Request, exc: AuthenticationError
-    ) -> JSONResponse:
+    async def auth_error_handler(request: Request, exc: AuthenticationError) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_401_UNAUTHORIZED,
             content={
@@ -230,9 +225,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(AuthorizationError)
-    async def authz_error_handler(
-        request: Request, exc: AuthorizationError
-    ) -> JSONResponse:
+    async def authz_error_handler(request: Request, exc: AuthorizationError) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_403_FORBIDDEN,
             content={
@@ -243,9 +236,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(ApplicationError)
-    async def app_error_handler(
-        request: Request, exc: ApplicationError
-    ) -> JSONResponse:
+    async def app_error_handler(request: Request, exc: ApplicationError) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={
