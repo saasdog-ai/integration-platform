@@ -551,7 +551,7 @@ class InternalDataRepository:
             if isinstance(val, UUID):
                 result[key] = str(val)
             elif isinstance(val, datetime):
-                result[key] = val
+                result[key] = val.isoformat()
         return result
 
     # Entity type → (table name, getter, upserter)

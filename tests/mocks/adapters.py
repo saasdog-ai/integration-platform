@@ -75,7 +75,7 @@ class MockIntegrationAdapter(IntegrationAdapterInterface):
         self._records[entity_type][external_id] = record
         return record
 
-    async def authenticate(self, auth_code: str, redirect_uri: str) -> OAuthTokens:
+    async def authenticate(self, auth_code: str, redirect_uri: str, oauth_config=None) -> OAuthTokens:
         """Mock OAuth authentication."""
         self.authenticate_calls.append((auth_code, redirect_uri))
 

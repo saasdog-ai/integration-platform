@@ -56,6 +56,7 @@ def _to_sync_job_response(job: SyncJob) -> SyncJobResponse:
         entities_processed=job.entities_processed,
         error_code=job.error_code,
         error_message=job.error_message,
+        error_details=job.error_details,
         created_at=job.created_at,
         updated_at=job.updated_at,
     )

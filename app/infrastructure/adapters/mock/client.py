@@ -5,7 +5,7 @@ from typing import Any
 from uuid import uuid4
 
 from app.core.logging import get_logger
-from app.domain.entities import ExternalRecord, OAuthTokens
+from app.domain.entities import ExternalRecord, OAuthConfig, OAuthTokens
 from app.domain.interfaces import IntegrationAdapterInterface
 
 logger = get_logger(__name__)
@@ -44,7 +44,7 @@ class MockAdapter(IntegrationAdapterInterface):
             extra={"external_account_id": external_account_id},
         )
 
-    async def authenticate(self, auth_code: str, redirect_uri: str) -> OAuthTokens:
+    async def authenticate(self, auth_code: str, redirect_uri: str, oauth_config: OAuthConfig | None = None) -> OAuthTokens:
         """Mock OAuth authentication."""
         logger.info(
             "Mock authentication",
@@ -62,7 +62,7 @@ class MockAdapter(IntegrationAdapterInterface):
             expires_at=datetime.now(timezone.utc),
         )
 
-    async def refresh_token(self, refresh_token: str) -> OAuthTokens:
+    async def refresh_token(self, refresh_token: str, oauth_config: OAuthConfig | None = None) -> OAuthTokens:
         """Mock token refresh."""
         logger.info(
             "Mock token refresh",

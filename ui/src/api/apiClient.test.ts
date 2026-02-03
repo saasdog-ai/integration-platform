@@ -147,15 +147,15 @@ describe('createApiClient', () => {
 
   describe('connectIntegration', () => {
     it('sends POST with request body', async () => {
-      fetchSpy.mockResolvedValue(jsonResponse({ id: 'u1', status: 'connected' }))
+      fetchSpy.mockResolvedValue(jsonResponse({ authorization_url: 'https://intuit.com/oauth' }))
       const api = createApiClient(createTestConfig())
 
-      await api.connectIntegration('int1', { external_account_id: 'acct1' })
+      await api.connectIntegration('int1', { redirect_uri: 'http://localhost/callback', state: 'test-state' })
 
       expect(fetchSpy.mock.calls[0][0]).toBe('https://api.test/integrations/int1/connect')
       const options = fetchSpy.mock.calls[0][1] as RequestInit
       expect(options.method).toBe('POST')
-      expect(JSON.parse(options.body as string)).toEqual({ external_account_id: 'acct1' })
+      expect(JSON.parse(options.body as string)).toEqual({ redirect_uri: 'http://localhost/callback', state: 'test-state' })
     })
   })
 

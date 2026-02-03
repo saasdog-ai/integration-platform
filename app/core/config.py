@@ -92,6 +92,16 @@ class Settings(BaseSettings):
     api_read_timeout: float = Field(default=30.0)  # Read timeout in seconds
     api_total_timeout: float = Field(default=60.0)  # Total request timeout in seconds
 
+    # QuickBooks Online
+    qbo_client_id: str | None = Field(default=None)
+    qbo_client_secret: str | None = Field(default=None)
+    qbo_environment: str = Field(default="sandbox")  # sandbox | production
+
+    # Internal system database (sister project with business data tables)
+    internal_database_url: str = Field(
+        default="postgresql+asyncpg://postgres:postgres@localhost:5433/job_runner"
+    )
+
     # Rate Limiting (in-process)
     # NOTE: In production, rate limiting should be done at the API gateway level
     # (Kong, AWS API Gateway, nginx) or via Redis for distributed rate limiting.
@@ -136,6 +146,13 @@ class Settings(BaseSettings):
     def database_url_sync(self) -> str:
         """Get synchronous database URL for Alembic."""
         return self.database_url.replace("+asyncpg", "")
+
+    @property
+    def qbo_base_url(self) -> str:
+        """Get QuickBooks API base URL based on environment."""
+        if self.qbo_environment == "production":
+            return "https://quickbooks.api.intuit.com"
+        return "https://sandbox-quickbooks.api.intuit.com"
 
     @property
     def is_production(self) -> bool:

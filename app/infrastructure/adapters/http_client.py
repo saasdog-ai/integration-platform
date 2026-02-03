@@ -49,12 +49,16 @@ async def get_http_client(
     if timeout is None:
         timeout = get_timeout_config()
 
-    async with httpx.AsyncClient(
-        base_url=base_url,
-        headers=headers,
-        timeout=timeout,
-        follow_redirects=True,
-    ) as client:
+    client_kwargs: dict[str, Any] = {
+        "timeout": timeout,
+        "follow_redirects": True,
+    }
+    if base_url is not None:
+        client_kwargs["base_url"] = base_url
+    if headers is not None:
+        client_kwargs["headers"] = headers
+
+    async with httpx.AsyncClient(**client_kwargs) as client:
         yield client
 
 

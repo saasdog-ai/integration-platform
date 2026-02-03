@@ -27,21 +27,31 @@ const DIRECTION_OPTIONS = [
 const CONFLICT_OPTIONS: { label: string; value: ConflictResolution }[] = [
   { label: 'External wins', value: 'external' },
   { label: 'Our system wins', value: 'our_system' },
-  { label: 'Most recent wins', value: 'most_recent' },
 ]
 
-function isPresetFrequency(value: string | null): boolean {
-  return FREQUENCY_PRESETS.some((p) => p.value !== 'custom' && p.value === value)
+const PRESET_TO_CRON: Record<string, string> = {
+  '1h': '0 * * * *',
+  '6h': '0 */6 * * *',
+  '12h': '0 */12 * * *',
+  '24h': '0 0 * * *',
 }
 
+const CRON_TO_PRESET: Record<string, string> = Object.fromEntries(
+  Object.entries(PRESET_TO_CRON).map(([k, v]) => [v, k])
+)
+
 function deriveFrequencyState(syncFrequency: string | null) {
-  if (syncFrequency && isPresetFrequency(syncFrequency)) {
-    return { mode: syncFrequency, custom: '' }
-  }
-  if (syncFrequency) {
-    return { mode: 'custom', custom: syncFrequency }
-  }
-  return { mode: '24h', custom: '' }
+  if (!syncFrequency) return { mode: '24h', custom: '' }
+  // Check if it's a known cron that maps to a preset
+  const preset = CRON_TO_PRESET[syncFrequency]
+  if (preset) return { mode: preset, custom: '' }
+  // Otherwise treat as custom cron
+  return { mode: 'custom', custom: syncFrequency }
+}
+
+function resolveSyncFrequency(mode: string, custom: string): string | null {
+  if (mode === 'custom') return custom || null
+  return PRESET_TO_CRON[mode] ?? null
 }
 
 // ─── Sub-components ──────────────────────────────────────────────
@@ -73,7 +83,7 @@ function FrequencySelector({ mode, customValue, onModeChange, onCustomChange }: 
       </select>
       {mode === 'custom' && (
         <Input
-          placeholder="e.g. 30m, 2h, 3d"
+          placeholder="e.g. 0 */2 * * *"
           value={customValue}
           onChange={(e) => onCustomChange(e.target.value)}
           className="max-w-xs mt-2"
@@ -149,7 +159,7 @@ function SyncRulesTable({ rules, onUpdateRule }: SyncRulesTableProps) {
                 </label>
                 <select
                   id={`conflict-${rule.entity_type}`}
-                  value={rule.master_if_conflict ?? 'most_recent'}
+                  value={rule.master_if_conflict ?? 'external'}
                   onChange={(e) =>
                     onUpdateRule(rule.entity_type, {
                       master_if_conflict: e.target.value as ConflictResolution,
@@ -284,7 +294,8 @@ export function IntegrationSettings() {
 
   const handleSave = () => {
     if (!localSettings) return
-    saveMutation.mutate({ ...localSettings, sync_rules: displayRules })
+    const cronFrequency = resolveSyncFrequency(frequencyMode, customFrequency)
+    saveMutation.mutate({ ...localSettings, sync_rules: displayRules, sync_frequency: cronFrequency })
   }
 
   const handleDiscard = () => {

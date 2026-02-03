@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useApiClient } from '@/hooks/useApiClient'
 import { useToast } from '@/contexts/ToastContext'
@@ -34,25 +34,98 @@ export function OnboardingDialog({
   const queryClient = useQueryClient()
 
   const [step, setStep] = useState<OnboardingStep>('intro')
+  const popupRef = useRef<Window | null>(null)
+  const pollTimerRef = useRef<number | null>(null)
 
-  // Connect integration mutation - uses OAuth callback for mock flow
+  // Clean up popup and timers
+  const cleanupPopup = useCallback(() => {
+    if (pollTimerRef.current !== null) {
+      window.clearInterval(pollTimerRef.current)
+      pollTimerRef.current = null
+    }
+    if (popupRef.current && !popupRef.current.closed) {
+      popupRef.current.close()
+    }
+    popupRef.current = null
+  }, [])
+
+  // Listen for postMessage from the OAuth callback popup
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return
+      if (event.data?.type !== 'oauth-complete') return
+
+      cleanupPopup()
+
+      if (event.data.success) {
+        queryClient.invalidateQueries({ queryKey: ['user-integrations'] })
+        setStep('complete')
+      } else {
+        setStep('intro')
+        toast.error(
+          'Connection failed',
+          event.data.error || 'OAuth authorization failed.'
+        )
+      }
+    }
+
+    window.addEventListener('message', handleMessage)
+    return () => window.removeEventListener('message', handleMessage)
+  }, [cleanupPopup, queryClient, toast])
+
+  // Clean up on unmount
+  useEffect(() => {
+    return () => cleanupPopup()
+  }, [cleanupPopup])
+
+  // Mutation to initiate OAuth — gets the authorization URL from the backend
   const connectMutation = useMutation({
     mutationFn: async () => {
-      // For mock mode, we skip the OAuth redirect and directly call the callback
-      // with a mock authorization code. The backend adapter handles this.
-      const result = await api.completeOAuthCallback(integration.id, {
-        code: `mock_auth_code_${Date.now()}`,
-        redirect_uri: window.location.origin + '/integrations/callback',
+      const csrfToken = crypto.randomUUID()
+      const state = `${integration.id}:${csrfToken}`
+      const redirectUri =
+        window.location.origin + '/integrations/oauth/callback'
+
+      const result = await api.connectIntegration(integration.id, {
+        redirect_uri: redirectUri,
+        state,
       })
-      return result
+
+      return result.authorization_url
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['user-integrations'] })
-      setStep('complete')
+    onSuccess: (authorizationUrl: string) => {
+      // Open the authorization URL in a popup
+      const width = 600
+      const height = 700
+      const left = window.screenX + (window.outerWidth - width) / 2
+      const top = window.screenY + (window.outerHeight - height) / 2
+
+      const popup = window.open(
+        authorizationUrl,
+        'oauth-popup',
+        `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
+      )
+      popupRef.current = popup
+
+      // Poll for popup closed (user closed without completing)
+      if (popup) {
+        pollTimerRef.current = window.setInterval(() => {
+          if (popup.closed) {
+            if (pollTimerRef.current !== null) {
+              window.clearInterval(pollTimerRef.current)
+              pollTimerRef.current = null
+            }
+            popupRef.current = null
+            // Only reset if we're still in connecting state
+            // (if oauth-complete arrived, we'd already be in 'complete')
+            setStep((current) => (current === 'connecting' ? 'intro' : current))
+          }
+        }, 500)
+      }
     },
     onError: (error: unknown) => {
       console.error('Connection error:', error)
-      setStep('intro') // Go back to intro on error
+      setStep('intro')
       let message = 'Unknown error'
       if (error instanceof Error) {
         message = error.message
@@ -92,7 +165,8 @@ export function OnboardingDialog({
   })
 
   const handleClose = () => {
-    if (connectMutation.isPending) return // Don't close while connecting
+    if (step === 'connecting') return // Don't close while waiting for OAuth
+    cleanupPopup()
     setStep('intro')
     onOpenChange(false)
   }
@@ -134,13 +208,6 @@ export function OnboardingDialog({
                   ))}
                 </ul>
               </div>
-
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                <p className="text-sm text-blue-800">
-                  <strong>Demo Mode:</strong> In production, you would be redirected to {integration.name} to authorize.
-                  For testing, mock credentials will be stored automatically.
-                </p>
-              </div>
             </div>
 
             <DialogFooter>
@@ -160,14 +227,14 @@ export function OnboardingDialog({
             <DialogHeader>
               <DialogTitle>Connecting to {integration.name}</DialogTitle>
               <DialogDescription>
-                Please wait while we establish the connection...
+                Please complete the authorization in the popup window.
               </DialogDescription>
             </DialogHeader>
 
             <div className="py-12 flex flex-col items-center justify-center space-y-4">
               <Spinner size="lg" />
               <p className="text-sm text-muted-foreground">
-                Setting up mock credentials...
+                Waiting for authorization...
               </p>
             </div>
           </>

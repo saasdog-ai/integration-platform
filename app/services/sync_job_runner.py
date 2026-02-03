@@ -30,6 +30,9 @@ BACKPRESSURE_BASE_DELAY = 2  # Base delay for exponential backoff
 # Stuck job check interval (in seconds)
 STUCK_JOB_CHECK_INTERVAL = 300  # Check every 5 minutes
 
+# Pending job recovery interval (in seconds)
+PENDING_RECOVERY_INTERVAL = 60  # Check every 1 minute
+
 # History cleanup interval (in seconds)
 HISTORY_CLEANUP_INTERVAL = 3600  # Check every 1 hour
 
@@ -78,6 +81,9 @@ class SyncJobRunner:
         # Stuck job monitoring
         self._last_stuck_job_check: float = 0
 
+        # Pending job recovery
+        self._last_pending_recovery: float = 0
+
         # History cleanup
         self._last_history_cleanup: float = 0
 
@@ -115,10 +121,16 @@ class SyncJobRunner:
             extra={"max_workers": self._max_workers},
         )
 
-        # Set up signal handlers for graceful shutdown
-        loop = asyncio.get_event_loop()
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            loop.add_signal_handler(sig, lambda: asyncio.create_task(self.stop()))
+        # Set up signal handlers for graceful shutdown.
+        # Wrapped in try/except because this can fail under uvicorn --reload
+        # or when not running in the main thread. The lifespan handler in
+        # main.py already handles shutdown via task cancellation.
+        try:
+            loop = asyncio.get_event_loop()
+            for sig in (signal.SIGTERM, signal.SIGINT):
+                loop.add_signal_handler(sig, lambda: asyncio.create_task(self.stop()))
+        except (RuntimeError, ValueError):
+            logger.debug("Could not set signal handlers — relying on lifespan shutdown")
 
         # Recover any orphaned pending jobs (lost from in-memory queue on restart)
         await self._recover_pending_jobs()
@@ -128,6 +140,9 @@ class SyncJobRunner:
             try:
                 # Check for stuck jobs periodically
                 await self._check_stuck_jobs()
+
+                # Recover orphaned pending jobs periodically
+                await self._recover_pending_jobs_periodic()
 
                 # Cleanup old history entries periodically
                 await self._cleanup_old_history()
@@ -291,6 +306,20 @@ class SyncJobRunner:
                 "Failed to recover pending jobs",
                 extra={"error": str(e)},
             )
+
+    async def _recover_pending_jobs_periodic(self) -> None:
+        """Periodically re-enqueue orphaned pending jobs.
+
+        Complements the startup recovery by catching jobs whose queue messages
+        were lost after the runner was already running (e.g. due to transient
+        errors or internal queue issues).
+        """
+        now = time.time()
+        if now - self._last_pending_recovery < PENDING_RECOVERY_INTERVAL:
+            return
+
+        self._last_pending_recovery = now
+        await self._recover_pending_jobs()
 
     async def stop(self) -> None:
         """Stop the job runner gracefully."""

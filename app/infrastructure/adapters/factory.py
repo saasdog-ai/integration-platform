@@ -61,7 +61,7 @@ def get_adapter_factory() -> AdapterFactory:
         _factory_instance = AdapterFactory()
 
         # Register available adapters
-        from app.infrastructure.adapters.quickbooks.client import QuickBooksAdapter
+        from app.integrations.quickbooks.client import QuickBooksAdapter
 
         _factory_instance.register("QuickBooks Online", QuickBooksAdapter)
 

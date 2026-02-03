@@ -162,7 +162,7 @@ class IntegrationService:
         # Validate state parameter format if provided (prevent injection)
         if state:
             # State should be alphanumeric with limited special chars
-            if not re.match(r'^[a-zA-Z0-9_\-\.]{1,128}$', state):
+            if not re.match(r'^[a-zA-Z0-9_\-\.:]{1,256}$', state):
                 raise ValidationError(
                     "Invalid state parameter. Must be alphanumeric with max 128 characters."
                 )
@@ -210,6 +210,7 @@ class IntegrationService:
         integration_id: UUID,
         auth_code: str,
         redirect_uri: str,
+        realm_id: str | None = None,
         user_id: str | None = None,
     ) -> UserIntegration:
         """
@@ -220,6 +221,7 @@ class IntegrationService:
             integration_id: The integration being connected.
             auth_code: The authorization code from OAuth callback.
             redirect_uri: The redirect URI used in the authorization request.
+            realm_id: External account identifier (e.g. QBO realmId).
             user_id: Optional user ID for audit.
 
         Returns:
@@ -234,7 +236,7 @@ class IntegrationService:
         try:
             # For new connections, we don't have tokens yet, so pass empty string
             adapter = self._adapter_factory.get_adapter(integration, "", None)
-            tokens = await adapter.authenticate(auth_code, redirect_uri)
+            tokens = await adapter.authenticate(auth_code, redirect_uri, integration.oauth_config)
         except Exception as e:
             # Sanitize error to avoid credential exposure in logs
             sanitized_error = _sanitize_error_for_log(e)
@@ -273,6 +275,7 @@ class IntegrationService:
             existing.status = IntegrationStatus.CONNECTED
             existing.credentials_encrypted = encrypted_creds
             existing.credentials_key_id = key_id
+            existing.external_account_id = realm_id
             existing.last_connected_at = now
             existing.updated_by = user_id
             user_integration = await self._repo.update_user_integration(existing)
@@ -284,6 +287,7 @@ class IntegrationService:
                 status=IntegrationStatus.CONNECTED,
                 credentials_encrypted=encrypted_creds,
                 credentials_key_id=key_id,
+                external_account_id=realm_id,
                 last_connected_at=now,
                 created_at=now,
                 updated_at=now,
@@ -417,7 +421,7 @@ class IntegrationService:
                 current_tokens.access_token,
                 user_integration.external_account_id,
             )
-            new_tokens = await adapter.refresh_token(current_tokens.refresh_token)
+            new_tokens = await adapter.refresh_token(current_tokens.refresh_token, integration.oauth_config)
         except Exception as e:
             # Sanitize error to avoid credential exposure in logs
             sanitized_error = _sanitize_error_for_log(e)

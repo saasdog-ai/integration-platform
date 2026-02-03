@@ -143,3 +143,32 @@ async def get_default_settings(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Integration not found: {integration_id}",
         )
+
+
+@router.put(
+    "/defaults",
+    response_model=UserSettingsResponse,
+    summary="Update default integration settings",
+)
+async def update_default_settings(
+    integration_id: UUID,
+    request: UserSettingsRequest,
+    service: SettingsService = Depends(get_settings_service),
+) -> UserSettingsResponse:
+    """Update system default settings for an integration."""
+    try:
+        settings = _from_settings_request(request)
+        updated = await service.update_system_settings(
+            integration_id, settings
+        )
+        return _to_settings_response(updated)
+    except NotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Integration not found: {integration_id}",
+        )
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )

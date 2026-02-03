@@ -30,8 +30,10 @@ import {
   IntegrationList,
   IntegrationDetail,
   IntegrationSettings,
+  OAuthCallback,
   SyncJobs,
   JobDetail,
+  AdminPage,
 } from "@/pages"
 
 // Default QueryClient for standalone use
@@ -72,6 +74,12 @@ export function IntegrationsMicroFrontend({ queryClient }: MicroFrontendProps) {
             <Routes>
               {/* Default route - integration list */}
               <Route index element={<IntegrationList />} />
+
+              {/* OAuth callback route - must be before :integrationId catch-all */}
+              <Route path="oauth/callback" element={<OAuthCallback />} />
+
+              {/* Admin route - must be before :integrationId catch-all */}
+              <Route path="admin" element={<AdminPage />} />
 
               {/* Sync jobs routes */}
               <Route path="jobs" element={<SyncJobs />} />

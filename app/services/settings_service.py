@@ -145,6 +145,56 @@ class SettingsService:
 
         return await self._repo.get_system_settings(integration_id)
 
+    async def update_system_settings(
+        self,
+        integration_id: UUID,
+        settings: UserIntegrationSettings,
+    ) -> UserIntegrationSettings:
+        """
+        Update system default settings for an integration.
+
+        Args:
+            integration_id: The integration ID.
+            settings: The new default settings.
+
+        Returns:
+            The updated settings.
+        """
+        # Verify integration exists
+        integration = await self._repo.get_available_integration(integration_id)
+        if not integration:
+            raise NotFoundError("Integration", integration_id)
+
+        # Validate entity types
+        supported_entities = set(integration.supported_entities)
+        for rule in settings.sync_rules:
+            if rule.entity_type not in supported_entities:
+                raise ValidationError(
+                    f"Entity type '{rule.entity_type}' is not supported by {integration.name}. "
+                    f"Supported: {', '.join(supported_entities)}",
+                    field="sync_rules.entity_type",
+                )
+
+        # Validate cron expression if provided
+        if settings.sync_frequency:
+            self._validate_cron_expression(settings.sync_frequency)
+
+        # Save settings
+        updated = await self._repo.upsert_system_settings(
+            integration_id, settings
+        )
+
+        logger.info(
+            "System default settings updated",
+            extra={
+                "integration_id": str(integration_id),
+                "enabled_rules": sum(1 for r in settings.sync_rules if r.enabled),
+                "auto_sync": settings.auto_sync_enabled,
+            },
+        )
+
+        return updated
+
     async def get_enabled_sync_rules(
         self,
         client_id: UUID,
