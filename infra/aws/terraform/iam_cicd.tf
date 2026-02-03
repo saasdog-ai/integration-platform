@@ -298,7 +298,18 @@ resource "aws_iam_role_policy" "cicd_deploy" {
           "kms:CreateAlias",
           "kms:DeleteAlias",
           "kms:UpdateAlias",
-          "kms:ListAliases"
+          "kms:ListAliases",
+          # Application Auto Scaling
+          "application-autoscaling:DescribeScalableTargets",
+          "application-autoscaling:RegisterScalableTarget",
+          "application-autoscaling:DeregisterScalableTarget",
+          "application-autoscaling:DescribeScalingPolicies",
+          "application-autoscaling:PutScalingPolicy",
+          "application-autoscaling:DeleteScalingPolicy",
+          "application-autoscaling:DescribeScalingActivities",
+          "application-autoscaling:ListTagsForResource",
+          "application-autoscaling:TagResource",
+          "application-autoscaling:UntagResource"
         ]
         Resource = "*"
         Condition = {
