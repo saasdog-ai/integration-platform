@@ -46,6 +46,20 @@ class IntegrationRepositoryInterface(ABC):
         pass
 
     @abstractmethod
+    async def create_available_integration(
+        self, integration: AvailableIntegration
+    ) -> AvailableIntegration:
+        """Create a new available integration. Raises ValueError if name already exists."""
+        pass
+
+    @abstractmethod
+    async def update_available_integration(
+        self, integration: AvailableIntegration
+    ) -> AvailableIntegration:
+        """Update an existing available integration. Raises ValueError if not found or name conflict."""
+        pass
+
+    @abstractmethod
     async def get_user_integration(
         self, client_id: UUID, integration_id: UUID
     ) -> UserIntegration | None:

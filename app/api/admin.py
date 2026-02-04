@@ -1,19 +1,25 @@
 """Admin endpoints for cross-client integration management."""
 
-from uuid import UUID
+from datetime import UTC, datetime
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.api.dto import (
+    AvailableIntegrationResponse,
+    AvailableIntegrationsResponse,
+    CreateAvailableIntegrationRequest,
     EntitySyncStatusItem,
     EntitySyncStatusListResponse,
     EntitySyncStatusResponse,
+    OAuthConfigResponse,
     ResetLastSyncTimeRequest,
+    UpdateAvailableIntegrationRequest,
     UserIntegrationResponse,
     UserIntegrationsResponse,
 )
 from app.core.logging import get_logger
-from app.domain.entities import UserIntegration
+from app.domain.entities import AvailableIntegration, OAuthConfig, UserIntegration
 from app.domain.interfaces import (
     IntegrationRepositoryInterface,
     IntegrationStateRepositoryInterface,
@@ -46,12 +52,12 @@ def _to_user_integration_response(
         id=user_integration.id,
         client_id=user_integration.client_id,
         integration_id=user_integration.integration_id,
-        integration_name=user_integration.integration.name
-        if user_integration.integration
-        else None,
-        integration_type=user_integration.integration.type
-        if user_integration.integration
-        else None,
+        integration_name=(
+            user_integration.integration.name if user_integration.integration else None
+        ),
+        integration_type=(
+            user_integration.integration.type if user_integration.integration else None
+        ),
         status=user_integration.status,
         external_account_id=user_integration.external_account_id,
         last_connected_at=user_integration.last_connected_at,
@@ -147,3 +153,159 @@ async def admin_reset_last_sync_time(
         records_synced_count=result.records_synced_count,
         message=message,
     )
+
+
+# =============================================================================
+# Available Integration CRUD (Admin)
+# =============================================================================
+
+
+def _to_available_integration_response(
+    integration: AvailableIntegration,
+) -> AvailableIntegrationResponse:
+    """Convert domain entity to response DTO."""
+    oauth_config = None
+    if integration.oauth_config:
+        oauth_config = OAuthConfigResponse(
+            authorization_url=integration.oauth_config.authorization_url,
+            token_url=integration.oauth_config.token_url,
+            scopes=integration.oauth_config.scopes,
+        )
+
+    return AvailableIntegrationResponse(
+        id=integration.id,
+        name=integration.name,
+        type=integration.type,
+        description=integration.description,
+        supported_entities=integration.supported_entities,
+        oauth_config=oauth_config,
+        is_active=integration.is_active,
+    )
+
+
+@router.post(
+    "/integrations/available",
+    response_model=AvailableIntegrationResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create an available integration",
+)
+async def admin_create_available_integration(
+    request: CreateAvailableIntegrationRequest,
+    repo: IntegrationRepositoryInterface = Depends(get_integration_repository),
+) -> AvailableIntegrationResponse:
+    """Create a new integration in the catalog (admin use only)."""
+    now = datetime.now(UTC)
+    oauth_config = OAuthConfig(**request.oauth_config) if request.oauth_config else None
+
+    integration = AvailableIntegration(
+        id=uuid4(),
+        name=request.name,
+        type=request.type,
+        description=request.description,
+        oauth_config=oauth_config,
+        supported_entities=request.supported_entities,
+        is_active=request.is_active,
+        created_at=now,
+        updated_at=now,
+    )
+
+    try:
+        created = await repo.create_available_integration(integration)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(e),
+        ) from None
+
+    logger.info("Admin created available integration", integration_name=created.name)
+    return _to_available_integration_response(created)
+
+
+@router.get(
+    "/integrations/available",
+    response_model=AvailableIntegrationsResponse,
+    summary="List all available integrations (admin)",
+)
+async def admin_list_available_integrations(
+    include_inactive: bool = True,
+    repo: IntegrationRepositoryInterface = Depends(get_integration_repository),
+) -> AvailableIntegrationsResponse:
+    """List all available integrations including inactive ones (admin use only)."""
+    integrations = await repo.get_available_integrations(active_only=not include_inactive)
+    return AvailableIntegrationsResponse(
+        integrations=[_to_available_integration_response(i) for i in integrations]
+    )
+
+
+@router.get(
+    "/integrations/available/{integration_id}",
+    response_model=AvailableIntegrationResponse,
+    summary="Get an available integration (admin)",
+)
+async def admin_get_available_integration(
+    integration_id: UUID,
+    repo: IntegrationRepositoryInterface = Depends(get_integration_repository),
+) -> AvailableIntegrationResponse:
+    """Get a specific available integration by ID, including inactive ones (admin use only)."""
+    integration = await repo.get_available_integration(integration_id)
+    if not integration:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Integration not found: {integration_id}",
+        )
+    return _to_available_integration_response(integration)
+
+
+@router.put(
+    "/integrations/available/{integration_id}",
+    response_model=AvailableIntegrationResponse,
+    summary="Update an available integration (admin)",
+)
+async def admin_update_available_integration(
+    integration_id: UUID,
+    request: UpdateAvailableIntegrationRequest,
+    repo: IntegrationRepositoryInterface = Depends(get_integration_repository),
+) -> AvailableIntegrationResponse:
+    """Update an available integration. Setting is_active=false is the soft-delete mechanism."""
+    existing = await repo.get_available_integration(integration_id)
+    if not existing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Integration not found: {integration_id}",
+        )
+
+    # Apply partial update: only update fields that were provided
+    updated = AvailableIntegration(
+        id=existing.id,
+        name=request.name if request.name is not None else existing.name,
+        type=request.type if request.type is not None else existing.type,
+        description=(
+            request.description if request.description is not None else existing.description
+        ),
+        oauth_config=(
+            OAuthConfig(**request.oauth_config)
+            if request.oauth_config is not None
+            else existing.oauth_config
+        ),
+        supported_entities=(
+            request.supported_entities
+            if request.supported_entities is not None
+            else existing.supported_entities
+        ),
+        is_active=request.is_active if request.is_active is not None else existing.is_active,
+        created_at=existing.created_at,
+        updated_at=datetime.now(UTC),
+        created_by=existing.created_by,
+        updated_by=existing.updated_by,
+    )
+
+    try:
+        result = await repo.update_available_integration(updated)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(e),
+        ) from None
+
+    logger.info("Admin updated available integration", integration_id=str(integration_id))
+    return _to_available_integration_response(result)

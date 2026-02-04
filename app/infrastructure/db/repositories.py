@@ -270,6 +270,72 @@ class IntegrationRepository(IntegrationRepositoryInterface):
             model = result.scalar_one_or_none()
             return _model_to_available_integration(model) if model else None
 
+    async def create_available_integration(
+        self, integration: AvailableIntegration
+    ) -> AvailableIntegration:
+        async with get_session_context() as session:
+            # Check name uniqueness
+            existing = await session.execute(
+                select(AvailableIntegrationModel).where(
+                    AvailableIntegrationModel.name == integration.name
+                )
+            )
+            if existing.scalar_one_or_none():
+                raise ValueError(f"Integration with name '{integration.name}' already exists")
+
+            model = AvailableIntegrationModel(
+                id=integration.id,
+                name=integration.name,
+                type=integration.type,
+                description=integration.description,
+                oauth_config=(
+                    integration.oauth_config.model_dump() if integration.oauth_config else None
+                ),
+                supported_entities=integration.supported_entities,
+                is_active=integration.is_active,
+                created_by=integration.created_by,
+                updated_by=integration.updated_by,
+            )
+            session.add(model)
+            await session.flush()
+            await session.refresh(model)
+            return _model_to_available_integration(model)
+
+    async def update_available_integration(
+        self, integration: AvailableIntegration
+    ) -> AvailableIntegration:
+        async with get_session_context() as session:
+            result = await session.execute(
+                select(AvailableIntegrationModel).where(
+                    AvailableIntegrationModel.id == integration.id
+                )
+            )
+            model = result.scalar_one_or_none()
+            if not model:
+                raise ValueError(f"Integration not found: {integration.id}")
+
+            # If name changed, check uniqueness
+            if integration.name != model.name:
+                existing = await session.execute(
+                    select(AvailableIntegrationModel).where(
+                        AvailableIntegrationModel.name == integration.name
+                    )
+                )
+                if existing.scalar_one_or_none():
+                    raise ValueError(f"Integration with name '{integration.name}' already exists")
+
+            model.name = integration.name
+            model.type = integration.type
+            model.description = integration.description
+            model.oauth_config = (
+                integration.oauth_config.model_dump() if integration.oauth_config else None
+            )
+            model.supported_entities = integration.supported_entities
+            model.is_active = integration.is_active
+            await session.flush()
+            await session.refresh(model)
+            return _model_to_available_integration(model)
+
     async def get_user_integration(
         self, client_id: UUID, integration_id: UUID
     ) -> UserIntegration | None:

@@ -73,6 +73,31 @@ class MockIntegrationRepository(IntegrationRepositoryInterface):
                 return integration
         return None
 
+    async def create_available_integration(
+        self, integration: AvailableIntegration
+    ) -> AvailableIntegration:
+        # Check name uniqueness
+        for existing in self._available_integrations.values():
+            if existing.name == integration.name:
+                raise ValueError(f"Integration with name '{integration.name}' already exists")
+        self._available_integrations[integration.id] = integration
+        return integration
+
+    async def update_available_integration(
+        self, integration: AvailableIntegration
+    ) -> AvailableIntegration:
+        if integration.id not in self._available_integrations:
+            raise ValueError(f"Integration not found: {integration.id}")
+        existing = self._available_integrations[integration.id]
+        # If name changed, check uniqueness
+        if integration.name != existing.name:
+            for other in self._available_integrations.values():
+                if other.id != integration.id and other.name == integration.name:
+                    raise ValueError(f"Integration with name '{integration.name}' already exists")
+        integration.updated_at = datetime.now(UTC)
+        self._available_integrations[integration.id] = integration
+        return integration
+
     async def get_user_integration(
         self, client_id: UUID, integration_id: UUID
     ) -> UserIntegration | None:

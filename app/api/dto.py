@@ -348,3 +348,30 @@ class WebhookReceiveResponse(BaseResponse):
     records_created: int = 0
     sync_triggered: bool = False
     sync_job_id: UUID | None = None
+
+
+# =============================================================================
+# Admin Integration Management DTOs
+# =============================================================================
+
+
+class CreateAvailableIntegrationRequest(BaseModel):
+    """Request to create a new available integration."""
+
+    name: str = Field(min_length=1, max_length=100)
+    type: str = Field(min_length=1, max_length=50)
+    description: str | None = None
+    oauth_config: dict[str, Any] | None = None
+    supported_entities: list[str] = Field(default_factory=list)
+    is_active: bool = True
+
+
+class UpdateAvailableIntegrationRequest(BaseModel):
+    """Request to update an available integration (partial update)."""
+
+    name: str | None = None
+    type: str | None = None
+    description: str | None = None
+    oauth_config: dict[str, Any] | None = None
+    supported_entities: list[str] | None = None
+    is_active: bool | None = None
