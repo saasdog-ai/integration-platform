@@ -14,6 +14,7 @@ from app.core.exceptions import (
 )
 from app.core.logging import get_logger
 from app.domain.entities import (
+    ChangeEvent,
     EntitySyncRequest,
     IntegrationHistoryRecord,
     IntegrationStateRecord,
@@ -22,12 +23,14 @@ from app.domain.entities import (
     SyncRule,
 )
 from app.domain.enums import (
+    ChangeSourceType,
     IntegrationStatus,
     RecordSyncStatus,
     SyncDirection,
     SyncJobStatus,
     SyncJobTrigger,
     SyncJobType,
+    SyncTriggerMode,
 )
 from app.domain.interfaces import (
     AdapterFactoryInterface,
@@ -349,11 +352,11 @@ class SyncOrchestrator:
             integration_id=integration_id,
             job_type=job_type,
             entity_types=job_params.get("entity_types") if job_params else None,
-            entity_requests=[
-                EntitySyncRequest(**req) for req in job_params.get("entity_requests", [])
-            ]
-            if job_params and job_params.get("entity_requests")
-            else None,
+            entity_requests=(
+                [EntitySyncRequest(**req) for req in job_params.get("entity_requests", [])]
+                if job_params and job_params.get("entity_requests")
+                else None
+            ),
         )
         await self._queue.send_message(message.model_dump(mode="json"))
 
@@ -1068,6 +1071,114 @@ class SyncOrchestrator:
             )
 
         return result
+
+    async def handle_change_event(
+        self,
+        event: ChangeEvent,
+    ) -> tuple[int, int, SyncJob | None]:
+        """
+        Handle a change notification (push or webhook).
+
+        Always bumps version vectors. Optionally triggers a sync job
+        based on the entity's sync_trigger setting.
+
+        Args:
+            event: The normalized change event.
+
+        Returns:
+            Tuple of (records_bumped, records_created, sync_job_or_none).
+        """
+        # Verify integration exists and is connected
+        integration = await self._integration_repo.get_available_integration(event.integration_id)
+        if not integration:
+            raise NotFoundError("Integration", event.integration_id)
+
+        user_integration = await self._integration_repo.get_user_integration(
+            event.client_id, event.integration_id
+        )
+        if not user_integration:
+            raise NotFoundError("UserIntegration", f"{event.client_id}/{event.integration_id}")
+
+        if user_integration.status != IntegrationStatus.CONNECTED:
+            raise SyncError(f"Integration is not connected (status: {user_integration.status})")
+
+        # Validate entity_type is supported
+        if event.entity_type not in integration.supported_entities:
+            raise SyncError(
+                f"Unsupported entity type: {event.entity_type}",
+                details={"supported": integration.supported_entities},
+            )
+
+        # Look up SyncRule for sync_trigger mode
+        sync_trigger = SyncTriggerMode.DEFERRED
+        settings = await self._integration_repo.get_user_settings(
+            event.client_id, event.integration_id
+        )
+        if settings:
+            for rule in settings.sync_rules:
+                if rule.entity_type == event.entity_type and rule.enabled:
+                    sync_trigger = rule.sync_trigger
+                    break
+
+        # Bump version vectors — always happens
+        bump_internal = event.source == ChangeSourceType.PUSH
+        bump_external = event.source == ChangeSourceType.WEBHOOK
+        records_bumped, records_created = await self._state_repo.bump_version_vectors(
+            client_id=event.client_id,
+            integration_id=event.integration_id,
+            entity_type=event.entity_type,
+            record_ids=event.record_ids,
+            bump_internal=bump_internal,
+            bump_external=bump_external,
+        )
+
+        logger.info(
+            "Change event processed",
+            extra={
+                "client_id": str(event.client_id),
+                "integration_id": str(event.integration_id),
+                "entity_type": event.entity_type,
+                "source": event.source.value,
+                "event": event.event,
+                "records_bumped": records_bumped,
+                "records_created": records_created,
+                "sync_trigger": sync_trigger.value,
+            },
+        )
+
+        # Optionally trigger sync
+        sync_job: SyncJob | None = None
+        if sync_trigger == SyncTriggerMode.IMMEDIATE:
+            triggered_by = (
+                SyncJobTrigger.PUSH
+                if event.source == ChangeSourceType.PUSH
+                else SyncJobTrigger.WEBHOOK
+            )
+            try:
+                sync_job = await self.trigger_sync(
+                    client_id=event.client_id,
+                    integration_id=event.integration_id,
+                    job_type=SyncJobType.INCREMENTAL,
+                    entity_requests=[
+                        EntitySyncRequest(
+                            entity_type=event.entity_type,
+                            record_ids=event.record_ids,
+                        )
+                    ],
+                    triggered_by=triggered_by,
+                )
+            except ConflictError:
+                # A job is already running — version vectors are already bumped,
+                # so the next sync will pick up the changes.
+                logger.info(
+                    "Sync job already running, skipping immediate trigger",
+                    extra={
+                        "client_id": str(event.client_id),
+                        "integration_id": str(event.integration_id),
+                    },
+                )
+
+        return records_bumped, records_created, sync_job
 
     async def cancel_sync_job(
         self,

@@ -52,6 +52,7 @@ class SyncJobTrigger(StrEnum):
     USER = "user"
     SCHEDULER = "scheduler"
     WEBHOOK = "webhook"
+    PUSH = "push"
     SYSTEM = "system"
 
 
@@ -61,3 +62,19 @@ class SyncJobType(StrEnum):
     FULL_SYNC = "full_sync"
     INCREMENTAL = "incremental"
     ENTITY_SYNC = "entity_sync"
+
+
+class ChangeSourceType(StrEnum):
+    """How change detection is performed for an entity type."""
+
+    POLLING = "polling"
+    WEBHOOK = "webhook"
+    PUSH = "push"
+    HYBRID = "hybrid"
+
+
+class SyncTriggerMode(StrEnum):
+    """Whether a notification should immediately queue a sync job."""
+
+    IMMEDIATE = "immediate"
+    DEFERRED = "deferred"

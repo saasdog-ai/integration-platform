@@ -7,12 +7,14 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.domain.enums import (
+    ChangeSourceType,
     ConflictResolution,
     IntegrationStatus,
     SyncDirection,
     SyncJobStatus,
     SyncJobTrigger,
     SyncJobType,
+    SyncTriggerMode,
 )
 
 # =============================================================================
@@ -132,6 +134,8 @@ class SyncRuleRequest(BaseModel):
     enabled: bool = True
     master_if_conflict: ConflictResolution = ConflictResolution.EXTERNAL
     field_mappings: dict[str, str] | None = None
+    change_source: ChangeSourceType = ChangeSourceType.POLLING
+    sync_trigger: SyncTriggerMode = SyncTriggerMode.DEFERRED
 
 
 class SyncRuleResponse(BaseResponse):
@@ -142,6 +146,8 @@ class SyncRuleResponse(BaseResponse):
     enabled: bool
     master_if_conflict: ConflictResolution
     field_mappings: dict[str, str] | None
+    change_source: ChangeSourceType
+    sync_trigger: SyncTriggerMode
 
 
 class UserSettingsRequest(BaseModel):
@@ -310,3 +316,35 @@ class HealthDetailResponse(BaseResponse):
     database: str
     queue: str
     encryption: str
+
+
+# =============================================================================
+# Change Notification DTOs
+# =============================================================================
+
+
+class NotifyChangeRequest(BaseModel):
+    """Request to notify of record changes (push notification)."""
+
+    entity_type: str
+    record_ids: list[str] = Field(min_length=1, max_length=1000)
+    event: str  # e.g. "created", "updated", "deleted"
+
+
+class NotifyChangeResponse(BaseResponse):
+    """Response from a change notification."""
+
+    records_bumped: int
+    records_created: int
+    sync_triggered: bool
+    sync_job_id: UUID | None = None
+
+
+class WebhookReceiveResponse(BaseResponse):
+    """Response from a webhook endpoint."""
+
+    accepted: bool
+    records_bumped: int = 0
+    records_created: int = 0
+    sync_triggered: bool = False
+    sync_job_id: UUID | None = None

@@ -7,6 +7,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.domain.enums import (
+    ChangeSourceType,
     ConflictResolution,
     IntegrationStatus,
     RecordSyncStatus,
@@ -14,6 +15,7 @@ from app.domain.enums import (
     SyncJobStatus,
     SyncJobTrigger,
     SyncJobType,
+    SyncTriggerMode,
 )
 
 
@@ -41,6 +43,8 @@ class SyncRule(BaseModel):
         ConflictResolution.EXTERNAL
     )  # Default to external as master
     field_mappings: dict[str, str] | None = None  # internal_field -> external_field
+    change_source: ChangeSourceType = ChangeSourceType.POLLING
+    sync_trigger: SyncTriggerMode = SyncTriggerMode.DEFERRED
 
 
 class UserIntegrationSettings(BaseModel):
@@ -249,3 +253,17 @@ class SyncJobMessage(BaseModel):
     entity_requests: list[EntitySyncRequest] | None = (
         None  # Detailed requests with optional record IDs
     )
+
+
+class ChangeEvent(BaseModel):
+    """Normalized change notification from push or webhook sources."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    client_id: UUID
+    integration_id: UUID
+    entity_type: str
+    record_ids: list[str]
+    event: str  # e.g. "created", "updated", "deleted"
+    source: ChangeSourceType  # PUSH or WEBHOOK
+    provider: str | None = None  # e.g. "procore", "quickbooks" (for webhooks)

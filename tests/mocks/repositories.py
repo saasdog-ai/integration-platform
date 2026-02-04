@@ -554,6 +554,61 @@ class MockIntegrationStateRepository(IntegrationStateRepositoryInterface):
         existing.updated_at = datetime.now(UTC)
         return existing
 
+    async def bump_version_vectors(
+        self,
+        client_id: UUID,
+        integration_id: UUID,
+        entity_type: str,
+        record_ids: list[str],
+        bump_internal: bool = False,
+        bump_external: bool = False,
+    ) -> tuple[int, int]:
+        """Bump version vectors, creating records if not found."""
+        records_bumped = 0
+        records_created = 0
+
+        for record_id in record_ids:
+            existing = None
+
+            # Look up by internal_record_id for push
+            if bump_internal:
+                existing = await self.get_record(client_id, integration_id, entity_type, record_id)
+
+            # Look up by external_record_id for webhook
+            if bump_external and existing is None:
+                existing = await self.get_record_by_external_id(
+                    client_id, integration_id, entity_type, record_id
+                )
+
+            if existing:
+                if bump_internal:
+                    existing.internal_version_id += 1
+                if bump_external:
+                    existing.external_version_id += 1
+                existing.sync_status = RecordSyncStatus.PENDING
+                existing.updated_at = datetime.now(UTC)
+                records_bumped += 1
+            else:
+                now = datetime.now(UTC)
+                new_record = IntegrationStateRecord(
+                    id=uuid4(),
+                    client_id=client_id,
+                    integration_id=integration_id,
+                    entity_type=entity_type,
+                    internal_record_id=record_id if bump_internal else None,
+                    external_record_id=record_id if bump_external else None,
+                    sync_status=RecordSyncStatus.PENDING,
+                    internal_version_id=2 if bump_internal else 1,
+                    external_version_id=2 if bump_external else 0,
+                    last_sync_version_id=0,
+                    created_at=now,
+                    updated_at=now,
+                )
+                self._records[(client_id, new_record.id)] = new_record
+                records_created += 1
+
+        return records_bumped, records_created
+
     async def batch_upsert_records(
         self,
         records: list[IntegrationStateRecord],

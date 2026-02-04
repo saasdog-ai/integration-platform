@@ -459,6 +459,64 @@ class IntegrationStateRepositoryInterface(ABC):
         """
         pass
 
+    @abstractmethod
+    async def bump_version_vectors(
+        self,
+        client_id: UUID,
+        integration_id: UUID,
+        entity_type: str,
+        record_ids: list[str],
+        bump_internal: bool = False,
+        bump_external: bool = False,
+    ) -> tuple[int, int]:
+        """
+        Bump version vectors for the given records, creating state records if needed.
+
+        For push notifications: bump internal_version_id (our system changed).
+        For webhook notifications: bump external_version_id (external system changed).
+
+        Args:
+            client_id: The tenant/client ID.
+            integration_id: The integration ID.
+            entity_type: The entity type (e.g. "vendor").
+            record_ids: List of record IDs to bump.
+            bump_internal: If True, bump internal_version_id.
+            bump_external: If True, bump external_version_id.
+
+        Returns:
+            Tuple of (records_bumped, records_created).
+        """
+        pass
+
+
+# =============================================================================
+# Webhook Handler Interface
+# =============================================================================
+
+
+class WebhookHandlerInterface(ABC):
+    """Abstract interface for per-provider webhook handlers."""
+
+    @abstractmethod
+    def verify_signature(self, headers: dict[str, str], body: bytes) -> bool:
+        """Verify the webhook signature from the provider."""
+        pass
+
+    @abstractmethod
+    def parse_payload(self, body: bytes) -> tuple[str, list[str], str]:
+        """
+        Parse webhook payload into normalized form.
+
+        Returns:
+            Tuple of (entity_type, record_ids, event_type).
+        """
+        pass
+
+    @abstractmethod
+    def provider_name(self) -> str:
+        """Return the provider name this handler supports."""
+        pass
+
 
 # =============================================================================
 # Queue Interface

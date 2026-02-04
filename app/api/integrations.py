@@ -12,23 +12,29 @@ from app.api.dto import (
     EntitySyncStatusItem,
     EntitySyncStatusListResponse,
     EntitySyncStatusResponse,
+    NotifyChangeRequest,
+    NotifyChangeResponse,
     OAuthCallbackRequest,
     OAuthConfigResponse,
     ResetLastSyncTimeRequest,
     UserIntegrationResponse,
     UserIntegrationsResponse,
+    WebhookReceiveResponse,
 )
 from app.auth import get_client_id
 from app.core.exceptions import (
     ConflictError,
     IntegrationError,
     NotFoundError,
+    SyncError,
     ValidationError,
 )
 from app.core.logging import get_logger
-from app.domain.entities import AvailableIntegration, UserIntegration
+from app.domain.entities import AvailableIntegration, ChangeEvent, UserIntegration
+from app.domain.enums import ChangeSourceType
 from app.domain.interfaces import IntegrationStateRepositoryInterface
 from app.services.integration_service import IntegrationService
+from app.services.sync_orchestrator import SyncOrchestrator
 
 logger = get_logger(__name__)
 
@@ -43,6 +49,22 @@ def get_integration_service() -> IntegrationService:
     container = get_container()
     return IntegrationService(
         integration_repo=container.integration_repository,
+        encryption_service=container.encryption_service,
+        adapter_factory=get_adapter_factory(),
+    )
+
+
+def get_sync_orchestrator() -> SyncOrchestrator:
+    """Dependency to get sync orchestrator."""
+    from app.core.dependency_injection import get_container
+    from app.infrastructure.adapters.factory import get_adapter_factory
+
+    container = get_container()
+    return SyncOrchestrator(
+        integration_repo=container.integration_repository,
+        job_repo=container.sync_job_repository,
+        state_repo=container.integration_state_repository,
+        queue=container.message_queue,
         encryption_service=container.encryption_service,
         adapter_factory=get_adapter_factory(),
     )
@@ -86,12 +108,12 @@ def _to_user_integration_response(
         id=user_integration.id,
         client_id=user_integration.client_id,
         integration_id=user_integration.integration_id,
-        integration_name=user_integration.integration.name
-        if user_integration.integration
-        else None,
-        integration_type=user_integration.integration.type
-        if user_integration.integration
-        else None,
+        integration_name=(
+            user_integration.integration.name if user_integration.integration else None
+        ),
+        integration_type=(
+            user_integration.integration.type if user_integration.integration else None
+        ),
         status=user_integration.status,
         external_account_id=user_integration.external_account_id,
         last_connected_at=user_integration.last_connected_at,
@@ -355,4 +377,72 @@ async def reset_entity_last_sync_time(
         last_sync_job_id=result.last_sync_job_id,
         records_synced_count=result.records_synced_count,
         message=message,
+    )
+
+
+@router.post(
+    "/{integration_id}/notify",
+    response_model=NotifyChangeResponse,
+    summary="Notify of record changes (push)",
+)
+async def notify_change(
+    integration_id: UUID,
+    request: NotifyChangeRequest,
+    client_id: UUID = Depends(get_client_id),
+    orchestrator: SyncOrchestrator = Depends(get_sync_orchestrator),
+) -> NotifyChangeResponse:
+    """
+    Notify the platform that records have changed in the internal system.
+
+    Bumps version vectors for the specified records and optionally
+    triggers a sync job based on the entity's sync_trigger setting.
+    """
+    event = ChangeEvent(
+        client_id=client_id,
+        integration_id=integration_id,
+        entity_type=request.entity_type,
+        record_ids=request.record_ids,
+        event=request.event,
+        source=ChangeSourceType.PUSH,
+    )
+    try:
+        records_bumped, records_created, sync_job = await orchestrator.handle_change_event(event)
+        return NotifyChangeResponse(
+            records_bumped=records_bumped,
+            records_created=records_created,
+            sync_triggered=sync_job is not None,
+            sync_job_id=sync_job.id if sync_job else None,
+        )
+    except NotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Integration not found: {integration_id}",
+        ) from None
+    except SyncError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
+
+
+@router.post(
+    "/{integration_id}/webhooks/{provider}",
+    response_model=WebhookReceiveResponse,
+    status_code=status.HTTP_501_NOT_IMPLEMENTED,
+    summary="Receive webhook from provider (stub)",
+)
+async def receive_webhook(
+    integration_id: UUID,
+    provider: str,
+    client_id: UUID = Depends(get_client_id),
+) -> WebhookReceiveResponse:
+    """
+    Receive a webhook from an external provider.
+
+    This is a stub endpoint. Provider-specific handlers will be
+    registered in future implementations.
+    """
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail=f"Webhook handler for provider '{provider}' is not implemented",
     )

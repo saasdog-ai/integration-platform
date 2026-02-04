@@ -133,6 +133,9 @@ def test_app(
     )
     from app.api.integrations import get_client_id as get_client_id_integrations
     from app.api.integrations import get_integration_service
+    from app.api.integrations import (
+        get_sync_orchestrator as get_sync_orchestrator_integrations,
+    )
     from app.api.settings import get_client_id as get_client_id_settings
     from app.api.settings import get_settings_service
     from app.api.sync_jobs import get_client_id as get_client_id_sync
@@ -148,6 +151,7 @@ def test_app(
     app.dependency_overrides[get_integration_service] = lambda: mock_integration_service
     app.dependency_overrides[get_settings_service] = lambda: mock_settings_service
     app.dependency_overrides[get_sync_orchestrator] = lambda: mock_sync_orchestrator
+    app.dependency_overrides[get_sync_orchestrator_integrations] = lambda: mock_sync_orchestrator
     app.dependency_overrides[get_client_id_integrations] = lambda: sample_client_id
     app.dependency_overrides[get_client_id_settings] = lambda: sample_client_id
     app.dependency_overrides[get_client_id_sync] = lambda: sample_client_id

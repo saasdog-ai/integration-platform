@@ -40,6 +40,8 @@ def _to_settings_response(settings: UserIntegrationSettings) -> UserSettingsResp
                 enabled=rule.enabled,
                 master_if_conflict=rule.master_if_conflict,
                 field_mappings=rule.field_mappings,
+                change_source=rule.change_source,
+                sync_trigger=rule.sync_trigger,
             )
             for rule in settings.sync_rules
         ],
@@ -58,6 +60,8 @@ def _from_settings_request(request: UserSettingsRequest) -> UserIntegrationSetti
                 enabled=rule.enabled,
                 master_if_conflict=rule.master_if_conflict,
                 field_mappings=rule.field_mappings,
+                change_source=rule.change_source,
+                sync_trigger=rule.sync_trigger,
             )
             for rule in request.sync_rules
         ],

@@ -20,12 +20,14 @@ from app.domain.entities import (
     UserIntegrationSettings,
 )
 from app.domain.enums import (
+    ChangeSourceType,
     IntegrationStatus,
     RecordSyncStatus,
     SyncDirection,
     SyncJobStatus,
     SyncJobTrigger,
     SyncJobType,
+    SyncTriggerMode,
 )
 from app.domain.interfaces import (
     IntegrationRepositoryInterface,
@@ -108,7 +110,10 @@ def _settings_dict_to_entity(
                 entity_type=rule["entity_type"],
                 direction=SyncDirection(rule["direction"]),
                 enabled=rule.get("enabled", True),
+                master_if_conflict=rule.get("master_if_conflict", "external"),
                 field_mappings=rule.get("field_mappings"),
+                change_source=rule.get("change_source", ChangeSourceType.POLLING),
+                sync_trigger=rule.get("sync_trigger", SyncTriggerMode.DEFERRED),
             )
         )
 
@@ -127,7 +132,10 @@ def _settings_entity_to_dict(settings: UserIntegrationSettings) -> dict[str, Any
                 "entity_type": rule.entity_type,
                 "direction": rule.direction.value,
                 "enabled": rule.enabled,
+                "master_if_conflict": rule.master_if_conflict.value,
                 "field_mappings": rule.field_mappings,
+                "change_source": rule.change_source.value,
+                "sync_trigger": rule.sync_trigger.value,
             }
             for rule in settings.sync_rules
         ],
@@ -1089,6 +1097,81 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
             await session.refresh(model)
             return _model_to_entity_sync_status(model)
 
+    async def bump_version_vectors(
+        self,
+        client_id: UUID,
+        integration_id: UUID,
+        entity_type: str,
+        record_ids: list[str],
+        bump_internal: bool = False,
+        bump_external: bool = False,
+    ) -> tuple[int, int]:
+        """Bump version vectors for records, creating new ones if not found."""
+        records_bumped = 0
+        records_created = 0
+
+        async with get_session_context() as session:
+            async with advisory_lock(session, client_id, integration_id):
+                for record_id in record_ids:
+                    model = None
+
+                    # For push (bump_internal): look up by internal_record_id
+                    if bump_internal:
+                        result = await session.execute(
+                            select(IntegrationStateModel).where(
+                                and_(
+                                    IntegrationStateModel.client_id == client_id,
+                                    IntegrationStateModel.integration_id == integration_id,
+                                    IntegrationStateModel.entity_type == entity_type,
+                                    IntegrationStateModel.internal_record_id == record_id,
+                                )
+                            )
+                        )
+                        model = result.scalar_one_or_none()
+
+                    # For webhook (bump_external): look up by external_record_id
+                    if bump_external and model is None:
+                        result = await session.execute(
+                            select(IntegrationStateModel).where(
+                                and_(
+                                    IntegrationStateModel.client_id == client_id,
+                                    IntegrationStateModel.integration_id == integration_id,
+                                    IntegrationStateModel.entity_type == entity_type,
+                                    IntegrationStateModel.external_record_id == record_id,
+                                )
+                            )
+                        )
+                        model = result.scalar_one_or_none()
+
+                    if model:
+                        if bump_internal:
+                            model.internal_version_id += 1
+                        if bump_external:
+                            model.external_version_id += 1
+                        model.sync_status = RecordSyncStatus.PENDING.value
+                        records_bumped += 1
+                    else:
+                        from uuid import uuid4 as _uuid4
+
+                        new_model = IntegrationStateModel(
+                            id=_uuid4(),
+                            client_id=client_id,
+                            integration_id=integration_id,
+                            entity_type=entity_type,
+                            internal_record_id=record_id if bump_internal else None,
+                            external_record_id=record_id if bump_external else None,
+                            sync_status=RecordSyncStatus.PENDING.value,
+                            internal_version_id=2 if bump_internal else 1,
+                            external_version_id=2 if bump_external else 0,
+                            last_sync_version_id=0,
+                        )
+                        session.add(new_model)
+                        records_created += 1
+
+                await session.flush()
+
+        return records_bumped, records_created
+
     async def batch_upsert_records(
         self,
         records: list[IntegrationStateRecord],
@@ -1175,9 +1258,9 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
                             internal_record_id=record.internal_record_id,
                             external_record_id=record.external_record_id,
                             sync_status=record.sync_status.value,
-                            sync_direction=record.sync_direction.value
-                            if record.sync_direction
-                            else None,
+                            sync_direction=(
+                                record.sync_direction.value if record.sync_direction else None
+                            ),
                             internal_version_id=record.internal_version_id,
                             external_version_id=record.external_version_id,
                             last_sync_version_id=record.last_sync_version_id,
