@@ -321,9 +321,9 @@ class IntegrationRepository(IntegrationRepositoryInterface):
                 updated_by=integration.updated_by,
             )
             session.add(model)
-            await session.flush()
-            await session.refresh(model)
-            return _model_to_user_integration(model)
+            await session.commit()
+        # Read back with eager loading from a fresh session
+        return await self.get_user_integration(integration.client_id, integration.integration_id)
 
     async def update_user_integration(self, integration: UserIntegration) -> UserIntegration:
         async with get_session_context() as session:

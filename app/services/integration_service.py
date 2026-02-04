@@ -221,16 +221,53 @@ class IntegrationService:
         Returns:
             The connected user integration.
         """
+        logger.info(
+            "OAuth callback started",
+            extra={
+                "client_id": str(client_id),
+                "integration_id": str(integration_id),
+                "realm_id": realm_id,
+                "has_auth_code": bool(auth_code),
+            },
+        )
+
         integration = await self.get_available_integration(integration_id)
 
         # Get or create user integration
         existing = await self._repo.get_user_integration(client_id, integration_id)
+        logger.info(
+            "OAuth callback: existing connection lookup",
+            extra={
+                "client_id": str(client_id),
+                "integration": integration.name,
+                "has_existing": existing is not None,
+            },
+        )
 
         # Create adapter and exchange code for tokens
         try:
             # For new connections, we don't have tokens yet, so pass empty string
             adapter = self._adapter_factory.get_adapter(integration, "", None)
+            logger.info(
+                "OAuth callback: exchanging auth code for tokens",
+                extra={
+                    "client_id": str(client_id),
+                    "integration": integration.name,
+                    "redirect_uri": redirect_uri,
+                },
+            )
             tokens = await adapter.authenticate(auth_code, redirect_uri, integration.oauth_config)
+            logger.info(
+                "OAuth callback: token exchange succeeded",
+                extra={
+                    "client_id": str(client_id),
+                    "integration": integration.name,
+                    "token_type": tokens.token_type,
+                    "expires_in": tokens.expires_in,
+                    "has_refresh_token": bool(tokens.refresh_token),
+                    "scope": tokens.scope,
+                },
+            )
         except Exception as e:
             # Sanitize error to avoid credential exposure in logs
             sanitized_error = _sanitize_error_for_log(e)
@@ -259,7 +296,19 @@ class IntegrationService:
                 "scope": tokens.scope,
             }
         )
+        logger.info(
+            "OAuth callback: encrypting credentials",
+            extra={"client_id": str(client_id), "integration": integration.name},
+        )
         encrypted_creds, key_id = await self._encryption.encrypt(credentials_json.encode())
+        logger.info(
+            "OAuth callback: credentials encrypted",
+            extra={
+                "client_id": str(client_id),
+                "integration": integration.name,
+                "key_id": key_id,
+            },
+        )
 
         now = datetime.now(UTC)
 
@@ -270,6 +319,14 @@ class IntegrationService:
             existing.external_account_id = realm_id
             existing.last_connected_at = now
             existing.updated_by = user_id
+            logger.info(
+                "OAuth callback: updating existing connection",
+                extra={
+                    "client_id": str(client_id),
+                    "integration": integration.name,
+                    "user_integration_id": str(existing.id),
+                },
+            )
             user_integration = await self._repo.update_user_integration(existing)
         else:
             user_integration = UserIntegration(
@@ -286,6 +343,14 @@ class IntegrationService:
                 created_by=user_id,
                 updated_by=user_id,
             )
+            logger.info(
+                "OAuth callback: creating new connection",
+                extra={
+                    "client_id": str(client_id),
+                    "integration": integration.name,
+                    "user_integration_id": str(user_integration.id),
+                },
+            )
             user_integration = await self._repo.create_user_integration(user_integration)
 
         logger.info(
@@ -294,6 +359,7 @@ class IntegrationService:
                 "client_id": str(client_id),
                 "integration": integration.name,
                 "user_integration_id": str(user_integration.id),
+                "realm_id": realm_id,
             },
         )
 
