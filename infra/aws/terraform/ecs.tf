@@ -101,7 +101,7 @@ resource "aws_ecs_task_definition" "app" {
         { name = "AWS_REGION", value = var.aws_region },
         { name = "QUEUE_URL", value = aws_sqs_queue.sync_jobs.url },
         { name = "KMS_KEY_ID", value = local.kms_key_id },
-        { name = "LOG_LEVEL", value = var.environment == "prod" ? "INFO" : "DEBUG" },
+        { name = "LOG_LEVEL", value = "INFO" },
         { name = "AUTH_ENABLED", value = var.environment == "prod" ? "true" : "false" },
         { name = "DATABASE_NAME", value = var.db_name }
       ]
