@@ -71,14 +71,11 @@ class AWSKMSEncryptionService(EncryptionServiceInterface):
             import asyncio
 
             client = self._get_client()
-            loop = asyncio.get_event_loop()
 
-            response = await loop.run_in_executor(
-                None,
-                lambda: client.encrypt(
-                    KeyId=self._key_id,
-                    Plaintext=plaintext,
-                ),
+            response = await asyncio.to_thread(
+                client.encrypt,
+                KeyId=self._key_id,
+                Plaintext=plaintext,
             )
 
             ciphertext = response["CiphertextBlob"]
@@ -110,14 +107,11 @@ class AWSKMSEncryptionService(EncryptionServiceInterface):
             import asyncio
 
             client = self._get_client()
-            loop = asyncio.get_event_loop()
 
-            response = await loop.run_in_executor(
-                None,
-                lambda: client.decrypt(
-                    CiphertextBlob=ciphertext,
-                    KeyId=key_id,
-                ),
+            response = await asyncio.to_thread(
+                client.decrypt,
+                CiphertextBlob=ciphertext,
+                KeyId=key_id,
             )
 
             plaintext = response["Plaintext"]
