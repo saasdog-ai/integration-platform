@@ -49,7 +49,7 @@ Instead of paying expensive third-party integration vendors like Workato, MuleSo
 - **Alembic** - Database migrations
 - **PostgreSQL 15+** - Primary database (port 5433)
 - **React / TypeScript / Vite** - Micro-frontend UI
-- **pytest** - 318 tests (unit + integration)
+- **pytest** - 381 tests (unit + integration)
 - **mypy, Ruff, Black** - Code quality
 - **Docker & Docker Compose** - Containerization
 - **Terraform** - AWS infrastructure (ECS/Fargate)
@@ -78,7 +78,7 @@ integration-platform/
 │   ├── unit/                 # 285 unit tests
 │   ├── integration/          # 3 E2E integration tests
 │   └── mocks/                # Mock adapters, repos, encryption
-├── alembic/                  # Database migrations (001–010)
+├── alembic/                  # Database migrations (001–011)
 ├── scripts/                  # Demo, data generation, seed SQL
 └── docker-compose.yml        # Local development (LocalStack, app)
 ```
@@ -194,6 +194,38 @@ Every record tracked in `integration_state` has three version fields:
 
 After every successful sync, all three are equalized: `iv = ev = lsv`.
 
+### Change Detection Methods
+
+Each sync rule specifies how changes are detected (`change_source`) and when to act on them (`sync_trigger`):
+
+| Change Source | Description |
+|---------------|-------------|
+| `polling` | Default. Changes discovered during scheduled sync jobs |
+| `push` | Internal system proactively notifies via `POST /integrations/{id}/notify` |
+| `webhook` | External system pushes changes via `POST /integrations/{id}/webhooks/{provider}` |
+| `hybrid` | Combination of polling and webhook/push |
+
+| Sync Trigger | Description |
+|--------------|-------------|
+| `deferred` | Default. Bump version vectors only; changes picked up at next scheduled sync |
+| `immediate` | Queue an incremental sync job as soon as the change notification arrives |
+
+**Push notification flow**: Your internal system calls the notify endpoint with a list of changed record IDs. The platform bumps `internal_version_id` on matching state records (creating new ones if needed). If the sync rule has `sync_trigger: immediate`, an incremental sync job is queued automatically.
+
+**Webhook flow**: An external system (e.g., QuickBooks) calls the webhook endpoint. The platform bumps `external_version_id` on matching state records. Same trigger logic applies. The webhook endpoint currently returns `501` — implement provider-specific payload parsing in `app/api/integrations.py` to activate it.
+
+**Example sync rule with push + immediate trigger**:
+```json
+{
+  "entity_type": "vendor",
+  "direction": "bidirectional",
+  "enabled": true,
+  "master_if_conflict": "external",
+  "change_source": "push",
+  "sync_trigger": "immediate"
+}
+```
+
 ### Sync Directions
 
 Configured per entity type in user settings:
@@ -264,7 +296,8 @@ Response:
       "type": "erp",
       "description": "Accounting software for small businesses",
       "supported_entities": ["invoice", "bill", "vendor", "customer"],
-      "oauth_config": {
+      "connection_config": {
+        "auth_type": "oauth2",
         "authorization_url": "https://appcenter.intuit.com/connect/oauth2",
         "token_url": "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer",
         "scopes": ["com.intuit.quickbooks.accounting"]
@@ -522,14 +555,18 @@ Response:
       "direction": "bidirectional",
       "enabled": true,
       "master_if_conflict": "external",
-      "field_mappings": null
+      "field_mappings": null,
+      "change_source": "polling",
+      "sync_trigger": "deferred"
     },
     {
       "entity_type": "bill",
       "direction": "inbound",
       "enabled": true,
       "master_if_conflict": "external",
-      "field_mappings": null
+      "field_mappings": null,
+      "change_source": "push",
+      "sync_trigger": "immediate"
     }
   ],
   "sync_frequency": "0 */6 * * *",
@@ -539,6 +576,8 @@ Response:
 
 Sync direction options: `inbound`, `outbound`, `bidirectional`.
 Conflict resolution options: `external` (external system wins), `our_system` (our system wins).
+Change source options: `polling`, `push`, `webhook`, `hybrid`.
+Sync trigger options: `deferred` (next scheduled sync), `immediate` (queue job now).
 
 #### Update Settings
 
@@ -658,7 +697,7 @@ See [OpenAPI Generator docs](https://openapi-generator.tech/docs/generators) for
 ### Running Tests
 
 ```bash
-# Run all 318 tests
+# Run all tests
 pytest tests/ -v --no-cov
 
 # Run unit tests only (285 tests)
