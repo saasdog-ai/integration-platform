@@ -6,7 +6,7 @@ from typing import Any
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
-from app.domain.entities import ExternalRecord, OAuthConfig, OAuthTokens
+from app.domain.entities import ConnectionConfig, ExternalRecord, OAuthTokens
 from app.domain.interfaces import IntegrationAdapterInterface
 from app.infrastructure.adapters.http_client import get_http_client
 from app.integrations.quickbooks.constants import (
@@ -120,11 +120,11 @@ class QuickBooksAdapter(IntegrationAdapterInterface):
     # ------------------------------------------------------------------
 
     async def authenticate(
-        self, auth_code: str, redirect_uri: str, oauth_config: OAuthConfig | None = None
+        self, auth_code: str, redirect_uri: str, connection_config: ConnectionConfig | None = None
     ) -> OAuthTokens:
         """Exchange authorization code for access/refresh tokens."""
-        client_id = oauth_config.client_id if oauth_config else None
-        client_secret = oauth_config.client_secret if oauth_config else None
+        client_id = connection_config.client_id if connection_config else None
+        client_secret = connection_config.client_secret if connection_config else None
 
         if not client_id or not client_secret:
             raise Exception(
@@ -174,11 +174,11 @@ class QuickBooksAdapter(IntegrationAdapterInterface):
         )
 
     async def refresh_token(
-        self, refresh_token: str, oauth_config: OAuthConfig | None = None
+        self, refresh_token: str, connection_config: ConnectionConfig | None = None
     ) -> OAuthTokens:
         """Refresh an expired access token."""
-        client_id = oauth_config.client_id if oauth_config else None
-        client_secret = oauth_config.client_secret if oauth_config else None
+        client_id = connection_config.client_id if connection_config else None
+        client_secret = connection_config.client_secret if connection_config else None
 
         if not client_id or not client_secret:
             raise Exception(

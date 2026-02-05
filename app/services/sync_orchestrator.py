@@ -35,6 +35,7 @@ from app.domain.enums import (
 from app.domain.interfaces import (
     AdapterFactoryInterface,
     EncryptionServiceInterface,
+    FeatureFlagServiceInterface,
     IntegrationAdapterInterface,
     IntegrationRepositoryInterface,
     IntegrationStateRepositoryInterface,
@@ -77,6 +78,7 @@ class SyncOrchestrator:
         queue: MessageQueueInterface,
         encryption_service: EncryptionServiceInterface,
         adapter_factory: AdapterFactoryInterface,
+        feature_flags: FeatureFlagServiceInterface | None = None,
     ) -> None:
         """
         Initialize sync orchestrator.
@@ -88,6 +90,7 @@ class SyncOrchestrator:
             queue: Message queue for async job dispatch.
             encryption_service: Service for credential encryption.
             adapter_factory: Factory for creating integration adapters.
+            feature_flags: Feature flag service (defaults from DI container).
         """
         self._integration_repo = integration_repo
         self._job_repo = job_repo
@@ -95,6 +98,12 @@ class SyncOrchestrator:
         self._queue = queue
         self._encryption = encryption_service
         self._adapter_factory = adapter_factory
+
+        if feature_flags is None:
+            from app.core.dependency_injection import get_container
+
+            feature_flags = get_container().feature_flag_service
+        self._feature_flags = feature_flags
         _init_strategies()
 
     async def _write_history_entries(
@@ -270,8 +279,7 @@ class SyncOrchestrator:
             The created sync job.
         """
         # Check global kill switch
-        settings = get_settings()
-        if settings.sync_globally_disabled:
+        if self._feature_flags.is_sync_globally_disabled():
             raise SyncError(
                 "Sync is currently disabled globally",
                 details={"reason": "feature_flag"},
@@ -283,7 +291,7 @@ class SyncOrchestrator:
             raise NotFoundError("Integration", integration_id)
 
         # Check if integration is disabled via feature flag
-        if integration.name in settings.disabled_integrations:
+        if self._feature_flags.is_integration_disabled(integration.name):
             raise SyncError(
                 f"Integration '{integration.name}' is currently disabled",
                 details={"reason": "feature_flag", "integration": integration.name},

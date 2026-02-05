@@ -205,8 +205,11 @@ class TestRateLimitMiddleware:
         simple_app.add_middleware(RateLimitMiddleware)
         client = TestClient(simple_app)
 
-        with patch("app.core.middleware.get_settings") as mock_settings:
-            mock_settings.return_value.rate_limit_enabled = False
+        mock_ff = MagicMock()
+        mock_ff.is_rate_limit_enabled.return_value = False
+
+        with patch("app.core.dependency_injection.get_container") as mock_container:
+            mock_container.return_value.feature_flag_service = mock_ff
             response = client.get("/test")
 
         assert response.status_code == 200
@@ -216,8 +219,14 @@ class TestRateLimitMiddleware:
         simple_app.add_middleware(RateLimitMiddleware)
         client = TestClient(simple_app)
 
-        with patch("app.core.middleware.get_settings") as mock_settings:
-            mock_settings.return_value.rate_limit_enabled = True
+        mock_ff = MagicMock()
+        mock_ff.is_rate_limit_enabled.return_value = True
+
+        with (
+            patch("app.core.middleware.get_settings") as mock_settings,
+            patch("app.core.dependency_injection.get_container") as mock_container,
+        ):
+            mock_container.return_value.feature_flag_service = mock_ff
             mock_settings.return_value.rate_limit_requests_per_minute = 1
             mock_settings.return_value.rate_limit_burst = 0
 
@@ -231,8 +240,14 @@ class TestRateLimitMiddleware:
         simple_app.add_middleware(RateLimitMiddleware)
         client = TestClient(simple_app)
 
-        with patch("app.core.middleware.get_settings") as mock_settings:
-            mock_settings.return_value.rate_limit_enabled = True
+        mock_ff = MagicMock()
+        mock_ff.is_rate_limit_enabled.return_value = True
+
+        with (
+            patch("app.core.middleware.get_settings") as mock_settings,
+            patch("app.core.dependency_injection.get_container") as mock_container,
+        ):
+            mock_container.return_value.feature_flag_service = mock_ff
             mock_settings.return_value.rate_limit_requests_per_minute = 2
             mock_settings.return_value.rate_limit_burst = 0
 
@@ -253,8 +268,14 @@ class TestRateLimitMiddleware:
         simple_app.add_middleware(RateLimitMiddleware)
         client = TestClient(simple_app)
 
-        with patch("app.core.middleware.get_settings") as mock_settings:
-            mock_settings.return_value.rate_limit_enabled = True
+        mock_ff = MagicMock()
+        mock_ff.is_rate_limit_enabled.return_value = True
+
+        with (
+            patch("app.core.middleware.get_settings") as mock_settings,
+            patch("app.core.dependency_injection.get_container") as mock_container,
+        ):
+            mock_container.return_value.feature_flag_service = mock_ff
             mock_settings.return_value.rate_limit_requests_per_minute = 60
             mock_settings.return_value.rate_limit_burst = 10
 

@@ -9,13 +9,13 @@ from app.api.dto import (
     AvailableIntegrationsResponse,
     ConnectIntegrationRequest,
     ConnectIntegrationResponse,
+    ConnectionConfigResponse,
     EntitySyncStatusItem,
     EntitySyncStatusListResponse,
     EntitySyncStatusResponse,
     NotifyChangeRequest,
     NotifyChangeResponse,
     OAuthCallbackRequest,
-    OAuthConfigResponse,
     ResetLastSyncTimeRequest,
     UserIntegrationResponse,
     UserIntegrationsResponse,
@@ -67,6 +67,7 @@ def get_sync_orchestrator() -> SyncOrchestrator:
         queue=container.message_queue,
         encryption_service=container.encryption_service,
         adapter_factory=get_adapter_factory(),
+        feature_flags=container.feature_flag_service,
     )
 
 
@@ -81,12 +82,14 @@ def _to_available_integration_response(
     integration: AvailableIntegration,
 ) -> AvailableIntegrationResponse:
     """Convert domain entity to response DTO."""
-    oauth_config = None
-    if integration.oauth_config:
-        oauth_config = OAuthConfigResponse(
-            authorization_url=integration.oauth_config.authorization_url,
-            token_url=integration.oauth_config.token_url,
-            scopes=integration.oauth_config.scopes,
+    connection_config = None
+    if integration.connection_config:
+        connection_config = ConnectionConfigResponse(
+            auth_type=integration.connection_config.auth_type,
+            authorization_url=integration.connection_config.authorization_url,
+            token_url=integration.connection_config.token_url,
+            scopes=integration.connection_config.scopes,
+            api_key_header_name=integration.connection_config.api_key_header_name,
         )
 
     return AvailableIntegrationResponse(
@@ -95,7 +98,7 @@ def _to_available_integration_response(
         type=integration.type,
         description=integration.description,
         supported_entities=integration.supported_entities,
-        oauth_config=oauth_config,
+        connection_config=connection_config,
         is_active=integration.is_active,
     )
 

@@ -221,10 +221,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return False, 0, retry_after
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        from app.core.dependency_injection import get_container
+
         settings = get_settings()
 
         # Skip rate limiting if disabled
-        if not settings.rate_limit_enabled:
+        if not get_container().feature_flag_service.is_rate_limit_enabled():
             return await call_next(request)
 
         # Skip rate limiting for health checks

@@ -1,5 +1,5 @@
 -- Seed Available Integrations
-INSERT INTO available_integrations (id, name, type, description, supported_entities, oauth_config, is_active, created_at, updated_at)
+INSERT INTO available_integrations (id, name, type, description, supported_entities, connection_config, is_active, created_at, updated_at)
 VALUES
   ('11111111-1111-1111-1111-111111111111', 'QuickBooks Online', 'erp', 'Intuit QuickBooks Online accounting software',
    '["bill", "invoice", "vendor", "customer", "chart_of_accounts", "payment"]'::jsonb,

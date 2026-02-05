@@ -3,7 +3,6 @@
 import asyncio
 import signal
 import time
-from typing import Any
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -12,6 +11,7 @@ from app.domain.enums import SyncJobStatus, SyncJobType
 from app.domain.interfaces import (
     AdapterFactoryInterface,
     EncryptionServiceInterface,
+    FeatureFlagServiceInterface,
     IntegrationRepositoryInterface,
     IntegrationStateRepositoryInterface,
     MessageQueueInterface,
@@ -53,6 +53,7 @@ class SyncJobRunner:
         encryption_service: EncryptionServiceInterface,
         adapter_factory: AdapterFactoryInterface,
         max_workers: int | None = None,
+        feature_flags: FeatureFlagServiceInterface | None = None,
     ) -> None:
         """
         Initialize sync job runner.
@@ -65,8 +66,16 @@ class SyncJobRunner:
             encryption_service: Service for credential encryption.
             adapter_factory: Factory for creating integration adapters.
             max_workers: Maximum concurrent workers.
+            feature_flags: Feature flag service (defaults from DI container).
         """
         settings = get_settings()
+
+        if feature_flags is None:
+            from app.core.dependency_injection import get_container
+
+            feature_flags = get_container().feature_flag_service
+        self._feature_flags = feature_flags
+
         self._queue = queue
         self._max_workers = max_workers or settings.job_runner_max_workers
         self._running = False
@@ -94,6 +103,7 @@ class SyncJobRunner:
             queue=queue,
             encryption_service=encryption_service,
             adapter_factory=adapter_factory,
+            feature_flags=feature_flags,
         )
         self._job_repo = job_repo
         self._state_repo = state_repo
@@ -105,10 +115,8 @@ class SyncJobRunner:
             logger.warning("Job runner is already running")
             return
 
-        settings = get_settings()
-
         # Check global kill switch
-        if settings.sync_globally_disabled:
+        if self._feature_flags.is_sync_globally_disabled():
             logger.warning("Sync is globally disabled via feature flag - job runner not starting")
             return
 
@@ -201,10 +209,8 @@ class SyncJobRunner:
 
     async def _check_stuck_jobs(self) -> None:
         """Check for and terminate stuck jobs."""
-        settings = get_settings()
-
         # Skip if termination is disabled
-        if not settings.job_termination_enabled:
+        if not self._feature_flags.is_job_termination_enabled():
             return
 
         # Rate limit stuck job checks
@@ -215,6 +221,7 @@ class SyncJobRunner:
         self._last_stuck_job_check = now
 
         try:
+            settings = get_settings()
             stuck_jobs = await self._job_repo.get_stuck_jobs(
                 stuck_threshold_minutes=settings.job_stuck_timeout_minutes
             )
@@ -450,7 +457,6 @@ class SyncJobRunner:
         self,
         job_message: SyncJobMessage,
         receipt_handle: str,
-        settings: Any,
     ) -> SyncJob | None:
         """Look up job and verify it is ready to execute.
 
@@ -483,7 +489,7 @@ class SyncJobRunner:
 
         # Check if integration is disabled via feature flag
         integration = await self._integration_repo.get_available_integration(job.integration_id)
-        if integration and integration.name in settings.disabled_integrations:
+        if integration and self._feature_flags.is_integration_disabled(integration.name):
             logger.warning(
                 "Integration disabled via feature flag - skipping job",
                 extra={
@@ -554,7 +560,6 @@ class SyncJobRunner:
         """
         receipt_handle = message.receipt_handle
         receive_count = int(message.attributes.get("ApproximateReceiveCount", 1))
-        settings = get_settings()
 
         try:
             job_message = self._validate_and_parse_message(message)
@@ -574,7 +579,7 @@ class SyncJobRunner:
             )
 
             # Check global kill switch
-            if settings.sync_globally_disabled:
+            if self._feature_flags.is_sync_globally_disabled():
                 logger.warning(
                     "Sync globally disabled - skipping job",
                     extra={"job_id": str(job_message.job_id)},
@@ -585,7 +590,6 @@ class SyncJobRunner:
             job = await self._check_job_ready_for_execution(
                 job_message,
                 receipt_handle,
-                settings,
             )
             if job is None:
                 return
@@ -616,13 +620,12 @@ async def run_job_runner() -> None:
     from app.core.dependency_injection import get_container
     from app.infrastructure.adapters.factory import get_adapter_factory
 
-    settings = get_settings()
+    container = get_container()
+    feature_flags = container.feature_flag_service
 
-    if not settings.job_runner_enabled:
+    if not feature_flags.is_job_runner_enabled():
         logger.info("Job runner is disabled")
         return
-
-    container = get_container()
 
     runner = SyncJobRunner(
         queue=container.message_queue,
@@ -631,6 +634,7 @@ async def run_job_runner() -> None:
         state_repo=container.integration_state_repository,
         encryption_service=container.encryption_service,
         adapter_factory=get_adapter_factory(),
+        feature_flags=feature_flags,
     )
 
     await runner.start()

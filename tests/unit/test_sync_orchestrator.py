@@ -9,7 +9,7 @@ import pytest
 from app.core.exceptions import ConflictError, NotFoundError, SyncError
 from app.domain.entities import (
     AvailableIntegration,
-    OAuthConfig,
+    ConnectionConfig,
     SyncJob,
     SyncRule,
     UserIntegration,
@@ -26,6 +26,7 @@ from app.infrastructure.queue.memory_queue import InMemoryQueue
 from app.services.sync_orchestrator import SyncOrchestrator
 from tests.mocks.adapters import MockAdapterFactory
 from tests.mocks.encryption import MockEncryptionService
+from tests.mocks.feature_flags import MockFeatureFlagService
 from tests.mocks.repositories import (
     MockIntegrationRepository,
     MockIntegrationStateRepository,
@@ -81,6 +82,14 @@ def mock_adapter_factory():
 
 
 @pytest.fixture
+def mock_feature_flags():
+    """Create mock feature flag service."""
+    service = MockFeatureFlagService()
+    yield service
+    service.reset()
+
+
+@pytest.fixture
 def orchestrator(
     mock_integration_repo,
     mock_job_repo,
@@ -88,6 +97,7 @@ def orchestrator(
     mock_queue,
     mock_encryption,
     mock_adapter_factory,
+    mock_feature_flags,
 ):
     """Create sync orchestrator with mocks."""
     return SyncOrchestrator(
@@ -97,6 +107,7 @@ def orchestrator(
         queue=mock_queue,
         encryption_service=mock_encryption,
         adapter_factory=mock_adapter_factory,
+        feature_flags=mock_feature_flags,
     )
 
 
@@ -113,7 +124,7 @@ def sample_integration(mock_integration_repo) -> AvailableIntegration:
         name="QuickBooks Online",
         type="erp",
         supported_entities=["bill", "invoice", "vendor"],
-        oauth_config=OAuthConfig(
+        connection_config=ConnectionConfig(
             authorization_url="https://oauth.example.com/authorize",
             token_url="https://oauth.example.com/token",
             scopes=["read", "write"],
@@ -989,44 +1000,38 @@ class TestGlobalDisable:
     async def test_trigger_sync_globally_disabled(
         self,
         orchestrator,
+        mock_feature_flags,
         sample_client_id,
         sample_integration,
         connected_user_integration,
     ):
         """Test triggering sync when globally disabled."""
-        from unittest.mock import patch
+        mock_feature_flags.sync_globally_disabled = True
 
-        with patch("app.services.sync_orchestrator.get_settings") as mock_settings:
-            mock_settings.return_value.sync_globally_disabled = True
-            mock_settings.return_value.disabled_integrations = []
-
-            with pytest.raises(SyncError) as exc_info:
-                await orchestrator.trigger_sync(
-                    client_id=sample_client_id,
-                    integration_id=sample_integration.id,
-                )
-            assert "globally" in str(exc_info.value).lower()
+        with pytest.raises(SyncError) as exc_info:
+            await orchestrator.trigger_sync(
+                client_id=sample_client_id,
+                integration_id=sample_integration.id,
+            )
+        assert "globally" in str(exc_info.value).lower()
 
     async def test_trigger_sync_integration_disabled(
         self,
         orchestrator,
+        mock_feature_flags,
         sample_client_id,
         sample_integration,
         connected_user_integration,
     ):
         """Test triggering sync when specific integration is disabled."""
-        from unittest.mock import patch
+        mock_feature_flags.disabled_integrations = ["QuickBooks Online"]
 
-        with patch("app.services.sync_orchestrator.get_settings") as mock_settings:
-            mock_settings.return_value.sync_globally_disabled = False
-            mock_settings.return_value.disabled_integrations = ["QuickBooks Online"]
-
-            with pytest.raises(SyncError) as exc_info:
-                await orchestrator.trigger_sync(
-                    client_id=sample_client_id,
-                    integration_id=sample_integration.id,
-                )
-            assert "disabled" in str(exc_info.value).lower()
+        with pytest.raises(SyncError) as exc_info:
+            await orchestrator.trigger_sync(
+                client_id=sample_client_id,
+                integration_id=sample_integration.id,
+            )
+        assert "disabled" in str(exc_info.value).lower()
 
 
 class TestResolveRequestedEntityTypes:

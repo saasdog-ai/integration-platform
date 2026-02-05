@@ -61,7 +61,9 @@ async def lifespan(app: FastAPI):
         raise
 
     # Start job runner as background task (shares in-memory queue with API)
-    if settings.job_runner_enabled:
+    from app.core.dependency_injection import get_container
+
+    if get_container().feature_flag_service.is_job_runner_enabled():
         _job_runner_task = asyncio.create_task(_run_job_runner())
         _job_runner_watchdog = asyncio.create_task(_watch_job_runner())
         logger.info(

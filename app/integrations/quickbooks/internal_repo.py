@@ -81,7 +81,8 @@ class InternalDataRepository:
                 record_id = str(existing[0])
                 address_json = json.dumps(data.get("address")) if data.get("address") else None
                 await session.execute(
-                    text("""
+                    text(
+                        """
                         UPDATE sample_vendors SET
                             name = COALESCE(:name, name),
                             email_address = COALESCE(:email, email_address),
@@ -94,7 +95,8 @@ class InternalDataRepository:
                             address = COALESCE(CAST(:address AS json), address),
                             updated_at = :now
                         WHERE id = :id
-                    """),
+                    """
+                    ),
                     {
                         "id": record_id,
                         "name": data.get("name"),
@@ -114,7 +116,8 @@ class InternalDataRepository:
                 record_id = str(uuid4())
                 address_json = json.dumps(data.get("address")) if data.get("address") else None
                 await session.execute(
-                    text("""
+                    text(
+                        """
                         INSERT INTO sample_vendors
                             (id, client_id, name, email_address, phone, tax_number,
                              is_supplier, is_customer, status, currency, address,
@@ -123,7 +126,8 @@ class InternalDataRepository:
                             (:id, :client_id, :name, :email, :phone, :tax_number,
                              :is_supplier, :is_customer, :status, :currency, CAST(:address AS json),
                              :external_id, :now, :now)
-                    """),
+                    """
+                    ),
                     {
                         "id": record_id,
                         "client_id": str(client_id),
@@ -198,7 +202,8 @@ class InternalDataRepository:
             if existing:
                 record_id = str(existing[0])
                 await session.execute(
-                    text("""
+                    text(
+                        """
                         UPDATE sample_bills SET
                             bill_number = COALESCE(:bill_number, bill_number),
                             amount = COALESCE(:amount, amount),
@@ -211,7 +216,8 @@ class InternalDataRepository:
                             line_items = COALESCE(CAST(:line_items AS json), line_items),
                             updated_at = :now
                         WHERE id = :id
-                    """),
+                    """
+                    ),
                     {
                         "id": record_id,
                         "bill_number": data.get("bill_number"),
@@ -242,7 +248,8 @@ class InternalDataRepository:
                         vendor_id = str(vrow[0])
 
                 await session.execute(
-                    text("""
+                    text(
+                        """
                         INSERT INTO sample_bills
                             (id, client_id, bill_number, vendor_id, amount, date, due_date,
                              paid_on_date, description, currency, status, line_items,
@@ -251,7 +258,8 @@ class InternalDataRepository:
                             (:id, :client_id, :bill_number, :vendor_id, :amount, :date, :due_date,
                              :paid_on_date, :description, :currency, :status, CAST(:line_items AS json),
                              :external_id, :now, :now)
-                    """),
+                    """
+                    ),
                     {
                         "id": record_id,
                         "client_id": str(client_id),
@@ -327,7 +335,8 @@ class InternalDataRepository:
             if existing:
                 record_id = str(existing[0])
                 await session.execute(
-                    text("""
+                    text(
+                        """
                         UPDATE sample_invoices SET
                             invoice_number = COALESCE(:invoice_number, invoice_number),
                             issue_date = COALESCE(:issue_date, issue_date),
@@ -343,7 +352,8 @@ class InternalDataRepository:
                             line_items = COALESCE(CAST(:line_items AS json), line_items),
                             updated_at = :now
                         WHERE id = :id
-                    """),
+                    """
+                    ),
                     {
                         "id": record_id,
                         "invoice_number": data.get("invoice_number"),
@@ -377,7 +387,8 @@ class InternalDataRepository:
                         contact_id = str(crow[0])
 
                 await session.execute(
-                    text("""
+                    text(
+                        """
                         INSERT INTO sample_invoices
                             (id, client_id, invoice_number, contact_id, issue_date, due_date,
                              paid_on_date, memo, currency, sub_total, total_tax_amount,
@@ -388,7 +399,8 @@ class InternalDataRepository:
                              :paid_on_date, :memo, :currency, :sub_total, :total_tax,
                              :total_amount, :balance, :status, CAST(:line_items AS json), :external_id,
                              :now, :now)
-                    """),
+                    """
+                    ),
                     {
                         "id": record_id,
                         "client_id": str(client_id),
@@ -465,7 +477,8 @@ class InternalDataRepository:
             if existing:
                 record_id = str(existing[0])
                 await session.execute(
-                    text("""
+                    text(
+                        """
                         UPDATE sample_chart_of_accounts SET
                             name = COALESCE(:name, name),
                             account_number = COALESCE(:account_number, account_number),
@@ -479,7 +492,8 @@ class InternalDataRepository:
                             parent_account_external_id = :parent_account_external_id,
                             updated_at = :now
                         WHERE id = :id
-                    """),
+                    """
+                    ),
                     {
                         "id": record_id,
                         "name": data.get("name"),
@@ -498,7 +512,8 @@ class InternalDataRepository:
             else:
                 record_id = str(uuid4())
                 await session.execute(
-                    text("""
+                    text(
+                        """
                         INSERT INTO sample_chart_of_accounts
                             (id, client_id, name, account_number, account_type, account_sub_type,
                              classification, current_balance, currency, description, active,
@@ -507,7 +522,8 @@ class InternalDataRepository:
                             (:id, :client_id, :name, :account_number, :account_type, :account_sub_type,
                              :classification, :current_balance, :currency, :description, :active,
                              :parent_account_external_id, :external_id, :now, :now)
-                    """),
+                    """
+                    ),
                     {
                         "id": record_id,
                         "client_id": str(client_id),

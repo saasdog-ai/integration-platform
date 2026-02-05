@@ -107,13 +107,13 @@ class TestCreateAvailableIntegration:
         )
         assert response.status_code == 422
 
-    def test_create_with_oauth_config(self, client: TestClient) -> None:
+    def test_create_with_connection_config(self, client: TestClient) -> None:
         response = client.post(
             "/admin/integrations/available",
             json={
                 "name": "Xero",
                 "type": "erp",
-                "oauth_config": {
+                "connection_config": {
                     "authorization_url": "https://login.xero.com/authorize",
                     "token_url": "https://identity.xero.com/connect/token",
                     "scopes": ["openid", "accounting.transactions"],
@@ -122,8 +122,8 @@ class TestCreateAvailableIntegration:
         )
         assert response.status_code == 201
         data = response.json()
-        assert data["oauth_config"]["authorization_url"] == "https://login.xero.com/authorize"
-        assert data["oauth_config"]["scopes"] == ["openid", "accounting.transactions"]
+        assert data["connection_config"]["authorization_url"] == "https://login.xero.com/authorize"
+        assert data["connection_config"]["scopes"] == ["openid", "accounting.transactions"]
 
     def test_create_defaults(self, client: TestClient) -> None:
         response = client.post(
@@ -135,7 +135,7 @@ class TestCreateAvailableIntegration:
         assert data["description"] is None
         assert data["supported_entities"] == []
         assert data["is_active"] is True
-        assert data["oauth_config"] is None
+        assert data["connection_config"] is None
 
 
 # =============================================================================

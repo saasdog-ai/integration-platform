@@ -10,7 +10,7 @@ import pytest
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.domain.entities import (
     AvailableIntegration,
-    OAuthConfig,
+    ConnectionConfig,
     UserIntegration,
 )
 from app.domain.enums import IntegrationStatus
@@ -66,7 +66,7 @@ def sample_integration(mock_repo) -> AvailableIntegration:
         name="QuickBooks Online",
         type="erp",
         supported_entities=["bill", "invoice", "vendor"],
-        oauth_config=OAuthConfig(
+        connection_config=ConnectionConfig(
             authorization_url="https://oauth.example.com/authorize",
             token_url="https://oauth.example.com/token",
             scopes=["read", "write"],
@@ -180,15 +180,15 @@ class TestOAuthFlow:
         # Scope with space encoded as + (urlencode default)
         assert "scope=read+write" in auth_url
 
-    async def test_get_oauth_authorization_url_no_oauth_config(
+    async def test_get_oauth_authorization_url_no_connection_config(
         self, service, mock_repo, sample_client_id
     ):
-        """Test error when integration doesn't support OAuth."""
+        """Test error when integration has no connection config."""
         integration = mock_repo.seed_available_integration(
             name="No OAuth Integration",
             type="erp",
             supported_entities=["bill"],
-            oauth_config=None,
+            connection_config=None,
         )
 
         with pytest.raises(ValidationError):

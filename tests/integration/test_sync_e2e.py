@@ -18,8 +18,8 @@ import pytest
 
 from app.domain.entities import (
     AvailableIntegration,
+    ConnectionConfig,
     IntegrationStateRecord,
-    OAuthConfig,
     SyncJob,
     SyncRule,
     UserIntegration,
@@ -160,7 +160,7 @@ async def infra():
         type="erp",
         description="QuickBooks Online",
         supported_entities=["vendor", "bill", "invoice", "chart_of_accounts"],
-        oauth_config=OAuthConfig(
+        connection_config=ConnectionConfig(
             authorization_url="https://example.com/auth",
             token_url="https://example.com/token",
             scopes=["accounting"],
@@ -427,9 +427,9 @@ class TestVendorSyncLifecycle:
 
         # Metadata updated with QBO data
         after_name = (after.metadata or {}).get("data", {}).get("name", "")
-        assert "Updated in QBO" in after_name, (
-            f"Metadata should reflect QBO change, got: {after_name}"
-        )
+        assert (
+            "Updated in QBO" in after_name
+        ), f"Metadata should reflect QBO change, got: {after_name}"
         print(f"  Metadata updated: name={after_name}")
 
         assert after.is_in_sync is True
@@ -519,9 +519,9 @@ class TestVendorSyncLifecycle:
         _show_state("After sync", final)
 
         # QBO should win → direction = INBOUND
-        assert final.sync_direction == SyncDirection.INBOUND, (
-            f"External should win — expected INBOUND, got {final.sync_direction}"
-        )
+        assert (
+            final.sync_direction == SyncDirection.INBOUND
+        ), f"External should win — expected INBOUND, got {final.sync_direction}"
         print("  Winner: QBO (sync_direction = INBOUND)")
 
         # Version vectors equalized

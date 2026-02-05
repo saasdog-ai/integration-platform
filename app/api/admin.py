@@ -8,18 +8,18 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.api.dto import (
     AvailableIntegrationResponse,
     AvailableIntegrationsResponse,
+    ConnectionConfigResponse,
     CreateAvailableIntegrationRequest,
     EntitySyncStatusItem,
     EntitySyncStatusListResponse,
     EntitySyncStatusResponse,
-    OAuthConfigResponse,
     ResetLastSyncTimeRequest,
     UpdateAvailableIntegrationRequest,
     UserIntegrationResponse,
     UserIntegrationsResponse,
 )
 from app.core.logging import get_logger
-from app.domain.entities import AvailableIntegration, OAuthConfig, UserIntegration
+from app.domain.entities import AvailableIntegration, ConnectionConfig, UserIntegration
 from app.domain.interfaces import (
     IntegrationRepositoryInterface,
     IntegrationStateRepositoryInterface,
@@ -164,12 +164,14 @@ def _to_available_integration_response(
     integration: AvailableIntegration,
 ) -> AvailableIntegrationResponse:
     """Convert domain entity to response DTO."""
-    oauth_config = None
-    if integration.oauth_config:
-        oauth_config = OAuthConfigResponse(
-            authorization_url=integration.oauth_config.authorization_url,
-            token_url=integration.oauth_config.token_url,
-            scopes=integration.oauth_config.scopes,
+    connection_config = None
+    if integration.connection_config:
+        connection_config = ConnectionConfigResponse(
+            auth_type=integration.connection_config.auth_type,
+            authorization_url=integration.connection_config.authorization_url,
+            token_url=integration.connection_config.token_url,
+            scopes=integration.connection_config.scopes,
+            api_key_header_name=integration.connection_config.api_key_header_name,
         )
 
     return AvailableIntegrationResponse(
@@ -178,7 +180,7 @@ def _to_available_integration_response(
         type=integration.type,
         description=integration.description,
         supported_entities=integration.supported_entities,
-        oauth_config=oauth_config,
+        connection_config=connection_config,
         is_active=integration.is_active,
     )
 
@@ -195,14 +197,16 @@ async def admin_create_available_integration(
 ) -> AvailableIntegrationResponse:
     """Create a new integration in the catalog (admin use only)."""
     now = datetime.now(UTC)
-    oauth_config = OAuthConfig(**request.oauth_config) if request.oauth_config else None
+    connection_config = (
+        ConnectionConfig(**request.connection_config) if request.connection_config else None
+    )
 
     integration = AvailableIntegration(
         id=uuid4(),
         name=request.name,
         type=request.type,
         description=request.description,
-        oauth_config=oauth_config,
+        connection_config=connection_config,
         supported_entities=request.supported_entities,
         is_active=request.is_active,
         created_at=now,
@@ -282,10 +286,10 @@ async def admin_update_available_integration(
         description=(
             request.description if request.description is not None else existing.description
         ),
-        oauth_config=(
-            OAuthConfig(**request.oauth_config)
-            if request.oauth_config is not None
-            else existing.oauth_config
+        connection_config=(
+            ConnectionConfig(**request.connection_config)
+            if request.connection_config is not None
+            else existing.connection_config
         ),
         supported_entities=(
             request.supported_entities

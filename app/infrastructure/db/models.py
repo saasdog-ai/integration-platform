@@ -56,7 +56,9 @@ class AvailableIntegrationModel(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
     type: Mapped[str] = mapped_column(String(50), nullable=False)  # erp, hris, crm
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    oauth_config: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    connection_config: Mapped[dict[str, Any] | None] = mapped_column(
+        "connection_config", JSONB, nullable=True
+    )
     supported_entities: Mapped[list[str]] = mapped_column(
         JSONB, nullable=False, server_default="[]"
     )

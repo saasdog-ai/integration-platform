@@ -15,6 +15,7 @@ from app.domain.enums import IntegrationStatus, SyncJobStatus, SyncJobTrigger, S
 from app.infrastructure.queue.memory_queue import InMemoryQueue
 from tests.mocks.adapters import MockAdapterFactory, MockIntegrationAdapter
 from tests.mocks.encryption import MockEncryptionService
+from tests.mocks.feature_flags import MockFeatureFlagService
 from tests.mocks.repositories import (
     MockIntegrationRepository,
     MockIntegrationStateRepository,
@@ -86,6 +87,14 @@ def mock_adapter_factory() -> MockAdapterFactory:
     factory = MockAdapterFactory()
     yield factory
     factory.clear()
+
+
+@pytest.fixture
+def mock_feature_flags() -> MockFeatureFlagService:
+    """Create a mock feature flag service."""
+    service = MockFeatureFlagService()
+    yield service
+    service.reset()
 
 
 @pytest.fixture

@@ -78,3 +78,12 @@ class SyncTriggerMode(StrEnum):
 
     IMMEDIATE = "immediate"
     DEFERRED = "deferred"
+
+
+class AuthType(StrEnum):
+    """Authentication type for an integration connection."""
+
+    OAUTH2 = "oauth2"
+    API_KEY = "api_key"
+    BASIC = "basic"
+    NONE = "none"

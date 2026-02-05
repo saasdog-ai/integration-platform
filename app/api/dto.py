@@ -51,12 +51,14 @@ class PaginatedResponse(BaseModel):
 # =============================================================================
 
 
-class OAuthConfigResponse(BaseResponse):
-    """OAuth configuration for an integration."""
+class ConnectionConfigResponse(BaseResponse):
+    """Connection/authentication configuration for an integration."""
 
-    authorization_url: str
-    token_url: str
-    scopes: list[str]
+    auth_type: str = "oauth2"
+    authorization_url: str | None = None
+    token_url: str | None = None
+    scopes: list[str] = []
+    api_key_header_name: str | None = None
 
 
 class AvailableIntegrationResponse(BaseResponse):
@@ -67,7 +69,7 @@ class AvailableIntegrationResponse(BaseResponse):
     type: str
     description: str | None
     supported_entities: list[str]
-    oauth_config: OAuthConfigResponse | None
+    connection_config: ConnectionConfigResponse | None
     is_active: bool
 
 
@@ -361,7 +363,7 @@ class CreateAvailableIntegrationRequest(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     type: str = Field(min_length=1, max_length=50)
     description: str | None = None
-    oauth_config: dict[str, Any] | None = None
+    connection_config: dict[str, Any] | None = None
     supported_entities: list[str] = Field(default_factory=list)
     is_active: bool = True
 
@@ -372,6 +374,6 @@ class UpdateAvailableIntegrationRequest(BaseModel):
     name: str | None = None
     type: str | None = None
     description: str | None = None
-    oauth_config: dict[str, Any] | None = None
+    connection_config: dict[str, Any] | None = None
     supported_entities: list[str] | None = None
     is_active: bool | None = None

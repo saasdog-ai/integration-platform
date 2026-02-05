@@ -7,7 +7,6 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.auth.jwt import verify_token
-from app.core.config import get_settings
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -36,10 +35,10 @@ async def get_current_client(
     When auth is disabled (development), uses a fixed test client ID.
     When auth is enabled, requires valid JWT token with client_id claim.
     """
-    settings = get_settings()
+    from app.core.dependency_injection import get_container
 
     # Development mode: auth disabled
-    if not settings.auth_enabled:
+    if not get_container().feature_flag_service.is_auth_enabled():
         # Use a consistent test client ID in development
         # This is safer than random UUID - at least data is consistent
         test_client_id = UUID("cccccccc-cccc-cccc-cccc-cccccccccccc")

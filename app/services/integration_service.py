@@ -143,8 +143,8 @@ class IntegrationService:
         """
         integration = await self.get_available_integration(integration_id)
 
-        if not integration.oauth_config:
-            raise ValidationError(f"Integration {integration.name} does not support OAuth")
+        if not integration.connection_config:
+            raise ValidationError(f"Integration {integration.name} has no connection config")
 
         # Validate redirect_uri against whitelist if provided
         if allowed_redirect_uris:
@@ -170,23 +170,23 @@ class IntegrationService:
             )
 
         # Build authorization URL with proper URL encoding
-        oauth_config = integration.oauth_config
+        connection_config = integration.connection_config
         params = {
             "response_type": "code",
             "redirect_uri": redirect_uri,
-            "scope": " ".join(oauth_config.scopes),
+            "scope": " ".join(connection_config.scopes),
         }
 
         # Add OAuth client_id from config if available
-        if oauth_config.client_id:
-            params["client_id"] = oauth_config.client_id
+        if connection_config.client_id:
+            params["client_id"] = connection_config.client_id
 
         if state:
             params["state"] = state
 
         # Use urlencode for proper URL encoding (prevents injection attacks)
         query = urlencode(params)
-        auth_url = f"{oauth_config.authorization_url}?{query}"
+        auth_url = f"{connection_config.authorization_url}?{query}"
 
         logger.info(
             "Generated OAuth authorization URL",
@@ -256,7 +256,9 @@ class IntegrationService:
                     "redirect_uri": redirect_uri,
                 },
             )
-            tokens = await adapter.authenticate(auth_code, redirect_uri, integration.oauth_config)
+            tokens = await adapter.authenticate(
+                auth_code, redirect_uri, integration.connection_config
+            )
             logger.info(
                 "OAuth callback: token exchange succeeded",
                 extra={
@@ -444,9 +446,11 @@ class IntegrationService:
             refresh_token=credentials_dict.get("refresh_token"),
             token_type=credentials_dict.get("token_type", "Bearer"),
             expires_in=credentials_dict.get("expires_in"),
-            expires_at=datetime.fromisoformat(credentials_dict["expires_at"])
-            if credentials_dict.get("expires_at")
-            else None,
+            expires_at=(
+                datetime.fromisoformat(credentials_dict["expires_at"])
+                if credentials_dict.get("expires_at")
+                else None
+            ),
             scope=credentials_dict.get("scope"),
         )
 
@@ -480,7 +484,7 @@ class IntegrationService:
                 user_integration.external_account_id,
             )
             new_tokens = await adapter.refresh_token(
-                current_tokens.refresh_token, integration.oauth_config
+                current_tokens.refresh_token, integration.connection_config
             )
         except Exception as e:
             # Sanitize error to avoid credential exposure in logs

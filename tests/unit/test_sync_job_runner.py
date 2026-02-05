@@ -26,6 +26,7 @@ from app.infrastructure.queue.memory_queue import InMemoryQueue
 from app.services.sync_job_runner import SyncJobRunner
 from tests.mocks.adapters import MockAdapterFactory
 from tests.mocks.encryption import MockEncryptionService
+from tests.mocks.feature_flags import MockFeatureFlagService
 from tests.mocks.repositories import (
     MockIntegrationRepository,
     MockIntegrationStateRepository,
@@ -78,6 +79,14 @@ def mock_adapter_factory():
     factory = MockAdapterFactory()
     yield factory
     factory.clear()
+
+
+@pytest.fixture
+def mock_feature_flags():
+    """Create mock feature flag service."""
+    service = MockFeatureFlagService()
+    yield service
+    service.reset()
 
 
 @pytest.fixture
@@ -138,6 +147,7 @@ def job_runner(
     mock_state_repo,
     mock_encryption,
     mock_adapter_factory,
+    mock_feature_flags,
 ):
     """Create a sync job runner."""
     return SyncJobRunner(
@@ -148,6 +158,7 @@ def job_runner(
         encryption_service=mock_encryption,
         adapter_factory=mock_adapter_factory,
         max_workers=2,
+        feature_flags=mock_feature_flags,
     )
 
 
@@ -352,28 +363,26 @@ class TestProcessMessage:
 class TestStuckJobHandling:
     """Tests for stuck job detection and termination."""
 
-    async def test_check_stuck_jobs_disabled(self, job_runner):
+    async def test_check_stuck_jobs_disabled(self, job_runner, mock_feature_flags):
         """Test stuck job check when termination is disabled."""
-        with patch("app.core.config.get_settings") as mock_settings:
-            mock_settings.return_value.job_termination_enabled = False
+        mock_feature_flags.job_termination_enabled = False
 
-            await job_runner._check_stuck_jobs()
-            # Should return early without error
+        await job_runner._check_stuck_jobs()
+        # Should return early without error
 
-    async def test_check_stuck_jobs_rate_limited(self, job_runner):
+    async def test_check_stuck_jobs_rate_limited(self, job_runner, mock_feature_flags):
         """Test stuck job check is rate limited."""
         job_runner._last_stuck_job_check = 999999999999  # Far future
+        mock_feature_flags.job_termination_enabled = True
 
-        with patch("app.core.config.get_settings") as mock_settings:
-            mock_settings.return_value.job_termination_enabled = True
-
-            await job_runner._check_stuck_jobs()
-            # Should return early due to rate limiting
+        await job_runner._check_stuck_jobs()
+        # Should return early due to rate limiting
 
     async def test_terminates_stuck_jobs(
         self,
         job_runner,
         mock_job_repo,
+        mock_feature_flags,
         sample_client_id,
         sample_integration,
     ):
@@ -394,9 +403,9 @@ class TestStuckJobHandling:
         await mock_job_repo.create_job(job)
 
         job_runner._last_stuck_job_check = 0  # Force check
+        mock_feature_flags.job_termination_enabled = True
 
         with patch("app.services.sync_job_runner.get_settings") as mock_settings:
-            mock_settings.return_value.job_termination_enabled = True
             mock_settings.return_value.job_stuck_timeout_minutes = 60
 
             await job_runner._check_stuck_jobs()
@@ -507,6 +516,7 @@ class TestGlobalDisable:
         self,
         job_runner,
         mock_job_repo,
+        mock_feature_flags,
         sample_client_id,
         sample_integration,
     ):
@@ -536,8 +546,9 @@ class TestGlobalDisable:
             attributes={"ApproximateReceiveCount": "1"},
         )
 
+        mock_feature_flags.sync_globally_disabled = True
+
         with patch("app.services.sync_job_runner.get_settings") as mock_settings:
-            mock_settings.return_value.sync_globally_disabled = True
             mock_settings.return_value.queue_max_receive_count = 3
 
             await job_runner._process_message(message)

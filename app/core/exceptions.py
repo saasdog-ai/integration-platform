@@ -67,9 +67,9 @@ class ConflictError(ApplicationError):
         super().__init__(
             message=message,
             code="CONFLICT",
-            details={"resource_type": resource_type, **(details or {})}
-            if resource_type
-            else details,
+            details=(
+                {"resource_type": resource_type, **(details or {})} if resource_type else details
+            ),
         )
 
 

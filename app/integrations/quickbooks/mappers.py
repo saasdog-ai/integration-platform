@@ -179,9 +179,9 @@ def map_bill_inbound(qbo_data: dict) -> dict:
         "amount": total,
         "date": _parse_qbo_timestamp(qbo_data.get("TxnDate")),
         "due_date": _parse_qbo_timestamp(qbo_data.get("DueDate")),
-        "paid_on_date": _parse_qbo_timestamp(meta.get("LastUpdatedTime"))
-        if status == "paid"
-        else None,
+        "paid_on_date": (
+            _parse_qbo_timestamp(meta.get("LastUpdatedTime")) if status == "paid" else None
+        ),
         "description": (line_items[0]["description"] if line_items else None),
         "currency": (qbo_data.get("CurrencyRef") or {}).get("value", "USD"),
         "status": status,
@@ -304,9 +304,9 @@ def map_invoice_inbound(qbo_data: dict) -> dict:
         "contact_name": customer_ref.get("name"),
         "issue_date": _parse_qbo_timestamp(qbo_data.get("TxnDate")),
         "due_date": _parse_qbo_timestamp(qbo_data.get("DueDate")),
-        "paid_on_date": _parse_qbo_timestamp(meta.get("LastUpdatedTime"))
-        if status == "PAID"
-        else None,
+        "paid_on_date": (
+            _parse_qbo_timestamp(meta.get("LastUpdatedTime")) if status == "PAID" else None
+        ),
         "memo": qbo_data.get("PrivateNote"),
         "currency": (qbo_data.get("CurrencyRef") or {}).get("value", "USD"),
         "exchange_rate": None,

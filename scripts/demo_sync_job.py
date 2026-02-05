@@ -31,7 +31,7 @@ from app.core.logging import get_logger
 from app.domain.entities import (
     AvailableIntegration,
     EntitySyncRequest,
-    OAuthConfig,
+    ConnectionConfig,
     SyncJob,
     SyncJobMessage,
     SyncRule,
@@ -92,7 +92,7 @@ async def setup_mock_data(
         type="erp",
         description="Intuit QuickBooks Online accounting software",
         supported_entities=["vendor", "bill", "invoice", "customer", "chart_of_accounts", "payment"],
-        oauth_config=OAuthConfig(
+        connection_config=ConnectionConfig(
             authorization_url="https://appcenter.intuit.com/connect/oauth2",
             token_url="https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer",
             scopes=["com.intuit.quickbooks.accounting"],
@@ -111,7 +111,7 @@ async def setup_mock_data(
         type="erp",
         description="Xero cloud accounting platform",
         supported_entities=["bill", "invoice", "contact", "account", "payment"],
-        oauth_config=OAuthConfig(
+        connection_config=ConnectionConfig(
             authorization_url="https://login.xero.com/identity/connect/authorize",
             token_url="https://identity.xero.com/connect/token",
             scopes=["accounting.transactions", "accounting.contacts"],

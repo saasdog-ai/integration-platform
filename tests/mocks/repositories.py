@@ -39,7 +39,7 @@ class MockIntegrationRepository(IntegrationRepositoryInterface):
         type: str = "erp",
         supported_entities: list[str] | None = None,
         is_active: bool = True,
-        oauth_config: Any | None = None,
+        connection_config: Any | None = None,
     ) -> AvailableIntegration:
         """Seed an available integration for testing."""
         integration = AvailableIntegration(
@@ -48,7 +48,7 @@ class MockIntegrationRepository(IntegrationRepositoryInterface):
             type=type,
             description=f"Test {name} integration",
             supported_entities=supported_entities or ["bill", "invoice", "vendor"],
-            oauth_config=oauth_config,
+            connection_config=connection_config,
             is_active=is_active,
             created_at=datetime.now(UTC),
             updated_at=datetime.now(UTC),

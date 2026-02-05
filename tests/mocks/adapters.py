@@ -78,7 +78,7 @@ class MockIntegrationAdapter(IntegrationAdapterInterface):
         return record
 
     async def authenticate(
-        self, auth_code: str, redirect_uri: str, oauth_config=None
+        self, auth_code: str, redirect_uri: str, connection_config=None
     ) -> OAuthTokens:
         """Mock OAuth authentication."""
         self.authenticate_calls.append((auth_code, redirect_uri))
@@ -94,7 +94,7 @@ class MockIntegrationAdapter(IntegrationAdapterInterface):
             expires_at=datetime.now(UTC) + timedelta(seconds=3600),
         )
 
-    async def refresh_token(self, refresh_token: str, oauth_config=None) -> OAuthTokens:
+    async def refresh_token(self, refresh_token: str, connection_config=None) -> OAuthTokens:
         """Mock token refresh."""
         self.refresh_token_calls.append(refresh_token)
 

@@ -7,11 +7,11 @@ from uuid import UUID
 
 from app.domain.entities import (
     AvailableIntegration,
+    ConnectionConfig,
     EntitySyncStatus,
     ExternalRecord,
     IntegrationHistoryRecord,
     IntegrationStateRecord,
-    OAuthConfig,
     OAuthTokens,
     QueueMessage,
     SyncJob,
@@ -653,14 +653,14 @@ class IntegrationAdapterInterface(ABC):
 
     @abstractmethod
     async def authenticate(
-        self, auth_code: str, redirect_uri: str, oauth_config: OAuthConfig | None = None
+        self, auth_code: str, redirect_uri: str, connection_config: ConnectionConfig | None = None
     ) -> OAuthTokens:
         """Exchange auth code for tokens."""
         pass
 
     @abstractmethod
     async def refresh_token(
-        self, refresh_token: str, oauth_config: OAuthConfig | None = None
+        self, refresh_token: str, connection_config: ConnectionConfig | None = None
     ) -> OAuthTokens:
         """Refresh expired access token."""
         pass
@@ -737,3 +737,40 @@ class AdapterFactoryInterface(ABC):
     ) -> IntegrationAdapterInterface:
         """Return adapter for the given integration."""
         pass
+
+
+# =============================================================================
+# Feature Flag Interface
+# =============================================================================
+
+
+class FeatureFlagServiceInterface(ABC):
+    """Abstract interface for feature flag access.
+
+    Decouples feature flag reads from Settings so we can swap to
+    LaunchDarkly or an internal service later.
+    """
+
+    @abstractmethod
+    def is_sync_globally_disabled(self) -> bool: ...
+
+    @abstractmethod
+    def is_integration_disabled(self, integration_name: str) -> bool: ...
+
+    @abstractmethod
+    def get_disabled_integrations(self) -> list[str]: ...
+
+    @abstractmethod
+    def is_job_termination_enabled(self) -> bool: ...
+
+    @abstractmethod
+    def is_auth_enabled(self) -> bool: ...
+
+    @abstractmethod
+    def is_rate_limit_enabled(self) -> bool: ...
+
+    @abstractmethod
+    def is_job_runner_enabled(self) -> bool: ...
+
+    @abstractmethod
+    def is_scheduler_enabled(self) -> bool: ...

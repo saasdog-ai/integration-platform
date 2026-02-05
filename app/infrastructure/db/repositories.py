@@ -10,10 +10,10 @@ from sqlalchemy.orm import selectinload
 
 from app.domain.entities import (
     AvailableIntegration,
+    ConnectionConfig,
     EntitySyncStatus,
     IntegrationHistoryRecord,
     IntegrationStateRecord,
-    OAuthConfig,
     SyncJob,
     SyncRule,
     UserIntegration,
@@ -51,9 +51,9 @@ def _model_to_available_integration(
     model: AvailableIntegrationModel,
 ) -> AvailableIntegration:
     """Convert model to domain entity."""
-    oauth_config = None
-    if model.oauth_config:
-        oauth_config = OAuthConfig(**model.oauth_config)
+    connection_config = None
+    if model.connection_config:
+        connection_config = ConnectionConfig(**model.connection_config)
 
     return AvailableIntegration(
         id=model.id,
@@ -61,7 +61,7 @@ def _model_to_available_integration(
         type=model.type,
         description=model.description,
         supported_entities=model.supported_entities or [],
-        oauth_config=oauth_config,
+        connection_config=connection_config,
         is_active=model.is_active,
         created_at=model.created_at,
         updated_at=model.updated_at,
@@ -288,8 +288,10 @@ class IntegrationRepository(IntegrationRepositoryInterface):
                 name=integration.name,
                 type=integration.type,
                 description=integration.description,
-                oauth_config=(
-                    integration.oauth_config.model_dump() if integration.oauth_config else None
+                connection_config=(
+                    integration.connection_config.model_dump()
+                    if integration.connection_config
+                    else None
                 ),
                 supported_entities=integration.supported_entities,
                 is_active=integration.is_active,
@@ -327,8 +329,10 @@ class IntegrationRepository(IntegrationRepositoryInterface):
             model.name = integration.name
             model.type = integration.type
             model.description = integration.description
-            model.oauth_config = (
-                integration.oauth_config.model_dump() if integration.oauth_config else None
+            model.connection_config = (
+                integration.connection_config.model_dump()
+                if integration.connection_config
+                else None
             )
             model.supported_entities = integration.supported_entities
             model.is_active = integration.is_active

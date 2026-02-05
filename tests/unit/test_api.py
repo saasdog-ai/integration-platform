@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from app.domain.entities import (
     AvailableIntegration,
-    OAuthConfig,
+    ConnectionConfig,
     SyncJob,
     SyncRule,
     UserIntegration,
@@ -50,7 +50,7 @@ def sample_available_integration(sample_integration_id):
         type="erp",
         description="QuickBooks Online integration",
         supported_entities=["bill", "invoice", "vendor"],
-        oauth_config=OAuthConfig(
+        connection_config=ConnectionConfig(
             authorization_url="https://appcenter.intuit.com/connect/oauth2",
             token_url="https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer",
             scopes=["com.intuit.quickbooks.accounting"],
@@ -223,7 +223,7 @@ class TestIntegrationsEndpoints:
         data = response.json()
         assert data["name"] == "QuickBooks Online"
         assert data["type"] == "erp"
-        assert "oauth_config" in data
+        assert "connection_config" in data
 
     def test_get_available_integration_not_found(
         self,

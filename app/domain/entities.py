@@ -4,9 +4,10 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.domain.enums import (
+    AuthType,
     ChangeSourceType,
     ConflictResolution,
     IntegrationStatus,
@@ -66,16 +67,31 @@ class SystemIntegrationSettings(BaseModel):
     default_sync_frequency: str | None = None
 
 
-class OAuthConfig(BaseModel):
-    """OAuth configuration for an integration."""
+class ConnectionConfig(BaseModel):
+    """Connection/authentication configuration for an integration."""
 
     model_config = ConfigDict(from_attributes=True)
 
-    authorization_url: str
-    token_url: str
+    auth_type: AuthType = AuthType.OAUTH2
+    authorization_url: str | None = None
+    token_url: str | None = None
     scopes: list[str] = Field(default_factory=list)
     client_id: str | None = None
     client_secret: str | None = None
+    api_key_header_name: str | None = None
+    api_key_env_var: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_fields_for_auth_type(self) -> "ConnectionConfig":
+        if self.auth_type == AuthType.OAUTH2:
+            if not self.authorization_url or not self.token_url:
+                raise ValueError(
+                    "authorization_url and token_url are required for OAuth2 auth_type"
+                )
+        elif self.auth_type == AuthType.API_KEY:
+            if not self.api_key_header_name:
+                raise ValueError("api_key_header_name is required for api_key auth_type")
+        return self
 
 
 class AvailableIntegration(BaseEntity):
@@ -85,7 +101,7 @@ class AvailableIntegration(BaseEntity):
     type: str  # "erp", "hris", "crm" - NOT an enum
     description: str | None = None
     supported_entities: list[str] = Field(default_factory=list)  # ["bill", "invoice", "vendor"]
-    oauth_config: OAuthConfig | None = None
+    connection_config: ConnectionConfig | None = None
     is_active: bool = True
 
 

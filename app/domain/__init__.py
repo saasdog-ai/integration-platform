@@ -3,10 +3,10 @@
 from app.domain.entities import (
     AvailableIntegration,
     BaseEntity,
+    ConnectionConfig,
     EntitySyncStatus,
     ExternalRecord,
     IntegrationStateRecord,
-    OAuthConfig,
     OAuthTokens,
     QueueMessage,
     SyncJob,
@@ -17,6 +17,7 @@ from app.domain.entities import (
     UserIntegrationSettings,
 )
 from app.domain.enums import (
+    AuthType,
     IntegrationStatus,
     RecordSyncStatus,
     SyncDirection,
@@ -27,6 +28,7 @@ from app.domain.enums import (
 from app.domain.interfaces import (
     AdapterFactoryInterface,
     EncryptionServiceInterface,
+    FeatureFlagServiceInterface,
     IntegrationAdapterInterface,
     IntegrationRepositoryInterface,
     IntegrationStateRepositoryInterface,
@@ -38,10 +40,10 @@ __all__ = [
     # Entities
     "AvailableIntegration",
     "BaseEntity",
+    "ConnectionConfig",
     "EntitySyncStatus",
     "ExternalRecord",
     "IntegrationStateRecord",
-    "OAuthConfig",
     "OAuthTokens",
     "QueueMessage",
     "SyncJob",
@@ -51,6 +53,7 @@ __all__ = [
     "UserIntegration",
     "UserIntegrationSettings",
     # Enums
+    "AuthType",
     "IntegrationStatus",
     "RecordSyncStatus",
     "SyncDirection",
@@ -60,6 +63,7 @@ __all__ = [
     # Interfaces
     "AdapterFactoryInterface",
     "EncryptionServiceInterface",
+    "FeatureFlagServiceInterface",
     "IntegrationAdapterInterface",
     "IntegrationRepositoryInterface",
     "IntegrationStateRepositoryInterface",

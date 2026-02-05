@@ -272,9 +272,9 @@ async def get_job_records(
                     internal_record_id=r.internal_record_id,
                     external_record_id=r.external_record_id,
                     sync_direction=r.sync_direction,
-                    sync_status=r.sync_status.value
-                    if hasattr(r.sync_status, "value")
-                    else r.sync_status,
+                    sync_status=(
+                        r.sync_status.value if hasattr(r.sync_status, "value") else r.sync_status
+                    ),
                     is_success=(r.sync_status == RecordSyncStatus.SYNCED),
                     updated_at=r.created_at,
                     error_code=r.error_code,

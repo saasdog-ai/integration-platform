@@ -8,6 +8,7 @@ from app.core.config import get_settings
 if TYPE_CHECKING:
     from app.domain.interfaces import (
         EncryptionServiceInterface,
+        FeatureFlagServiceInterface,
         IntegrationRepositoryInterface,
         IntegrationStateRepositoryInterface,
         MessageQueueInterface,
@@ -32,6 +33,7 @@ class DependencyContainer:
         self._integration_state_repo: IntegrationStateRepositoryInterface | None = None
         self._message_queue: MessageQueueInterface | None = None
         self._encryption_service: EncryptionServiceInterface | None = None
+        self._feature_flag_service: FeatureFlagServiceInterface | None = None
 
     @property
     def integration_repository(self) -> "IntegrationRepositoryInterface":
@@ -78,6 +80,15 @@ class DependencyContainer:
             self._encryption_service = get_encryption_service()
         return self._encryption_service
 
+    @property
+    def feature_flag_service(self) -> "FeatureFlagServiceInterface":
+        """Get the feature flag service."""
+        if self._feature_flag_service is None:
+            from app.infrastructure.feature_flags import ConfigFeatureFlagService
+
+            self._feature_flag_service = ConfigFeatureFlagService()
+        return self._feature_flag_service
+
     def override_integration_repository(self, repo: "IntegrationRepositoryInterface") -> None:
         """Override integration repository (for testing)."""
         self._integration_repo = repo
@@ -100,6 +111,10 @@ class DependencyContainer:
         """Override encryption service (for testing)."""
         self._encryption_service = service
 
+    def override_feature_flag_service(self, service: "FeatureFlagServiceInterface") -> None:
+        """Override feature flag service (for testing)."""
+        self._feature_flag_service = service
+
     def reset(self) -> None:
         """Reset all dependencies (useful for testing)."""
         self._integration_repo = None
@@ -107,6 +122,7 @@ class DependencyContainer:
         self._integration_state_repo = None
         self._message_queue = None
         self._encryption_service = None
+        self._feature_flag_service = None
 
 
 @lru_cache
