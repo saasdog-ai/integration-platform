@@ -300,14 +300,21 @@ class IntegrationStateModel(Base):
     """
     Record-level sync state.
 
-    NOTE: This table is designed to be partitioned by client_id in production.
-    The partition setup is handled in the Alembic migration.
+    This table is HASH-partitioned by client_id (16 partitions) for billion-row scale.
+    Partitioning enables:
+    - Partition pruning: queries scoped to a client only scan 1 partition
+    - Parallel query execution across partitions
+    - Per-partition maintenance (VACUUM, REINDEX)
+    - Future partition splitting without downtime
+
+    See migration 012_add_scaling_indexes.py for partition setup.
     """
 
     __tablename__ = "integration_state"
     __table_args__ = (
+        # Unique constraint on internal record ID (per client/integration/entity)
         Index(
-            "uq_integration_state_internal",
+            "uq_integration_state_part_internal",
             "client_id",
             "integration_id",
             "entity_type",
@@ -315,14 +322,9 @@ class IntegrationStateModel(Base):
             unique=True,
             postgresql_where="internal_record_id IS NOT NULL",
         ),
+        # Unique constraint on external record ID (per client/integration/entity)
         Index(
-            "ix_integration_state_pending",
-            "client_id",
-            "sync_status",
-            postgresql_where="sync_status IN ('pending', 'failed')",
-        ),
-        Index(
-            "uq_integration_state_external",
+            "uq_integration_state_part_external",
             "client_id",
             "integration_id",
             "entity_type",
@@ -330,8 +332,19 @@ class IntegrationStateModel(Base):
             unique=True,
             postgresql_where="external_record_id IS NOT NULL",
         ),
+        # Composite index for get_pending_records query
+        # Covers: WHERE client_id = ? AND integration_id = ? AND entity_type = ? AND sync_status = 'pending'
         Index(
-            "ix_integration_state_job",
+            "ix_integration_state_part_pending",
+            "client_id",
+            "integration_id",
+            "entity_type",
+            "sync_status",
+            postgresql_where="sync_status IN ('pending', 'failed')",
+        ),
+        # Index for job record lookup
+        Index(
+            "ix_integration_state_part_job",
             "client_id",
             "last_job_id",
             postgresql_where="last_job_id IS NOT NULL",
