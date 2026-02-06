@@ -18,6 +18,7 @@ from app.api.dto import (
     UserIntegrationResponse,
     UserIntegrationsResponse,
 )
+from app.auth.admin import require_admin_api_key
 from app.core.logging import get_logger
 from app.domain.entities import AvailableIntegration, ConnectionConfig, UserIntegration
 from app.domain.interfaces import (
@@ -27,7 +28,11 @@ from app.domain.interfaces import (
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/admin", tags=["admin"])
+router = APIRouter(
+    prefix="/admin",
+    tags=["admin"],
+    dependencies=[Depends(require_admin_api_key)],
+)
 
 
 def get_integration_repository() -> IntegrationRepositoryInterface:

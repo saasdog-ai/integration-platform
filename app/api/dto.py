@@ -119,7 +119,7 @@ class OAuthCallbackRequest(BaseModel):
 
     code: str
     redirect_uri: str
-    state: str | None = None
+    state: str  # Required for CSRF protection
     realm_id: str | None = None
 
 

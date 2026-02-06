@@ -15,6 +15,7 @@ from app.domain.entities import (
 )
 from app.domain.enums import IntegrationStatus
 from app.services.integration_service import IntegrationService
+from app.services.oauth_state_store import get_oauth_state_store
 from tests.mocks.adapters import MockIntegrationAdapter
 from tests.mocks.encryption import MockEncryptionService
 from tests.mocks.repositories import MockIntegrationRepository
@@ -170,13 +171,13 @@ class TestOAuthFlow:
             client_id=sample_client_id,
             integration_id=sample_integration.id,
             redirect_uri="https://app.example.com/callback",
-            state="csrf-token-123",
         )
 
         assert "oauth.example.com/authorize" in auth_url
         # URL-encoded redirect_uri for security
         assert "redirect_uri=https%3A%2F%2Fapp.example.com%2Fcallback" in auth_url
-        assert "state=csrf-token-123" in auth_url
+        # State is now auto-generated for CSRF protection
+        assert "state=" in auth_url
         # Scope with space encoded as + (urlencode default)
         assert "scope=read+write" in auth_url
 
@@ -221,6 +222,16 @@ class TestOAuthFlow:
         sample_integration,
     ):
         """Test completing OAuth callback."""
+        redirect_uri = "https://app.example.com/callback"
+
+        # Create a valid state using the state store (mimics what get_oauth_authorization_url does)
+        state_store = get_oauth_state_store()
+        state = state_store.create_state(
+            client_id=sample_client_id,
+            integration_id=sample_integration.id,
+            redirect_uri=redirect_uri,
+        )
+
         # Setup mock adapter
         mock_adapter = MockIntegrationAdapter()
         mock_adapter_factory.get_adapter.return_value = mock_adapter
@@ -230,7 +241,8 @@ class TestOAuthFlow:
             client_id=sample_client_id,
             integration_id=sample_integration.id,
             auth_code="auth_code_123",
-            redirect_uri="https://app.example.com/callback",
+            redirect_uri=redirect_uri,
+            state=state,
         )
 
         assert user_integration.status == IntegrationStatus.CONNECTED
@@ -249,6 +261,8 @@ class TestOAuthFlow:
         sample_integration,
     ):
         """Test completing OAuth callback updates existing integration."""
+        redirect_uri = "https://app.example.com/callback"
+
         # Create existing pending integration
         now = datetime.now(UTC)
         existing = UserIntegration(
@@ -261,6 +275,14 @@ class TestOAuthFlow:
         )
         await mock_repo.create_user_integration(existing)
 
+        # Create a valid state using the state store
+        state_store = get_oauth_state_store()
+        state = state_store.create_state(
+            client_id=sample_client_id,
+            integration_id=sample_integration.id,
+            redirect_uri=redirect_uri,
+        )
+
         # Setup mock adapter
         mock_adapter = MockIntegrationAdapter()
         mock_adapter_factory.get_adapter.return_value = mock_adapter
@@ -270,7 +292,8 @@ class TestOAuthFlow:
             client_id=sample_client_id,
             integration_id=sample_integration.id,
             auth_code="auth_code_123",
-            redirect_uri="https://app.example.com/callback",
+            redirect_uri=redirect_uri,
+            state=state,
         )
 
         assert user_integration.id == existing.id

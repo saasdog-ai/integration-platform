@@ -254,6 +254,7 @@ async def oauth_callback(
             integration_id=integration_id,
             auth_code=request.code,
             redirect_uri=request.redirect_uri,
+            state=request.state,
             realm_id=request.realm_id,
         )
         return _to_user_integration_response(user_integration)
@@ -262,6 +263,11 @@ async def oauth_callback(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Integration not found: {integration_id}",
         ) from None
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
     except IntegrationError as e:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,

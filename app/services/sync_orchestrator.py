@@ -13,6 +13,7 @@ from app.core.exceptions import (
     SyncError,
 )
 from app.core.logging import get_logger
+from app.core.utils import sanitize_error_for_log
 from app.domain.entities import (
     ChangeEvent,
     EntitySyncRequest,
@@ -535,11 +536,20 @@ class SyncOrchestrator:
                     creds_dict,
                 )
             except Exception as e:
+                # Sanitize error before including in logs or exception message
+                sanitized_error = sanitize_error_for_log(e)
+                logger.error(
+                    "Failed to decrypt credentials",
+                    extra={"error": sanitized_error, "client_id": str(job.client_id)},
+                )
                 if settings.app_env != "development":
-                    raise SyncError(f"Failed to decrypt credentials: {e}") from e
+                    raise SyncError(
+                        "Failed to access integration credentials. "
+                        "Please reconnect the integration."
+                    ) from e
                 logger.warning(
                     "Using mock token - credential decryption failed in dev mode",
-                    extra={"error": str(e)},
+                    extra={"error": sanitized_error},
                 )
         elif settings.app_env != "development":
             raise SyncError("Integration credentials not found")

@@ -310,6 +310,7 @@ class TestIntegrationsEndpoints:
             json={
                 "code": "auth_code_123",
                 "redirect_uri": "https://app.example.com/callback",
+                "state": "valid-csrf-state-token",  # Required for CSRF protection
             },
         )
         assert response.status_code == 200

@@ -115,6 +115,9 @@ class Settings(BaseSettings):
     rate_limit_requests_per_minute: int = Field(default=60)  # Max requests per minute per client
     rate_limit_burst: int = Field(default=10)  # Allow short bursts above limit
 
+    # Admin API Authentication
+    admin_api_key: str | None = Field(default=None)
+
     # CORS
     cors_allowed_origins: list[str] = Field(
         default=["http://localhost:3000", "http://localhost:3001", "http://localhost:4000"]
@@ -183,6 +186,9 @@ class Settings(BaseSettings):
 
         if self.jwt_algorithm.startswith("RS") and not self.jwt_jwks_url:
             errors.append("JWT_JWKS_URL is required for RS256/RS384/RS512 algorithms")
+
+        if not self.admin_api_key:
+            errors.append("ADMIN_API_KEY must be set in production")
 
         if errors:
             raise ValueError(

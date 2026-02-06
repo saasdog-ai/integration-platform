@@ -32,6 +32,7 @@ class TestSettings:
             database_url="postgresql+asyncpg://test:test@localhost:5432/test",
             auth_enabled=True,
             jwt_secret_key="secure-production-key-123456",
+            admin_api_key="secure-admin-key-123456",
         )
 
         assert prod_settings.is_development is False

@@ -24,6 +24,7 @@ from app.domain.interfaces import (
     EncryptionServiceInterface,
     IntegrationRepositoryInterface,
 )
+from app.services.oauth_state_store import get_oauth_state_store
 
 logger = get_logger(__name__)
 
@@ -125,7 +126,7 @@ class IntegrationService:
         client_id: UUID,
         integration_id: UUID,
         redirect_uri: str,
-        state: str | None = None,
+        state: str | None = None,  # Now ignored - we generate our own
         allowed_redirect_uris: list[str] | None = None,
     ) -> str:
         """
@@ -135,7 +136,7 @@ class IntegrationService:
             client_id: The tenant/client ID.
             integration_id: The integration to connect.
             redirect_uri: OAuth redirect URI.
-            state: Optional state parameter for CSRF protection.
+            state: Ignored - state is now generated internally for CSRF protection.
             allowed_redirect_uris: Whitelist of allowed redirect URIs.
 
         Returns:
@@ -153,14 +154,6 @@ class IntegrationService:
                     f"Invalid redirect_uri. Must be one of: {', '.join(allowed_redirect_uris)}"
                 )
 
-        # Validate state parameter format if provided (prevent injection)
-        if state:
-            # State should be alphanumeric with limited special chars
-            if not re.match(r"^[a-zA-Z0-9_\-\.:]{1,256}$", state):
-                raise ValidationError(
-                    "Invalid state parameter. Must be alphanumeric with max 128 characters."
-                )
-
         # Check if already connected
         existing = await self._repo.get_user_integration(client_id, integration_id)
         if existing and existing.status == IntegrationStatus.CONNECTED:
@@ -169,20 +162,26 @@ class IntegrationService:
                 resource_type="UserIntegration",
             )
 
+        # Generate and store state for CSRF protection
+        state_store = get_oauth_state_store()
+        generated_state = state_store.create_state(
+            client_id=client_id,
+            integration_id=integration_id,
+            redirect_uri=redirect_uri,
+        )
+
         # Build authorization URL with proper URL encoding
         connection_config = integration.connection_config
         params = {
             "response_type": "code",
             "redirect_uri": redirect_uri,
             "scope": " ".join(connection_config.scopes),
+            "state": generated_state,
         }
 
         # Add OAuth client_id from config if available
         if connection_config.client_id:
             params["client_id"] = connection_config.client_id
-
-        if state:
-            params["state"] = state
 
         # Use urlencode for proper URL encoding (prevents injection attacks)
         query = urlencode(params)
@@ -204,6 +203,7 @@ class IntegrationService:
         integration_id: UUID,
         auth_code: str,
         redirect_uri: str,
+        state: str,
         realm_id: str | None = None,
         user_id: str | None = None,
     ) -> UserIntegration:
@@ -215,12 +215,30 @@ class IntegrationService:
             integration_id: The integration being connected.
             auth_code: The authorization code from OAuth callback.
             redirect_uri: The redirect URI used in the authorization request.
+            state: The state parameter from OAuth callback (required for CSRF validation).
             realm_id: External account identifier (e.g. QBO realmId).
             user_id: Optional user ID for audit.
 
         Returns:
             The connected user integration.
         """
+        # Validate state FIRST (CSRF protection)
+        state_store = get_oauth_state_store()
+        state_entry = state_store.validate_and_consume(state, client_id)
+
+        if state_entry is None:
+            raise ValidationError(
+                "Invalid or expired OAuth state. Please restart the connection flow."
+            )
+
+        # Validate integration_id matches
+        if state_entry.integration_id != integration_id:
+            raise ValidationError("OAuth state mismatch. Please restart the connection flow.")
+
+        # Validate redirect_uri matches
+        if state_entry.redirect_uri != redirect_uri:
+            raise ValidationError("Redirect URI mismatch. Please restart the connection flow.")
+
         logger.info(
             "OAuth callback started",
             extra={
