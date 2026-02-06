@@ -26,6 +26,12 @@ variable "use_shared_infra" {
   default     = false
 }
 
+variable "shared_project_name" {
+  description = "Name prefix for shared resources (e.g., 'saasdog-ai'). Used when creating infrastructure that other projects can share."
+  type        = string
+  default     = "saasdog-ai"
+}
+
 # Shared infra variables (required when use_shared_infra = true)
 variable "shared_vpc_id" {
   description = "Shared VPC ID"

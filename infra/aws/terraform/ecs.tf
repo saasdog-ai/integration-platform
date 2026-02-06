@@ -51,12 +51,13 @@ resource "aws_cloudwatch_log_group" "ecs" {
 
 # =============================================================================
 # ECS Cluster - Only created in standalone mode
+# Uses shared_project_name for naming so other projects can reference it
 # =============================================================================
 
 resource "aws_ecs_cluster" "main" {
   count = var.use_shared_infra ? 0 : 1
 
-  name = "${var.app_name}-${var.environment}"
+  name = "${local.infra_name}-cluster-${var.environment}"
 
   setting {
     name  = "containerInsights"
@@ -64,7 +65,7 @@ resource "aws_ecs_cluster" "main" {
   }
 
   tags = {
-    Name = "${var.app_name}-${var.environment}"
+    Name = "${local.infra_name}-cluster-${var.environment}"
   }
 }
 

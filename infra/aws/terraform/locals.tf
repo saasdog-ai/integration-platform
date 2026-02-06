@@ -1,10 +1,20 @@
 # =============================================================================
 # Local values - resolve shared vs standalone resources
 # =============================================================================
+# This file enables the project to work in two modes:
+# 1. Standalone mode (use_shared_infra = false): Creates all resources
+# 2. Shared mode (use_shared_infra = true): Uses existing shared resources
+#
+# When creating shared infrastructure (standalone mode), resources are named
+# using shared_project_name so other projects can reference them with consistent names.
 
 locals {
   # Use shared or create standalone
   use_shared = var.use_shared_infra
+
+  # Resource naming for shared infrastructure (VPC, ECS cluster, RDS, security groups)
+  # Uses shared_project_name so multiple projects can share with consistent naming
+  infra_name = var.shared_project_name
 
   # VPC & Networking
   vpc_id             = local.use_shared ? var.shared_vpc_id : aws_vpc.main[0].id
@@ -17,7 +27,8 @@ locals {
   rds_security_group_id = local.use_shared ? var.shared_rds_security_group_id : aws_security_group.rds[0].id
 
   # ECS Cluster
-  ecs_cluster_arn = local.use_shared ? var.shared_ecs_cluster_arn : aws_ecs_cluster.main[0].arn
+  ecs_cluster_arn  = local.use_shared ? var.shared_ecs_cluster_arn : aws_ecs_cluster.main[0].arn
+  ecs_cluster_name = local.use_shared ? element(split("/", var.shared_ecs_cluster_arn), length(split("/", var.shared_ecs_cluster_arn)) - 1) : aws_ecs_cluster.main[0].name
 
   # RDS
   rds_endpoint              = local.use_shared ? var.shared_rds_endpoint : aws_db_instance.main[0].endpoint

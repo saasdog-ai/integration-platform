@@ -13,7 +13,11 @@ github_repository = "your-org/integration-platform"
 # Deployment Mode
 # =============================================================================
 
-# Option 1: Standalone deployment (creates all infrastructure)
+# Name prefix for shared resources when creating infrastructure
+# Other projects can reference resources using this name
+shared_project_name = "saasdog-ai"
+
+# Option 1: Standalone deployment (creates all infrastructure with shared_project_name prefix)
 use_shared_infra = false
 
 # Option 2: Use shared infrastructure (set use_shared_infra = true and provide values)

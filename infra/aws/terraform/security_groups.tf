@@ -6,7 +6,7 @@
 resource "aws_security_group" "alb" {
   count = var.use_shared_infra ? 0 : 1
 
-  name        = "${var.app_name}-${var.environment}-alb-sg"
+  name        = "${local.infra_name}-${var.environment}-alb-sg"
   description = "Security group for ALB"
   vpc_id      = local.vpc_id
 
@@ -34,7 +34,7 @@ resource "aws_security_group" "alb" {
   }
 
   tags = {
-    Name = "${var.app_name}-${var.environment}-alb-sg"
+    Name = "${local.infra_name}-${var.environment}-alb-sg"
   }
 }
 
@@ -42,7 +42,7 @@ resource "aws_security_group" "alb" {
 resource "aws_security_group" "ecs_tasks" {
   count = var.use_shared_infra ? 0 : 1
 
-  name        = "${var.app_name}-${var.environment}-ecs-tasks-sg"
+  name        = "${local.infra_name}-${var.environment}-ecs-tasks-sg"
   description = "Security group for ECS tasks"
   vpc_id      = local.vpc_id
 
@@ -62,7 +62,7 @@ resource "aws_security_group" "ecs_tasks" {
   }
 
   tags = {
-    Name = "${var.app_name}-${var.environment}-ecs-tasks-sg"
+    Name = "${local.infra_name}-${var.environment}-ecs-tasks-sg"
   }
 }
 
@@ -70,7 +70,7 @@ resource "aws_security_group" "ecs_tasks" {
 resource "aws_security_group" "rds" {
   count = var.use_shared_infra ? 0 : 1
 
-  name        = "${var.app_name}-${var.environment}-rds-sg"
+  name        = "${local.infra_name}-${var.environment}-rds-sg"
   description = "Security group for RDS"
   vpc_id      = local.vpc_id
 
@@ -90,6 +90,6 @@ resource "aws_security_group" "rds" {
   }
 
   tags = {
-    Name = "${var.app_name}-${var.environment}-rds-sg"
+    Name = "${local.infra_name}-${var.environment}-rds-sg"
   }
 }

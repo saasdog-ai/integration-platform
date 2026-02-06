@@ -10,7 +10,7 @@ resource "aws_vpc" "main" {
   enable_dns_support   = true
 
   tags = {
-    Name = "${var.app_name}-${var.environment}-vpc"
+    Name = "${local.infra_name}-${var.environment}-vpc"
   }
 }
 
@@ -20,7 +20,7 @@ resource "aws_internet_gateway" "main" {
   vpc_id = aws_vpc.main[0].id
 
   tags = {
-    Name = "${var.app_name}-${var.environment}-igw"
+    Name = "${local.infra_name}-${var.environment}-igw"
   }
 }
 
@@ -34,7 +34,7 @@ resource "aws_subnet" "public" {
   map_public_ip_on_launch = true
 
   tags = {
-    Name = "${var.app_name}-${var.environment}-public-${count.index + 1}"
+    Name = "${local.infra_name}-${var.environment}-public-${count.index + 1}"
     Type = "public"
   }
 }
@@ -48,7 +48,7 @@ resource "aws_subnet" "private" {
   availability_zone = var.availability_zones[count.index]
 
   tags = {
-    Name = "${var.app_name}-${var.environment}-private-${count.index + 1}"
+    Name = "${local.infra_name}-${var.environment}-private-${count.index + 1}"
     Type = "private"
   }
 }
@@ -60,7 +60,7 @@ resource "aws_eip" "nat" {
   domain = "vpc"
 
   tags = {
-    Name = "${var.app_name}-${var.environment}-nat-eip"
+    Name = "${local.infra_name}-${var.environment}-nat-eip"
   }
 
   depends_on = [aws_internet_gateway.main]
@@ -73,7 +73,7 @@ resource "aws_nat_gateway" "main" {
   subnet_id     = aws_subnet.public[0].id
 
   tags = {
-    Name = "${var.app_name}-${var.environment}-nat"
+    Name = "${local.infra_name}-${var.environment}-nat"
   }
 
   depends_on = [aws_internet_gateway.main]
@@ -91,7 +91,7 @@ resource "aws_route_table" "public" {
   }
 
   tags = {
-    Name = "${var.app_name}-${var.environment}-public-rt"
+    Name = "${local.infra_name}-${var.environment}-public-rt"
   }
 }
 
@@ -106,7 +106,7 @@ resource "aws_route_table" "private" {
   }
 
   tags = {
-    Name = "${var.app_name}-${var.environment}-private-rt"
+    Name = "${local.infra_name}-${var.environment}-private-rt"
   }
 }
 

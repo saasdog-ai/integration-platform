@@ -37,18 +37,18 @@ resource "aws_secretsmanager_secret_version" "db_password" {
 resource "aws_db_subnet_group" "main" {
   count = var.use_shared_infra ? 0 : 1
 
-  name       = "${var.app_name}-${var.environment}-db-subnet"
+  name       = "${local.infra_name}-${var.environment}-db-subnet"
   subnet_ids = local.private_subnet_ids
 
   tags = {
-    Name = "${var.app_name}-${var.environment}-db-subnet"
+    Name = "${local.infra_name}-${var.environment}-db-subnet"
   }
 }
 
 resource "aws_db_parameter_group" "main" {
   count = var.use_shared_infra ? 0 : 1
 
-  name   = "${var.app_name}-${var.environment}-pg15"
+  name   = "${local.infra_name}-${var.environment}-pg15"
   family = "postgres15"
 
   parameter {
@@ -62,14 +62,14 @@ resource "aws_db_parameter_group" "main" {
   }
 
   tags = {
-    Name = "${var.app_name}-${var.environment}-pg15"
+    Name = "${local.infra_name}-${var.environment}-pg15"
   }
 }
 
 resource "aws_db_instance" "main" {
   count = var.use_shared_infra ? 0 : 1
 
-  identifier = "${var.app_name}-${var.environment}"
+  identifier = "${local.infra_name}-${var.environment}"
 
   engine         = "postgres"
   engine_version = "15"
@@ -101,6 +101,6 @@ resource "aws_db_instance" "main" {
   performance_insights_enabled = var.environment == "prod"
 
   tags = {
-    Name = "${var.app_name}-${var.environment}"
+    Name = "${local.infra_name}-${var.environment}"
   }
 }
