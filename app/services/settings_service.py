@@ -121,6 +121,9 @@ class SettingsService:
             },
         )
 
+        # Refresh scheduler if settings affect scheduling (auto_sync or sync_frequency)
+        await self._refresh_scheduler_if_enabled()
+
         return updated
 
     async def get_system_settings(
@@ -226,6 +229,21 @@ class SettingsService:
         """
         settings = await self.get_user_settings(client_id, integration_id)
         return settings.auto_sync_enabled
+
+    async def _refresh_scheduler_if_enabled(self) -> None:
+        """Refresh the scheduler if it's enabled."""
+        try:
+            from app.core.dependency_injection import get_container
+
+            container = get_container()
+            if container.feature_flag_service.is_scheduler_enabled():
+                await container.scheduler.refresh_schedules()
+        except Exception as e:
+            # Log but don't fail the settings update
+            logger.warning(
+                "Failed to refresh scheduler after settings update",
+                extra={"error": str(e)},
+            )
 
     def _validate_cron_expression(self, cron_expr: str) -> None:
         """

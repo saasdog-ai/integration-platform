@@ -34,6 +34,7 @@ from app.domain.interfaces import (
     IntegrationStateRepositoryInterface,
     MessageQueueInterface,
     SyncJobRepositoryInterface,
+    SyncSchedulerInterface,
 )
 
 __all__ = [
@@ -69,4 +70,5 @@ __all__ = [
     "IntegrationStateRepositoryInterface",
     "MessageQueueInterface",
     "SyncJobRepositoryInterface",
+    "SyncSchedulerInterface",
 ]

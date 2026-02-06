@@ -7,6 +7,7 @@ from tests.mocks.repositories import (
     MockIntegrationStateRepository,
     MockSyncJobRepository,
 )
+from tests.mocks.scheduler import MockSyncScheduler
 
 __all__ = [
     "MockAdapterFactory",
@@ -15,4 +16,5 @@ __all__ = [
     "MockIntegrationRepository",
     "MockIntegrationStateRepository",
     "MockSyncJobRepository",
+    "MockSyncScheduler",
 ]

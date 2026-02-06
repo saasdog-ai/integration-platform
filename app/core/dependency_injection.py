@@ -13,6 +13,7 @@ if TYPE_CHECKING:
         IntegrationStateRepositoryInterface,
         MessageQueueInterface,
         SyncJobRepositoryInterface,
+        SyncSchedulerInterface,
     )
 
 
@@ -34,6 +35,7 @@ class DependencyContainer:
         self._message_queue: MessageQueueInterface | None = None
         self._encryption_service: EncryptionServiceInterface | None = None
         self._feature_flag_service: FeatureFlagServiceInterface | None = None
+        self._scheduler: SyncSchedulerInterface | None = None
 
     @property
     def integration_repository(self) -> "IntegrationRepositoryInterface":
@@ -115,6 +117,37 @@ class DependencyContainer:
         """Override feature flag service (for testing)."""
         self._feature_flag_service = service
 
+    @property
+    def scheduler(self) -> "SyncSchedulerInterface":
+        """Get the sync scheduler."""
+        if self._scheduler is None:
+            from app.infrastructure.adapters.factory import get_adapter_factory
+            from app.infrastructure.scheduling import SyncScheduler
+            from app.services.sync_orchestrator import SyncOrchestrator
+
+            # Create orchestrator for the scheduler to use
+            orchestrator = SyncOrchestrator(
+                integration_repo=self.integration_repository,
+                job_repo=self.sync_job_repository,
+                state_repo=self.integration_state_repository,
+                queue=self.message_queue,
+                encryption_service=self.encryption_service,
+                adapter_factory=get_adapter_factory(),
+                feature_flags=self.feature_flag_service,
+            )
+
+            self._scheduler = SyncScheduler(
+                integration_repo=self.integration_repository,
+                sync_orchestrator=orchestrator,
+                feature_flags=self.feature_flag_service,
+                timezone=self._settings.scheduler_timezone,
+            )
+        return self._scheduler
+
+    def override_scheduler(self, scheduler: "SyncSchedulerInterface") -> None:
+        """Override scheduler (for testing)."""
+        self._scheduler = scheduler
+
     def reset(self) -> None:
         """Reset all dependencies (useful for testing)."""
         self._integration_repo = None
@@ -123,6 +156,7 @@ class DependencyContainer:
         self._message_queue = None
         self._encryption_service = None
         self._feature_flag_service = None
+        self._scheduler = None
 
 
 @lru_cache

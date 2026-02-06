@@ -774,3 +774,42 @@ class FeatureFlagServiceInterface(ABC):
 
     @abstractmethod
     def is_scheduler_enabled(self) -> bool: ...
+
+
+# =============================================================================
+# Scheduler Interface
+# =============================================================================
+
+
+class SyncSchedulerInterface(ABC):
+    """Abstract interface for the sync job scheduler.
+
+    The scheduler reads user integration settings and triggers sync jobs
+    based on configured cron expressions.
+    """
+
+    @abstractmethod
+    async def start(self) -> None:
+        """Start the scheduler.
+
+        Loads all integrations with auto_sync_enabled=True and schedules
+        cron jobs based on their sync_frequency settings.
+        """
+        ...
+
+    @abstractmethod
+    async def stop(self) -> None:
+        """Stop the scheduler gracefully.
+
+        Waits for any currently executing jobs to complete before shutting down.
+        """
+        ...
+
+    @abstractmethod
+    async def refresh_schedules(self) -> None:
+        """Reload schedules from database.
+
+        Call this method after user settings change to update the scheduler
+        with new cron expressions or enabled/disabled states.
+        """
+        ...

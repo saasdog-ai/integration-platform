@@ -63,7 +63,9 @@ async def lifespan(app: FastAPI):
     # Start job runner as background task (shares in-memory queue with API)
     from app.core.dependency_injection import get_container
 
-    if get_container().feature_flag_service.is_job_runner_enabled():
+    container = get_container()
+
+    if container.feature_flag_service.is_job_runner_enabled():
         _job_runner_task = asyncio.create_task(_run_job_runner())
         _job_runner_watchdog = asyncio.create_task(_watch_job_runner())
         logger.info(
@@ -71,11 +73,26 @@ async def lifespan(app: FastAPI):
             extra={"max_workers": settings.job_runner_max_workers},
         )
 
+    # Start scheduler if enabled
+    if container.feature_flag_service.is_scheduler_enabled():
+        scheduler = container.scheduler
+        await scheduler.start()
+        logger.info(
+            "Scheduler started",
+            extra={"timezone": settings.scheduler_timezone},
+        )
+
     yield
 
     # Shutdown
     _shutdown_requested = True
     logger.info("Shutting down application...")
+
+    # Stop scheduler
+    if container.feature_flag_service.is_scheduler_enabled():
+        logger.info("Stopping scheduler...")
+        await container.scheduler.stop()
+        logger.info("Scheduler stopped")
 
     # Stop watchdog
     if _job_runner_watchdog and not _job_runner_watchdog.done():
