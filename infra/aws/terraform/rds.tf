@@ -25,13 +25,8 @@ resource "aws_secretsmanager_secret_version" "db_password" {
   count = var.use_shared_infra ? 0 : 1
 
   secret_id = aws_secretsmanager_secret.db_password[0].id
-  secret_string = jsonencode({
-    username = var.db_username
-    password = random_password.db_password[0].result
-    host     = aws_db_instance.main[0].address
-    port     = 5432
-    dbname   = var.db_name
-  })
+  # Store as DATABASE_URL connection string for direct use by application
+  secret_string = "postgresql+asyncpg://${var.db_username}:${urlencode(random_password.db_password[0].result)}@${aws_db_instance.main[0].address}:5432/${var.db_name}"
 }
 
 resource "aws_db_subnet_group" "main" {
