@@ -164,11 +164,14 @@ class IntegrationService:
 
         # Generate and store state for CSRF protection
         state_store = get_oauth_state_store()
-        generated_state = state_store.create_state(
+        csrf_token = state_store.create_state(
             client_id=client_id,
             integration_id=integration_id,
             redirect_uri=redirect_uri,
         )
+
+        # Format state as {integrationId}:{csrfToken} for UI parsing
+        formatted_state = f"{integration_id}:{csrf_token}"
 
         # Build authorization URL with proper URL encoding
         connection_config = integration.connection_config
@@ -176,7 +179,7 @@ class IntegrationService:
             "response_type": "code",
             "redirect_uri": redirect_uri,
             "scope": " ".join(connection_config.scopes),
-            "state": generated_state,
+            "state": formatted_state,
         }
 
         # Add OAuth client_id from config if available
