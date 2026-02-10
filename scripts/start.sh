@@ -9,6 +9,11 @@ if [ -n "$DATABASE_URL" ]; then
   DB_NAME=$(echo "$SYNC_URL" | sed 's|.*/||')
   BASE_URL=$(echo "$SYNC_URL" | sed "s|/$DB_NAME$|/postgres|")
 
+  # Add sslmode=require for RDS connections
+  if [[ "$BASE_URL" == *"rds.amazonaws.com"* ]]; then
+    BASE_URL="${BASE_URL}?sslmode=require"
+  fi
+
   echo "Checking if database '$DB_NAME' exists..."
   if ! psql "$BASE_URL" -tAc "SELECT 1 FROM pg_database WHERE datname='$DB_NAME'" | grep -q 1; then
     echo "Creating database '$DB_NAME'..."
