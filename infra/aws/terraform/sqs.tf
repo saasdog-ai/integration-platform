@@ -1,6 +1,9 @@
-# SQS Queue for sync jobs
+# -----------------------------------------------------------------------------
+# SQS Queues for Sync Jobs
+# -----------------------------------------------------------------------------
+
 resource "aws_sqs_queue" "sync_jobs" {
-  name                       = "${var.app_name}-${var.environment}-sync-jobs"
+  name                       = "${local.name_prefix}-sync-jobs-${var.environment}"
   delay_seconds              = 0
   max_message_size           = 262144  # 256 KB
   message_retention_seconds  = 1209600 # 14 days
@@ -16,20 +19,20 @@ resource "aws_sqs_queue" "sync_jobs" {
     maxReceiveCount     = 3
   })
 
-  tags = {
-    Name = "${var.app_name}-${var.environment}-sync-jobs"
-  }
+  tags = merge(local.common_tags, {
+    Name = "${local.name_prefix}-sync-jobs-${var.environment}"
+  })
 }
 
 # Dead Letter Queue
 resource "aws_sqs_queue" "sync_jobs_dlq" {
-  name                      = "${var.app_name}-${var.environment}-sync-jobs-dlq"
+  name                      = "${local.name_prefix}-sync-jobs-dlq-${var.environment}"
   message_retention_seconds = 1209600 # 14 days
   sqs_managed_sse_enabled   = true
 
-  tags = {
-    Name = "${var.app_name}-${var.environment}-sync-jobs-dlq"
-  }
+  tags = merge(local.common_tags, {
+    Name = "${local.name_prefix}-sync-jobs-dlq-${var.environment}"
+  })
 }
 
 # SQS Queue Policy

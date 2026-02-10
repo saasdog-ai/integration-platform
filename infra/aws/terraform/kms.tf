@@ -1,13 +1,11 @@
-# =============================================================================
-# KMS - Created unless a shared KMS key is provided
-# =============================================================================
+# -----------------------------------------------------------------------------
+# KMS Key for Credential Encryption
+# -----------------------------------------------------------------------------
 
 data "aws_caller_identity" "current" {}
 
 resource "aws_kms_key" "credentials" {
-  count = local.create_kms ? 1 : 0
-
-  description             = "KMS key for encrypting integration credentials"
+  description             = "KMS key for encrypting ${var.app_name} integration credentials"
   deletion_window_in_days = var.enable_deletion_protection ? 30 : 7
   enable_key_rotation     = true
 
@@ -40,14 +38,12 @@ resource "aws_kms_key" "credentials" {
     ]
   })
 
-  tags = {
-    Name = "${var.app_name}-${var.environment}-credentials-key"
-  }
+  tags = merge(local.common_tags, {
+    Name = "${local.name_prefix}-credentials-key-${var.environment}"
+  })
 }
 
 resource "aws_kms_alias" "credentials" {
-  count = local.create_kms ? 1 : 0
-
-  name          = "alias/${var.app_name}-${var.environment}-credentials"
-  target_key_id = aws_kms_key.credentials[0].key_id
+  name          = "alias/${local.name_prefix}-credentials-${var.environment}"
+  target_key_id = aws_kms_key.credentials.key_id
 }

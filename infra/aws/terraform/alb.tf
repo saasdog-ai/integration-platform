@@ -1,23 +1,23 @@
-# =============================================================================
-# ALB - Always created (project-specific, even with shared infra)
-# =============================================================================
+# -----------------------------------------------------------------------------
+# Application Load Balancer
+# -----------------------------------------------------------------------------
 
 resource "aws_lb" "main" {
-  name               = "${var.app_name}-${var.environment}-alb"
+  name               = "saasdog-integ-alb-${var.environment}"  # Max 32 chars
   internal           = false
   load_balancer_type = "application"
-  security_groups    = [local.alb_security_group_id]
+  security_groups    = [aws_security_group.alb.id]
   subnets            = local.public_subnet_ids
 
   enable_deletion_protection = var.enable_deletion_protection
 
-  tags = {
-    Name = "${var.app_name}-${var.environment}-alb"
-  }
+  tags = merge(local.common_tags, {
+    Name = "${local.name_prefix}-alb-${var.environment}"
+  })
 }
 
 resource "aws_lb_target_group" "app" {
-  name        = "${var.app_name}-${var.environment}-tg"
+  name        = "saasdog-integ-tg-${var.environment}"  # Max 32 chars
   port        = var.container_port
   protocol    = "HTTP"
   vpc_id      = local.vpc_id
@@ -33,9 +33,9 @@ resource "aws_lb_target_group" "app" {
     matcher             = "200"
   }
 
-  tags = {
-    Name = "${var.app_name}-${var.environment}-tg"
-  }
+  tags = merge(local.common_tags, {
+    Name = "${local.name_prefix}-tg-${var.environment}"
+  })
 }
 
 resource "aws_lb_listener" "http" {

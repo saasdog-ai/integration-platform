@@ -1,13 +1,11 @@
-# =============================================================================
-# Security Groups - Only created in standalone mode (use_shared_infra = false)
-# =============================================================================
+# -----------------------------------------------------------------------------
+# Security Groups (Project-specific)
+# -----------------------------------------------------------------------------
 
 # ALB Security Group
 resource "aws_security_group" "alb" {
-  count = var.use_shared_infra ? 0 : 1
-
-  name        = "${local.infra_name}-${var.environment}-alb-sg"
-  description = "Security group for ALB"
+  name        = "${local.name_prefix}-alb-sg-${var.environment}"
+  description = "Security group for ${var.app_name} ALB"
   vpc_id      = local.vpc_id
 
   ingress {
@@ -33,17 +31,15 @@ resource "aws_security_group" "alb" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags = {
-    Name = "${local.infra_name}-${var.environment}-alb-sg"
-  }
+  tags = merge(local.common_tags, {
+    Name = "${local.name_prefix}-alb-sg-${var.environment}"
+  })
 }
 
 # ECS Tasks Security Group
 resource "aws_security_group" "ecs_tasks" {
-  count = var.use_shared_infra ? 0 : 1
-
-  name        = "${local.infra_name}-${var.environment}-ecs-tasks-sg"
-  description = "Security group for ECS tasks"
+  name        = "${local.name_prefix}-ecs-sg-${var.environment}"
+  description = "Security group for ${var.app_name} ECS tasks"
   vpc_id      = local.vpc_id
 
   ingress {
@@ -51,7 +47,7 @@ resource "aws_security_group" "ecs_tasks" {
     from_port       = var.container_port
     to_port         = var.container_port
     protocol        = "tcp"
-    security_groups = [aws_security_group.alb[0].id]
+    security_groups = [aws_security_group.alb.id]
   }
 
   egress {
@@ -61,35 +57,18 @@ resource "aws_security_group" "ecs_tasks" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags = {
-    Name = "${local.infra_name}-${var.environment}-ecs-tasks-sg"
-  }
+  tags = merge(local.common_tags, {
+    Name = "${local.name_prefix}-ecs-sg-${var.environment}"
+  })
 }
 
-# RDS Security Group
-resource "aws_security_group" "rds" {
-  count = var.use_shared_infra ? 0 : 1
-
-  name        = "${local.infra_name}-${var.environment}-rds-sg"
-  description = "Security group for RDS"
-  vpc_id      = local.vpc_id
-
-  ingress {
-    description     = "PostgreSQL from ECS"
-    from_port       = 5432
-    to_port         = 5432
-    protocol        = "tcp"
-    security_groups = [aws_security_group.ecs_tasks[0].id]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = {
-    Name = "${local.infra_name}-${var.environment}-rds-sg"
-  }
+# Allow ECS tasks to connect to shared RDS
+resource "aws_security_group_rule" "ecs_to_rds" {
+  type                     = "ingress"
+  from_port                = 5432
+  to_port                  = 5432
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.ecs_tasks.id
+  security_group_id        = local.rds_security_group_id
+  description              = "Allow ${var.app_name} ECS tasks to connect to RDS"
 }

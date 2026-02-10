@@ -1,10 +1,10 @@
-# =============================================================================
+# -----------------------------------------------------------------------------
 # IAM Roles and Policies for ECS Application Runtime
-# =============================================================================
+# -----------------------------------------------------------------------------
 
 # ECS Task Execution Role
 resource "aws_iam_role" "ecs_task_execution_role" {
-  name = "${var.app_name}-ecs-task-execution-${var.environment}"
+  name = "${local.name_prefix}-ecs-exec-${var.environment}"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -20,7 +20,7 @@ resource "aws_iam_role" "ecs_task_execution_role" {
   })
 
   tags = merge(local.common_tags, {
-    Name = "${var.app_name}-ecs-task-execution-${var.environment}"
+    Name = "${local.name_prefix}-ecs-exec-${var.environment}"
   })
 }
 
@@ -31,7 +31,7 @@ resource "aws_iam_role_policy_attachment" "ecs_task_execution_role_policy" {
 
 # Additional policy for Secrets Manager access
 resource "aws_iam_role_policy" "ecs_execution_secrets" {
-  name = "${var.app_name}-ecs-execution-secrets-${var.environment}"
+  name = "${local.name_prefix}-ecs-exec-secrets-${var.environment}"
   role = aws_iam_role.ecs_task_execution_role.id
 
   policy = jsonencode({
@@ -43,7 +43,7 @@ resource "aws_iam_role_policy" "ecs_execution_secrets" {
           "secretsmanager:GetSecretValue"
         ]
         Resource = [
-          local.db_credentials_secret_arn
+          aws_secretsmanager_secret.database_url.arn
         ]
       }
     ]
@@ -52,7 +52,7 @@ resource "aws_iam_role_policy" "ecs_execution_secrets" {
 
 # ECS Task Role (for application)
 resource "aws_iam_role" "ecs_task_role" {
-  name = "${var.app_name}-ecs-task-${var.environment}"
+  name = "${local.name_prefix}-ecs-task-${var.environment}"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -68,13 +68,13 @@ resource "aws_iam_role" "ecs_task_role" {
   })
 
   tags = merge(local.common_tags, {
-    Name = "${var.app_name}-ecs-task-${var.environment}"
+    Name = "${local.name_prefix}-ecs-task-${var.environment}"
   })
 }
 
 # Task role policy for SQS, KMS, and Secrets Manager
 resource "aws_iam_role_policy" "ecs_task_policy" {
-  name = "${var.app_name}-ecs-task-policy-${var.environment}"
+  name = "${local.name_prefix}-ecs-task-policy-${var.environment}"
   role = aws_iam_role.ecs_task_role.id
 
   policy = jsonencode({
@@ -106,7 +106,7 @@ resource "aws_iam_role_policy" "ecs_task_policy" {
           "kms:DescribeKey"
         ]
         Resource = [
-          local.kms_key_arn
+          aws_kms_key.credentials.arn
         ]
       },
       {
@@ -116,7 +116,7 @@ resource "aws_iam_role_policy" "ecs_task_policy" {
           "secretsmanager:GetSecretValue"
         ]
         Resource = [
-          local.db_credentials_secret_arn
+          aws_secretsmanager_secret.database_url.arn
         ]
       },
       {

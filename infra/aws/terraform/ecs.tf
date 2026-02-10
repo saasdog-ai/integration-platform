@@ -1,18 +1,18 @@
-# =============================================================================
-# ECR Repository (always created - project-specific)
-# =============================================================================
+# -----------------------------------------------------------------------------
+# ECR Repository
+# -----------------------------------------------------------------------------
 
 resource "aws_ecr_repository" "app" {
-  name                 = "${var.app_name}-${var.environment}"
+  name                 = "${local.name_prefix}-${var.environment}"
   image_tag_mutability = "MUTABLE"
 
   image_scanning_configuration {
     scan_on_push = true
   }
 
-  tags = {
-    Name = "${var.app_name}-${var.environment}"
-  }
+  tags = merge(local.common_tags, {
+    Name = "${local.name_prefix}-${var.environment}"
+  })
 }
 
 resource "aws_ecr_lifecycle_policy" "app" {
@@ -36,45 +36,25 @@ resource "aws_ecr_lifecycle_policy" "app" {
   })
 }
 
-# =============================================================================
-# CloudWatch Log Group (always created - project-specific)
-# =============================================================================
+# -----------------------------------------------------------------------------
+# CloudWatch Log Group
+# -----------------------------------------------------------------------------
 
 resource "aws_cloudwatch_log_group" "ecs" {
-  name              = "/ecs/${var.app_name}-${var.environment}"
+  name              = "/ecs/${local.name_prefix}-${var.environment}"
   retention_in_days = 30
 
-  tags = {
-    Name = "${var.app_name}-${var.environment}"
-  }
+  tags = merge(local.common_tags, {
+    Name = "${local.name_prefix}-${var.environment}"
+  })
 }
 
-# =============================================================================
-# ECS Cluster - Only created in standalone mode
-# Uses shared_project_name for naming so other projects can reference it
-# =============================================================================
-
-resource "aws_ecs_cluster" "main" {
-  count = var.use_shared_infra ? 0 : 1
-
-  name = "${local.infra_name}-cluster-${var.environment}"
-
-  setting {
-    name  = "containerInsights"
-    value = "enabled"
-  }
-
-  tags = {
-    Name = "${local.infra_name}-cluster-${var.environment}"
-  }
-}
-
-# =============================================================================
-# ECS Task Definition (always created - project-specific)
-# =============================================================================
+# -----------------------------------------------------------------------------
+# ECS Task Definition
+# -----------------------------------------------------------------------------
 
 resource "aws_ecs_task_definition" "app" {
-  family                   = "${var.app_name}-${var.environment}"
+  family                   = "${local.name_prefix}-${var.environment}"
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
   cpu                      = var.ecs_task_cpu
@@ -101,7 +81,7 @@ resource "aws_ecs_task_definition" "app" {
         { name = "CLOUD_PROVIDER", value = "aws" },
         { name = "AWS_REGION", value = var.aws_region },
         { name = "QUEUE_URL", value = aws_sqs_queue.sync_jobs.url },
-        { name = "KMS_KEY_ID", value = local.kms_key_id },
+        { name = "KMS_KEY_ID", value = aws_kms_key.credentials.key_id },
         { name = "LOG_LEVEL", value = "INFO" },
         { name = "AUTH_ENABLED", value = var.environment == "prod" ? "true" : "false" },
         { name = "DATABASE_NAME", value = var.db_name }
@@ -110,7 +90,7 @@ resource "aws_ecs_task_definition" "app" {
       secrets = [
         {
           name      = "DATABASE_URL"
-          valueFrom = local.db_credentials_secret_arn
+          valueFrom = aws_secretsmanager_secret.database_url.arn
         }
       ]
 
@@ -133,17 +113,17 @@ resource "aws_ecs_task_definition" "app" {
     }
   ])
 
-  tags = {
-    Name = "${var.app_name}-${var.environment}"
-  }
+  tags = merge(local.common_tags, {
+    Name = "${local.name_prefix}-${var.environment}"
+  })
 }
 
-# =============================================================================
-# ECS Service (always created - project-specific)
-# =============================================================================
+# -----------------------------------------------------------------------------
+# ECS Service
+# -----------------------------------------------------------------------------
 
 resource "aws_ecs_service" "app" {
-  name            = "${var.app_name}-${var.environment}-api"
+  name            = "${local.name_prefix}-${var.environment}"
   cluster         = local.ecs_cluster_arn
   task_definition = aws_ecs_task_definition.app.arn
   desired_count   = var.ecs_desired_count
@@ -151,7 +131,7 @@ resource "aws_ecs_service" "app" {
 
   network_configuration {
     subnets          = local.private_subnet_ids
-    security_groups  = [local.ecs_security_group_id]
+    security_groups  = [aws_security_group.ecs_tasks.id]
     assign_public_ip = false
   }
 
@@ -163,25 +143,25 @@ resource "aws_ecs_service" "app" {
 
   depends_on = [aws_lb_listener.http]
 
-  tags = {
-    Name = "${var.app_name}-${var.environment}-api"
-  }
+  tags = merge(local.common_tags, {
+    Name = "${local.name_prefix}-${var.environment}"
+  })
 }
 
-# =============================================================================
-# Auto Scaling (always created - project-specific)
-# =============================================================================
+# -----------------------------------------------------------------------------
+# Auto Scaling
+# -----------------------------------------------------------------------------
 
 resource "aws_appautoscaling_target" "ecs" {
   max_capacity       = 4
   min_capacity       = var.ecs_desired_count
-  resource_id        = "service/${var.use_shared_infra ? element(split("/", local.ecs_cluster_arn), length(split("/", local.ecs_cluster_arn)) - 1) : aws_ecs_cluster.main[0].name}/${aws_ecs_service.app.name}"
+  resource_id        = "service/${local.ecs_cluster_name}/${aws_ecs_service.app.name}"
   scalable_dimension = "ecs:service:DesiredCount"
   service_namespace  = "ecs"
 }
 
 resource "aws_appautoscaling_policy" "ecs_cpu" {
-  name               = "${var.app_name}-${var.environment}-cpu-scaling"
+  name               = "${local.name_prefix}-cpu-scaling-${var.environment}"
   policy_type        = "TargetTrackingScaling"
   resource_id        = aws_appautoscaling_target.ecs.resource_id
   scalable_dimension = aws_appautoscaling_target.ecs.scalable_dimension

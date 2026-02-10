@@ -1,3 +1,13 @@
+# -----------------------------------------------------------------------------
+# General Configuration
+# -----------------------------------------------------------------------------
+
+variable "company_prefix" {
+  description = "Company prefix for resource naming"
+  type        = string
+  default     = "saasdog"
+}
+
 variable "aws_region" {
   description = "AWS region"
   type        = string
@@ -16,127 +26,74 @@ variable "app_name" {
   default     = "integration-platform"
 }
 
-# =============================================================================
-# Shared Infrastructure Mode
-# =============================================================================
+# -----------------------------------------------------------------------------
+# Shared Infrastructure References (from shared-infrastructure project)
+# -----------------------------------------------------------------------------
 
-variable "use_shared_infra" {
-  description = "Use shared infrastructure (VPC, RDS, ECS cluster) instead of creating standalone"
-  type        = bool
-  default     = false
-}
-
-variable "shared_project_name" {
-  description = "Name prefix for shared resources (e.g., 'saasdog-ai'). Used when creating infrastructure that other projects can share."
-  type        = string
-  default     = "saasdog-ai"
-}
-
-# Shared infra variables (required when use_shared_infra = true)
 variable "shared_vpc_id" {
-  description = "Shared VPC ID"
+  description = "VPC ID from shared infrastructure"
   type        = string
-  default     = ""
 }
 
 variable "shared_public_subnet_ids" {
-  description = "Shared public subnet IDs"
+  description = "Public subnet IDs from shared infrastructure"
   type        = list(string)
-  default     = []
 }
 
 variable "shared_private_subnet_ids" {
-  description = "Shared private subnet IDs"
+  description = "Private subnet IDs from shared infrastructure"
   type        = list(string)
-  default     = []
-}
-
-variable "shared_alb_security_group_id" {
-  description = "Shared ALB security group ID"
-  type        = string
-  default     = ""
-}
-
-variable "shared_ecs_security_group_id" {
-  description = "Shared ECS tasks security group ID"
-  type        = string
-  default     = ""
-}
-
-variable "shared_rds_security_group_id" {
-  description = "Shared RDS security group ID"
-  type        = string
-  default     = ""
 }
 
 variable "shared_ecs_cluster_arn" {
-  description = "Shared ECS cluster ARN"
+  description = "ECS cluster ARN from shared infrastructure"
   type        = string
-  default     = ""
+}
+
+variable "shared_ecs_cluster_name" {
+  description = "ECS cluster name from shared infrastructure"
+  type        = string
 }
 
 variable "shared_rds_endpoint" {
-  description = "Shared RDS endpoint"
+  description = "RDS endpoint from shared infrastructure"
   type        = string
-  default     = ""
 }
 
-variable "shared_db_credentials_secret_arn" {
-  description = "Shared DB credentials secret ARN"
+variable "shared_rds_address" {
+  description = "RDS address (hostname) from shared infrastructure"
   type        = string
-  default     = ""
 }
 
-variable "shared_kms_key_id" {
-  description = "Shared KMS key ID"
+variable "shared_rds_security_group_id" {
+  description = "RDS security group ID from shared infrastructure"
   type        = string
-  default     = ""
 }
 
-# =============================================================================
-# Standalone Infrastructure (used when use_shared_infra = false)
-# =============================================================================
-
-variable "vpc_cidr" {
-  description = "CIDR block for VPC (standalone mode)"
+variable "shared_rds_master_password_secret_arn" {
+  description = "ARN of secret containing RDS master password"
   type        = string
-  default     = "10.1.0.0/16" # Different from shared to avoid conflicts
 }
 
-variable "availability_zones" {
-  description = "Availability zones"
-  type        = list(string)
-  default     = ["us-east-1a", "us-east-1b"]
-}
-
-variable "db_instance_class" {
-  description = "RDS instance class (standalone mode)"
-  type        = string
-  default     = "db.t3.micro"
-}
-
-variable "db_allocated_storage" {
-  description = "RDS allocated storage in GB (standalone mode)"
-  type        = number
-  default     = 20
-}
+# -----------------------------------------------------------------------------
+# Database Configuration
+# -----------------------------------------------------------------------------
 
 variable "db_name" {
-  description = "Database name"
+  description = "Database name for this application"
   type        = string
   default     = "integration_platform"
 }
 
 variable "db_username" {
-  description = "Database master username"
+  description = "Database username for this application"
   type        = string
-  default     = "postgres"
-  sensitive   = true
+  default     = "integration_platform"
 }
 
-# =============================================================================
+# -----------------------------------------------------------------------------
 # ECS Configuration
-# =============================================================================
+# -----------------------------------------------------------------------------
 
 variable "ecs_task_cpu" {
   description = "ECS task CPU units"
@@ -162,18 +119,22 @@ variable "container_port" {
   default     = 8000
 }
 
-variable "enable_deletion_protection" {
-  description = "Enable deletion protection for RDS and KMS"
-  type        = bool
-  default     = false
-}
-
-# =============================================================================
+# -----------------------------------------------------------------------------
 # CI/CD Configuration
-# =============================================================================
+# -----------------------------------------------------------------------------
 
 variable "github_repository" {
   description = "GitHub repository (format: owner/repo) for OIDC trust policy"
   type        = string
   default     = ""
+}
+
+# -----------------------------------------------------------------------------
+# Feature Flags
+# -----------------------------------------------------------------------------
+
+variable "enable_deletion_protection" {
+  description = "Enable deletion protection for critical resources"
+  type        = bool
+  default     = false
 }

@@ -1,62 +1,47 @@
-# =============================================================================
-# Common Configuration
-# =============================================================================
+# -----------------------------------------------------------------------------
+# Integration Platform - Terraform Configuration Example
+# -----------------------------------------------------------------------------
+# Copy this to terraform.tfvars for local development, or set as
+# TERRAFORM_TFVARS secret in GitHub for CI/CD.
+# -----------------------------------------------------------------------------
 
-aws_region  = "us-east-1"
-environment = "dev"
-app_name    = "integration-platform"
+# General
+company_prefix = "saasdog"
+environment    = "dev"
+aws_region     = "us-east-1"
+app_name       = "integration-platform"
 
-# GitHub repository for CI/CD OIDC (format: owner/repo)
-github_repository = "your-org/integration-platform"
+# -----------------------------------------------------------------------------
+# Shared Infrastructure References
+# -----------------------------------------------------------------------------
+# These values come from the shared-infrastructure project outputs.
+# Run `terraform output` in shared-infrastructure to get these values.
 
-# =============================================================================
-# Deployment Mode
-# =============================================================================
+shared_vpc_id              = "vpc-xxxxxxxxx"
+shared_public_subnet_ids   = ["subnet-xxx", "subnet-yyy"]
+shared_private_subnet_ids  = ["subnet-aaa", "subnet-bbb"]
+shared_ecs_cluster_arn     = "arn:aws:ecs:us-east-1:ACCOUNT:cluster/saasdog-shared-ecs-dev"
+shared_ecs_cluster_name    = "saasdog-shared-ecs-dev"
+shared_rds_endpoint        = "saasdog-shared-rds-dev.xxx.us-east-1.rds.amazonaws.com:5432"
+shared_rds_address         = "saasdog-shared-rds-dev.xxx.us-east-1.rds.amazonaws.com"
+shared_rds_security_group_id = "sg-xxxxxxxxx"
+shared_rds_master_password_secret_arn = "arn:aws:secretsmanager:us-east-1:ACCOUNT:secret:saasdog-shared-rds-master-password-dev-xxxxx"
 
-# Name prefix for shared resources when creating infrastructure
-# Other projects can reference resources using this name
-shared_project_name = "saasdog-ai"
+# -----------------------------------------------------------------------------
+# Application Configuration
+# -----------------------------------------------------------------------------
 
-# Option 1: Standalone deployment (creates all infrastructure with shared_project_name prefix)
-use_shared_infra = false
+db_name     = "integration_platform"
+db_username = "integration_platform"
 
-# Option 2: Use shared infrastructure (set use_shared_infra = true and provide values)
-# use_shared_infra = true
-# shared_vpc_id                    = "vpc-xxx"
-# shared_public_subnet_ids         = ["subnet-xxx", "subnet-yyy"]
-# shared_private_subnet_ids        = ["subnet-aaa", "subnet-bbb"]
-# shared_alb_security_group_id     = "sg-xxx"
-# shared_ecs_security_group_id     = "sg-yyy"
-# shared_rds_security_group_id     = "sg-zzz"
-# shared_ecs_cluster_arn           = "arn:aws:ecs:us-east-1:123456789:cluster/saasdog-dev"
-# shared_rds_endpoint              = "saasdog-dev.xxx.us-east-1.rds.amazonaws.com:5432"
-# shared_db_credentials_secret_arn = "arn:aws:secretsmanager:us-east-1:123456789:secret:saasdog-dev-db-credentials-xxx"
-# shared_kms_key_id                = "xxx-xxx-xxx"
-
-# =============================================================================
-# Standalone Mode Configuration (ignored when use_shared_infra = true)
-# =============================================================================
-
-vpc_cidr           = "10.1.0.0/16"
-availability_zones = ["us-east-1a", "us-east-1b"]
-
-# RDS
-db_instance_class    = "db.t3.micro"
-db_allocated_storage = 20
-db_name              = "integration_platform"
-db_username          = "postgres"
-
-# =============================================================================
-# ECS Configuration (always used)
-# =============================================================================
-
-ecs_task_cpu      = 256
-ecs_task_memory   = 512
+# ECS
+ecs_task_cpu      = 256   # 0.25 vCPU
+ecs_task_memory   = 512   # 512 MB
 ecs_desired_count = 1
 container_port    = 8000
 
-# =============================================================================
-# Protection Settings
-# =============================================================================
+# CI/CD (GitHub repository for OIDC trust)
+github_repository = "your-org/integration-platform"
 
-enable_deletion_protection = false  # Set to true for prod
+# Protection (set to true for production)
+enable_deletion_protection = false
