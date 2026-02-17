@@ -7,7 +7,7 @@ These tests target a `sync_entity_bidirectional()` method on QuickBooksSyncStrat
 that does not yet exist, so bidirectional tests will fail until implemented.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -138,6 +138,9 @@ class TestBidirectionalChangeDetection:
         self, strategy, sample_job, mock_state_repo, mock_adapter
     ):
         """When only the internal record changed, it should be classified outbound."""
+        now = datetime.now(UTC)
+        past = now - timedelta(hours=1)
+
         state = make_state(
             internal_v=5,
             external_v=5,
@@ -154,15 +157,20 @@ class TestBidirectionalChangeDetection:
             master_if_conflict=ConflictResolution.EXTERNAL,
         )
 
-        mock_adapter.seed_record("vendor", state.external_record_id, {"name": "Vendor"})
+        # Seed external record with past timestamp - it hasn't changed since last sync
+        mock_adapter.seed_record(
+            "vendor", state.external_record_id, {"name": "Vendor"}, updated_at=past
+        )
         await mock_state_repo.upsert_record(state)
 
+        # Use since=now so the unchanged external record is NOT returned by fetch
         await strategy.sync_entity_bidirectional(
             job=sample_job,
             entity_type="vendor",
             adapter=mock_adapter,
             state_repo=mock_state_repo,
             rule=rule,
+            since=now,
         )
 
         updated = await mock_state_repo.get_record(
@@ -397,6 +405,9 @@ class TestBidirectionalSyncExecution:
         self, strategy, sample_job, mock_state_repo, mock_adapter
     ):
         """After outbound sync, iv=ev=lsv=6 and adapter.update_record called."""
+        now = datetime.now(UTC)
+        past = now - timedelta(hours=1)
+
         state = make_state(
             internal_v=6,
             external_v=5,
@@ -404,8 +415,10 @@ class TestBidirectionalSyncExecution:
             client_id=sample_job.client_id,
             integration_id=sample_job.integration_id,
         )
-        # Seed external record so adapter can update it
-        mock_adapter.seed_record("vendor", state.external_record_id, {"name": "Vendor"})
+        # Seed external record with past timestamp - it hasn't changed since last sync
+        mock_adapter.seed_record(
+            "vendor", state.external_record_id, {"name": "Vendor"}, updated_at=past
+        )
 
         rule = SyncRule(
             entity_type="vendor",
@@ -415,12 +428,14 @@ class TestBidirectionalSyncExecution:
 
         await mock_state_repo.upsert_record(state)
 
+        # Use since=now so unchanged external record is not returned
         await strategy.sync_entity_bidirectional(
             job=sample_job,
             entity_type="vendor",
             adapter=mock_adapter,
             state_repo=mock_state_repo,
             rule=rule,
+            since=now,
         )
 
         updated = await mock_state_repo.get_record(
@@ -645,10 +660,15 @@ class TestBidirectionalSyncExecution:
         self, strategy, sample_job, mock_state_repo, mock_adapter
     ):
         """Three records (outbound, inbound, conflict) each sync in correct direction."""
+        now = datetime.now(UTC)
+        past = now - timedelta(hours=1)
+        recent = now - timedelta(seconds=1)  # Just before now
+
         cid = sample_job.client_id
         iid = sample_job.integration_id
 
-        # Record 1: internal changed → outbound
+        # Record 1: internal changed only → outbound
+        # Seed with past timestamp so it won't be returned (external didn't change)
         outbound_state = make_state(
             internal_v=6,
             external_v=5,
@@ -658,31 +678,39 @@ class TestBidirectionalSyncExecution:
             client_id=cid,
             integration_id=iid,
         )
-        mock_adapter.seed_record("vendor", "ext-out", {"name": "Outbound Vendor"})
+        mock_adapter.seed_record(
+            "vendor", "ext-out", {"name": "Outbound Vendor"}, updated_at=past
+        )
 
         # Record 2: external changed → inbound
+        # Seed with now timestamp so it WILL be returned (updated_at > since)
         inbound_state = make_state(
             internal_v=5,
-            external_v=6,
+            external_v=5,  # Will be bumped to 6 when returned
             last_sync_v=5,
             internal_id="int-in",
             external_id="ext-in",
             client_id=cid,
             integration_id=iid,
         )
-        mock_adapter.seed_record("vendor", "ext-in", {"name": "Inbound Vendor"})
+        mock_adapter.seed_record(
+            "vendor", "ext-in", {"name": "Inbound Vendor"}, updated_at=now
+        )
 
         # Record 3: both changed → conflict (master=external → inbound)
+        # Seed with now timestamp so it WILL be returned, internal already bumped
         conflict_state = make_state(
             internal_v=6,
-            external_v=6,
+            external_v=5,  # Will be bumped to 6 when returned
             last_sync_v=5,
             internal_id="int-conf",
             external_id="ext-conf",
             client_id=cid,
             integration_id=iid,
         )
-        mock_adapter.seed_record("vendor", "ext-conf", {"name": "Conflict Vendor"})
+        mock_adapter.seed_record(
+            "vendor", "ext-conf", {"name": "Conflict Vendor"}, updated_at=now
+        )
 
         rule = SyncRule(
             entity_type="vendor",
@@ -694,12 +722,15 @@ class TestBidirectionalSyncExecution:
         await mock_state_repo.upsert_record(inbound_state)
         await mock_state_repo.upsert_record(conflict_state)
 
+        # Use since=recent so records with updated_at=now are returned (now > recent)
+        # but records with updated_at=past are not (past < recent)
         await strategy.sync_entity_bidirectional(
             job=sample_job,
             entity_type="vendor",
             adapter=mock_adapter,
             state_repo=mock_state_repo,
             rule=rule,
+            since=recent,
         )
 
         out = await mock_state_repo.get_record(

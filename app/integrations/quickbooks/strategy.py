@@ -19,7 +19,7 @@ from app.domain.entities import (
     SyncJob,
     SyncRule,
 )
-from app.domain.enums import ConflictResolution, RecordSyncStatus, SyncDirection
+from app.domain.enums import ChangeSourceType, ConflictResolution, RecordSyncStatus, SyncDirection
 from app.domain.interfaces import (
     IntegrationAdapterInterface,
     IntegrationStateRepositoryInterface,
@@ -291,10 +291,17 @@ class QuickBooksSyncStrategy:
         state_repo: IntegrationStateRepositoryInterface,
         since: datetime | None = None,
         record_ids: list[str] | None = None,
+        rule: SyncRule | None = None,
     ) -> dict[str, Any]:
         """Push records needing outbound sync to QBO.
 
-        Discovers records via version vectors in state_repo, pushes to
+        For POLLING change detection: polls internal DB for records modified
+        since last sync and bumps their internal_version_id first.
+
+        For PUSH change detection: assumes internal_version_id was already
+        bumped via the /notify endpoint.
+
+        Then discovers records via version vectors in state_repo, pushes to
         the external system, and equalizes all three version fields.
 
         Returns a summary dict with counts.
@@ -308,6 +315,17 @@ class QuickBooksSyncStrategy:
             "records_updated": 0,
             "records_failed": 0,
         }
+
+        # 0. Poll internal changes and bump internal_version_id (for POLLING mode)
+        # PUSH and HYBRID modes have internal_version_id already bumped via /notify endpoint
+        change_source = rule.change_source if rule else ChangeSourceType.POLLING
+        if change_source == ChangeSourceType.POLLING:
+            await self._poll_and_bump_internal_changes(
+                job=job,
+                entity_type=entity_type,
+                state_repo=state_repo,
+                since=since,
+            )
 
         # 1. Find records needing outbound sync via state repo
         synced_records = await state_repo.get_records_by_status(
@@ -388,6 +406,80 @@ class QuickBooksSyncStrategy:
         return result
 
     # ------------------------------------------------------------------
+    # Polling-based internal change detection
+    # ------------------------------------------------------------------
+
+    async def _poll_and_bump_internal_changes(
+        self,
+        job: SyncJob,
+        entity_type: str,
+        state_repo: IntegrationStateRepositoryInterface,
+        since: datetime | None = None,
+    ) -> int:
+        """Poll internal DB for modified records and bump their internal_version_id.
+
+        This implements polling-based change detection for outbound sync.
+        For PUSH mode, this step is skipped as internal_version_id is already
+        bumped via the /notify endpoint.
+
+        Args:
+            job: The sync job.
+            entity_type: The entity type (e.g., "vendor").
+            state_repo: The state repository.
+            since: Only poll records modified after this timestamp.
+
+        Returns:
+            Number of records with internal_version_id bumped.
+        """
+        display = ENTITY_DISPLAY_NAMES.get(entity_type, entity_type)
+
+        # Get internal records modified since last sync
+        try:
+            getter_fn = self._get_internal_getter_fn(entity_type)
+        except ValueError:
+            logger.debug(
+                f"No internal getter for {display} — skipping internal change detection",
+                extra={"job_id": str(job.id), "entity_type": entity_type},
+            )
+            return 0
+
+        internal_records = await getter_fn(job.client_id, since=since)
+
+        if not internal_records:
+            logger.debug(
+                f"No modified {display} records found in internal DB",
+                extra={"job_id": str(job.id), "entity_type": entity_type, "since": str(since)},
+            )
+            return 0
+
+        # Extract internal record IDs
+        record_ids = [str(r["id"]) for r in internal_records]
+
+        # Bump internal_version_id for these records
+        bumped, created = await state_repo.bump_version_vectors(
+            client_id=job.client_id,
+            integration_id=job.integration_id,
+            entity_type=entity_type,
+            record_ids=record_ids,
+            bump_internal=True,
+            bump_external=False,
+        )
+
+        logger.info(
+            f"Polled internal changes for {display}",
+            extra={
+                "job_id": str(job.id),
+                "entity_type": entity_type,
+                "records_found": len(internal_records),
+                "records_bumped": bumped,
+                "records_created": created,
+                "since": str(since),
+            },
+        )
+
+        return bumped + created
+
+    # ------------------------------------------------------------------
     # Bidirectional sync: version-vector based classification
     # ------------------------------------------------------------------
 
@@ -399,12 +491,19 @@ class QuickBooksSyncStrategy:
         state_repo: IntegrationStateRepositoryInterface,
         rule: SyncRule,
         since: datetime | None = None,
+        outbound_since: datetime | None = None,
         record_ids: list[str] | None = None,
     ) -> dict[str, Any]:
         """Bidirectional sync using version vectors for conflict detection.
 
         Classifies each record as inbound, outbound, conflict, or in-sync
         based on version vectors, then delegates to the appropriate handler.
+
+        For POLLING change detection: polls internal DB for records modified
+        since outbound_since and bumps their internal_version_id.
+
+        For PUSH change detection: assumes internal_version_id was already
+        bumped via the /notify endpoint.
 
         Returns a summary dict with counts.
         """
@@ -423,6 +522,16 @@ class QuickBooksSyncStrategy:
 
         # Track which state record IDs we've already processed
         processed_state_ids: set[UUID] = set()
+
+        # 0. Poll internal changes and bump internal_version_id (for POLLING/WEBHOOK modes)
+        # PUSH and HYBRID modes have internal_version_id already bumped via /notify endpoint
+        if rule.change_source in (ChangeSourceType.POLLING, ChangeSourceType.WEBHOOK):
+            await self._poll_and_bump_internal_changes(
+                job=job,
+                entity_type=entity_type,
+                state_repo=state_repo,
+                since=outbound_since,
+            )
 
         # 1. Fetch external records from adapter
         page_token = None
@@ -475,23 +584,31 @@ class QuickBooksSyncStrategy:
 
                 processed_state_ids.add(existing.id)
 
+                # The fact that QBO returned this record (filtered by `since`) means
+                # it was modified externally. Bump external_version_id if not already
+                # marked as changed (to avoid double-counting in push+poll hybrid).
+                if existing.external_version_id <= existing.last_sync_version_id:
+                    existing.external_version_id = existing.last_sync_version_id + 1
+
                 needs_out = existing.needs_outbound_sync
                 needs_in = existing.needs_inbound_sync
 
                 if not needs_out and not needs_in:
-                    # In sync — skip
+                    # In sync — shouldn't happen after bump, but skip if so
                     continue
 
-                if needs_out and not needs_in:
-                    direction = SyncDirection.OUTBOUND
-                elif needs_in and not needs_out:
-                    direction = SyncDirection.INBOUND
-                else:
-                    # Both changed — conflict: use master_if_conflict
+                if needs_out and needs_in:
+                    # Both sides changed — conflict: use master_if_conflict
                     if rule.master_if_conflict == ConflictResolution.EXTERNAL:
                         direction = SyncDirection.INBOUND
                     else:
                         direction = SyncDirection.OUTBOUND
+                elif needs_in:
+                    # Only external changed — sync inbound
+                    direction = SyncDirection.INBOUND
+                else:
+                    # Only internal changed — sync outbound
+                    direction = SyncDirection.OUTBOUND
 
                 if direction == SyncDirection.INBOUND:
                     # Write to internal database if mapper available
@@ -520,6 +637,8 @@ class QuickBooksSyncStrategy:
                 elif direction == SyncDirection.OUTBOUND:
                     # Push outbound using state metadata
                     data = existing.metadata.get("data", {}) if existing.metadata else {}
+                    # Remove stale SyncToken so client fetches fresh one
+                    data.pop("SyncToken", None)
 
                     if existing.external_record_id:
                         await adapter.update_record(entity_type, existing.external_record_id, data)

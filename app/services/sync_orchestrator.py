@@ -200,6 +200,7 @@ class SyncOrchestrator:
                         state_repo=self._state_repo,
                         rule=rule,
                         since=inbound_since,
+                        outbound_since=outbound_since,
                         record_ids=record_ids,
                     )
                 elif direction == SyncDirection.INBOUND:
@@ -219,6 +220,7 @@ class SyncOrchestrator:
                         state_repo=self._state_repo,
                         since=outbound_since,
                         record_ids=record_ids,
+                        rule=rule,
                     )
 
                 # Update entity sync status (before serializing datetime for JSON)

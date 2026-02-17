@@ -63,14 +63,24 @@ class MockIntegrationAdapter(IntegrationAdapterInterface):
         external_id: str,
         data: dict[str, Any],
         version: str | None = None,
+        updated_at: datetime | None = None,
     ) -> ExternalRecord:
-        """Seed a record for testing."""
+        """Seed a record for testing.
+
+        Args:
+            entity_type: Type of entity (e.g., "vendor").
+            external_id: External ID of the record.
+            data: Record data.
+            version: Optional version string.
+            updated_at: Optional timestamp. Defaults to now. Set to a past time
+                        to simulate a record that hasn't changed since last sync.
+        """
         record = ExternalRecord(
             id=external_id,
             entity_type=entity_type,
             data=data,
             version=version or "1",
-            updated_at=datetime.now(UTC),
+            updated_at=updated_at or datetime.now(UTC),
         )
         if entity_type not in self._records:
             self._records[entity_type] = {}
