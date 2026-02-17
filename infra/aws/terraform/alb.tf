@@ -3,7 +3,7 @@
 # -----------------------------------------------------------------------------
 
 resource "aws_lb" "main" {
-  name               = "saasdog-integ-alb-${var.environment}"  # Max 32 chars
+  name               = "saasdog-integ-alb-${var.environment}" # Max 32 chars
   internal           = false
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb.id]
@@ -17,7 +17,7 @@ resource "aws_lb" "main" {
 }
 
 resource "aws_lb_target_group" "app" {
-  name        = "saasdog-integ-tg-${var.environment}"  # Max 32 chars
+  name        = "saasdog-integ-tg-${var.environment}" # Max 32 chars
   port        = var.container_port
   protocol    = "HTTP"
   vpc_id      = local.vpc_id
