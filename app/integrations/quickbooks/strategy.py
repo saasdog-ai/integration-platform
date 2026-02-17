@@ -523,6 +523,9 @@ class QuickBooksSyncStrategy:
         # Track which state record IDs we've already processed
         processed_state_ids: set[UUID] = set()
 
+        # Track records that need history written
+        records_needing_history: list[IntegrationStateRecord] = []
+
         # 0. Poll internal changes and bump internal_version_id (for POLLING/WEBHOOK modes)
         # PUSH and HYBRID modes have internal_version_id already bumped via /notify endpoint
         if rule.change_source in (ChangeSourceType.POLLING, ChangeSourceType.WEBHOOK):
@@ -632,6 +635,7 @@ class QuickBooksSyncStrategy:
                     existing.metadata = {"data": record.data}
                     existing.updated_at = now
                     await state_repo.upsert_record(existing)
+                    records_needing_history.append(existing)
                     result["records_updated"] += 1
 
                 elif direction == SyncDirection.OUTBOUND:
@@ -657,6 +661,7 @@ class QuickBooksSyncStrategy:
                     existing.last_job_id = job.id
                     existing.updated_at = now
                     await state_repo.upsert_record(existing)
+                    records_needing_history.append(existing)
                     result["records_updated"] += 1
 
                 # Flush inbound batch
@@ -720,6 +725,7 @@ class QuickBooksSyncStrategy:
                 state.last_job_id = job.id
                 state.updated_at = now
                 await state_repo.upsert_record(state)
+                records_needing_history.append(state)
                 result["records_updated"] += 1
 
             except Exception as e:
@@ -742,6 +748,10 @@ class QuickBooksSyncStrategy:
             result["records_created"] += created
             result["records_updated"] += updated
             result["records_failed"] += failed
+
+        # 5. Write history entries for all synced records
+        if records_needing_history:
+            await self._write_history_entries(records_needing_history, state_repo, job.id)
 
         result["max_external_updated_at"] = max_external_updated_at
 
