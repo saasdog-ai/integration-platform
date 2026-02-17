@@ -678,9 +678,7 @@ class TestBidirectionalSyncExecution:
             client_id=cid,
             integration_id=iid,
         )
-        mock_adapter.seed_record(
-            "vendor", "ext-out", {"name": "Outbound Vendor"}, updated_at=past
-        )
+        mock_adapter.seed_record("vendor", "ext-out", {"name": "Outbound Vendor"}, updated_at=past)
 
         # Record 2: external changed → inbound
         # Seed with now timestamp so it WILL be returned (updated_at > since)
@@ -693,9 +691,7 @@ class TestBidirectionalSyncExecution:
             client_id=cid,
             integration_id=iid,
         )
-        mock_adapter.seed_record(
-            "vendor", "ext-in", {"name": "Inbound Vendor"}, updated_at=now
-        )
+        mock_adapter.seed_record("vendor", "ext-in", {"name": "Inbound Vendor"}, updated_at=now)
 
         # Record 3: both changed → conflict (master=external → inbound)
         # Seed with now timestamp so it WILL be returned, internal already bumped
@@ -708,9 +704,7 @@ class TestBidirectionalSyncExecution:
             client_id=cid,
             integration_id=iid,
         )
-        mock_adapter.seed_record(
-            "vendor", "ext-conf", {"name": "Conflict Vendor"}, updated_at=now
-        )
+        mock_adapter.seed_record("vendor", "ext-conf", {"name": "Conflict Vendor"}, updated_at=now)
 
         rule = SyncRule(
             entity_type="vendor",
