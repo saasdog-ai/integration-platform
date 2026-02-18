@@ -257,7 +257,47 @@ In development mode (`APP_ENV=development`) with no key configured, admin endpoi
 ## Sister Projects
 
 - **import-export-orchestrator**: Shares PostgreSQL (port 5433, container `job_runner_db`)
-- **admin-host-app**: React host app that embeds this platform's micro-frontend UI (`/ui`)
+- **saas-host-app**: User-facing React host app that embeds this platform's micro-frontend
+- **admin-host-app**: Admin React host app that embeds this platform's micro-frontend with admin features
+
+## Frontend Architecture (Micro-Frontend)
+
+The UI (`/ui`) is a React micro-frontend using **Vite Module Federation**. Host apps load it dynamically.
+
+### Ports & Processes
+
+| App | Port | Purpose |
+|-----|------|---------|
+| **integration-platform UI** | 3001 | Micro-frontend, serves `remoteEntry.js` |
+| **saas-host-app** | 4000 | User-facing host, loads micro-FE |
+| **admin-host-app** | 4001 | Admin host, loads micro-FE with admin API key |
+
+### How It Works
+
+1. **Module Federation**: Host apps import from `http://localhost:3001/assets/remoteEntry.js`
+2. **API Proxying**: Host apps proxy `/int-api/*` → AWS ALB → ECS backend
+3. **Admin API Key**: admin-host-app injects `X-Admin-API-Key` header for `/int-api/admin/*`
+
+### Starting the Frontend (Development)
+
+```bash
+# 1. Build and serve the micro-frontend (MUST use preview mode for Module Federation)
+npm run build && npm run preview      # in /ui directory, runs on :3001
+
+# 2. Start host apps (in separate terminals)
+npm run dev                              # in /saas-host-app, runs on :4000
+npm run dev                              # in /admin-host-app, runs on :4001
+```
+
+**Important**: The micro-frontend MUST run in `preview` mode (not `dev` mode) because `vite-plugin-federation` requires built assets to serve `remoteEntry.js` correctly.
+
+### Host App Configuration
+
+Both host apps use vite proxy to route API calls:
+- `saas-host-app/vite.config.ts` — proxies to AWS ALB
+- `admin-host-app/vite.config.ts` — proxies to AWS ALB + injects `X-Admin-API-Key` for admin routes
+
+The ALB URL is configured in these files. Update when ALB changes.
 
 ## Conventions
 
