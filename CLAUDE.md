@@ -154,7 +154,11 @@ The strategy's `__init__` accepts an optional `internal_repo` parameter for test
 - `GET /admin/clients/{cid}/integrations/{iid}/sync-status`
 - `POST /admin/clients/{cid}/integrations/{iid}/sync-status/{entity}/reset`
 
-All endpoints require `X-Client-ID` header (dev mode) or JWT (production).
+**Authentication:**
+- Regular endpoints require `X-Client-ID` header (dev mode) or JWT (production)
+- Admin endpoints (`/admin/*`) require `X-Admin-API-Key` header in production
+  - In development mode with no key configured, admin access is allowed
+  - In production, set `ADMIN_API_KEY` environment variable (see Configuration section)
 
 ## Test Structure
 
@@ -229,6 +233,18 @@ Key environment variables:
 - `JOB_RUNNER_ENABLED`, `JOB_RUNNER_MAX_WORKERS` — background processing
 - `SYNC_GLOBALLY_DISABLED` — kill switch
 - `DISABLED_INTEGRATIONS` — per-integration disable list
+- `ADMIN_API_KEY` — API key for `/admin/*` endpoints (required in production)
+
+### Admin API Key Setup
+
+The admin API (`/admin/*` endpoints) requires authentication in production:
+
+1. **Generate a key**: `openssl rand -base64 32 | tr -d '/+=' | head -c 32`
+2. **Set in environment**: Add `ADMIN_API_KEY=<your-key>` to your deployment config
+3. **Store securely**: Use AWS Secrets Manager, Azure Key Vault, or similar
+4. **Client usage**: Include `X-Admin-API-Key: <your-key>` header in admin API requests
+
+In development mode (`APP_ENV=development`) with no key configured, admin endpoints are accessible without authentication.
 
 ## Feature Flags
 

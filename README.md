@@ -820,6 +820,16 @@ User credentials are encrypted at rest using pluggable encryption:
 - **Azure Key Vault**: Production encryption for Azure deployments
 - **Local**: Development-only encryption using Fernet
 
+### Admin API Authentication
+
+The `/admin/*` endpoints require API key authentication in production:
+
+1. **Generate a key**: `openssl rand -base64 32 | tr -d '/+=' | head -c 32`
+2. **Set environment variable**: `ADMIN_API_KEY=<your-key>`
+3. **Include header in requests**: `X-Admin-API-Key: <your-key>`
+
+In development mode (`APP_ENV=development`) with no key configured, admin endpoints are accessible without authentication.
+
 ### Secrets Management
 
 **Never commit secrets to the repository!**
@@ -840,6 +850,7 @@ User credentials are encrypted at rest using pluggable encryption:
 | `AWS_ENDPOINT_URL` | LocalStack endpoint (for local dev) | - |
 | `JOB_RUNNER_ENABLED` | Enable background job runner | `true` |
 | `JOB_RUNNER_MAX_WORKERS` | Max concurrent job workers | `5` |
+| `ADMIN_API_KEY` | API key for admin endpoints (required in prod) | - |
 
 ## Related Projects
 
