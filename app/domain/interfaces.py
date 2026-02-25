@@ -724,6 +724,15 @@ class IntegrationAdapterInterface(ABC):
         """Delete record in external system."""
         pass
 
+    async def resolve_external_account_id(self, access_token: str) -> str | None:
+        """Resolve external account/tenant ID after OAuth token exchange.
+
+        Override in adapters where the account ID is not provided in the
+        OAuth callback URL (e.g., Xero requires a connections API call).
+        Returns None by default (e.g., QBO gets realm_id from callback URL).
+        """
+        return None
+
 
 class AdapterFactoryInterface(ABC):
     """Factory to get adapter for an integration - mock for tests."""

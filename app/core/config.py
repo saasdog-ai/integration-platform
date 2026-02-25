@@ -99,6 +99,10 @@ class Settings(BaseSettings):
     qbo_client_secret: str | None = Field(default=None)
     qbo_environment: str = Field(default="sandbox")  # sandbox | production
 
+    # Xero
+    xero_client_id: str | None = Field(default=None)
+    xero_client_secret: str | None = Field(default=None)
+
     # Internal system database (sister project with business data tables)
     internal_database_url: str = Field(
         default="postgresql+asyncpg://postgres:postgres@localhost:5433/job_runner"

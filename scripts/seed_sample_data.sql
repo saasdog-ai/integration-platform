@@ -7,8 +7,8 @@ VALUES
    true, NOW(), NOW()),
 
   ('22222222-2222-2222-2222-222222222222', 'Xero', 'erp', 'Xero cloud accounting platform',
-   '["bill", "invoice", "contact", "account", "payment"]'::jsonb,
-   '{"authorization_url": "https://login.xero.com/identity/connect/authorize", "token_url": "https://identity.xero.com/connect/token", "scopes": ["accounting.transactions", "accounting.contacts", "accounting.settings"]}'::jsonb,
+   '["vendor", "customer", "chart_of_accounts", "item", "bill", "invoice", "payment"]'::jsonb,
+   '{"authorization_url": "https://login.xero.com/identity/connect/authorize", "token_url": "https://identity.xero.com/connect/token", "scopes": ["openid", "profile", "email", "accounting.contacts.read", "accounting.contacts", "accounting.transactions.read", "accounting.transactions", "accounting.settings.read", "accounting.settings", "offline_access"]}'::jsonb,
    true, NOW(), NOW()),
 
   ('33333333-3333-3333-3333-333333333333', 'NetSuite', 'erp', 'Oracle NetSuite ERP system',

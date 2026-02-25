@@ -308,6 +308,10 @@ class IntegrationService:
                 f"OAuth authentication failed: {sanitized_error}",
             ) from e
 
+        # Resolve external account ID if not provided (generic hook)
+        if not realm_id:
+            realm_id = await adapter.resolve_external_account_id(tokens.access_token)
+
         # Encrypt and store credentials
         credentials_json = json.dumps(
             {

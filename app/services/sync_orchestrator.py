@@ -66,6 +66,12 @@ def _init_strategies() -> None:
         register_sync_strategy("QuickBooks Online", QuickBooksSyncStrategy)
     except ImportError:
         pass
+    try:
+        from app.integrations.xero.strategy import XeroSyncStrategy
+
+        register_sync_strategy("Xero", XeroSyncStrategy)
+    except ImportError:
+        pass
 
 
 class SyncOrchestrator:

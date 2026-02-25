@@ -63,6 +63,10 @@ def get_adapter_factory() -> AdapterFactory:
 
         _factory_instance.register("QuickBooks Online", QuickBooksAdapter)
 
+        from app.integrations.xero.client import XeroAdapter
+
+        _factory_instance.register("Xero", XeroAdapter)
+
         # For integrations without specific adapters, the factory will fall back
         # to MockAdapter automatically (see get_adapter method)
 
