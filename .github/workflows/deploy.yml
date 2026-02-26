@@ -15,6 +15,10 @@ on:
           - staging
           - prod
 
+concurrency:
+  group: deploy-${{ github.event.inputs.environment || 'dev' }}
+  cancel-in-progress: true
+
 permissions:
   id-token: write  # Required for OIDC
   contents: read
