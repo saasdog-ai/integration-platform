@@ -25,7 +25,6 @@ from app.integrations.xero.mappers import (
 )
 from app.integrations.xero.strategy import XeroSyncStrategy
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
