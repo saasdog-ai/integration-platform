@@ -123,6 +123,9 @@ jobs:
           TF_VAR_database_password: ${{ secrets.DATABASE_PASSWORD }}
           TF_VAR_github_repository: ${{ github.repository }}
           TF_VAR_environment: ${{ github.event.inputs.environment || 'dev' }}
+          TF_VAR_shared_ecs_cluster_name: ${{ secrets.TF_VAR_SHARED_ECS_CLUSTER_NAME }}
+          TF_VAR_shared_rds_address: ${{ secrets.TF_VAR_SHARED_RDS_ADDRESS }}
+          TF_VAR_shared_rds_master_password_secret_arn: ${{ secrets.TF_VAR_SHARED_RDS_MASTER_PASSWORD_SECRET_ARN }}
           TF_LOG: INFO
         run: |
           echo "::group::Terraform Plan"
@@ -139,6 +142,9 @@ jobs:
           TF_VAR_database_password: ${{ secrets.DATABASE_PASSWORD }}
           TF_VAR_github_repository: ${{ github.repository }}
           TF_VAR_environment: ${{ github.event.inputs.environment || 'dev' }}
+          TF_VAR_shared_ecs_cluster_name: ${{ secrets.TF_VAR_SHARED_ECS_CLUSTER_NAME }}
+          TF_VAR_shared_rds_address: ${{ secrets.TF_VAR_SHARED_RDS_ADDRESS }}
+          TF_VAR_shared_rds_master_password_secret_arn: ${{ secrets.TF_VAR_SHARED_RDS_MASTER_PASSWORD_SECRET_ARN }}
           TF_LOG: INFO
         run: |
           echo "::group::Terraform Apply"
