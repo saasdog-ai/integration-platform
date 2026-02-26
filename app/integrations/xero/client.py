@@ -4,7 +4,6 @@ import base64
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.domain.entities import ConnectionConfig, ExternalRecord, OAuthTokens
 from app.domain.interfaces import IntegrationAdapterInterface
@@ -115,16 +114,13 @@ class XeroAdapter(IntegrationAdapterInterface):
         self, auth_code: str, redirect_uri: str, connection_config: ConnectionConfig | None = None
     ) -> OAuthTokens:
         """Exchange authorization code for access/refresh tokens."""
-        client_id = connection_config.client_id if connection_config else None
-        client_secret = connection_config.client_secret if connection_config else None
+        if not connection_config or not connection_config.client_id or not connection_config.client_secret:
+            raise Exception(
+                "Xero client_id and client_secret must be configured in connection_config"
+            )
 
-        if not client_id or not client_secret:
-            settings = get_settings()
-            client_id = client_id or settings.xero_client_id
-            client_secret = client_secret or settings.xero_client_secret
-
-        if not client_id or not client_secret:
-            raise Exception("Xero client_id and client_secret must be configured")
+        client_id = connection_config.client_id
+        client_secret = connection_config.client_secret
 
         # Xero uses HTTP Basic auth for the token endpoint
         credentials = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
@@ -171,16 +167,13 @@ class XeroAdapter(IntegrationAdapterInterface):
         self, refresh_token: str, connection_config: ConnectionConfig | None = None
     ) -> OAuthTokens:
         """Refresh an expired access token."""
-        client_id = connection_config.client_id if connection_config else None
-        client_secret = connection_config.client_secret if connection_config else None
+        if not connection_config or not connection_config.client_id or not connection_config.client_secret:
+            raise Exception(
+                "Xero client_id and client_secret must be configured in connection_config"
+            )
 
-        if not client_id or not client_secret:
-            settings = get_settings()
-            client_id = client_id or settings.xero_client_id
-            client_secret = client_secret or settings.xero_client_secret
-
-        if not client_id or not client_secret:
-            raise Exception("Xero client_id and client_secret must be configured")
+        client_id = connection_config.client_id
+        client_secret = connection_config.client_secret
 
         credentials = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
 

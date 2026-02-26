@@ -95,13 +95,7 @@ class Settings(BaseSettings):
     api_total_timeout: float = Field(default=60.0)  # Total request timeout in seconds
 
     # QuickBooks Online
-    qbo_client_id: str | None = Field(default=None)
-    qbo_client_secret: str | None = Field(default=None)
     qbo_environment: str = Field(default="sandbox")  # sandbox | production
-
-    # Xero
-    xero_client_id: str | None = Field(default=None)
-    xero_client_secret: str | None = Field(default=None)
 
     # Internal system database (sister project with business data tables)
     internal_database_url: str = Field(
