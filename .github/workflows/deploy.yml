@@ -71,13 +71,19 @@ jobs:
           TFVARS_CONTENT: ${{ secrets.TERRAFORM_TFVARS }}
         run: |
           if [ -n "$TFVARS_CONTENT" ]; then
-            echo "$TFVARS_CONTENT" > terraform.tfvars
+            printf '%s\n' "$TFVARS_CONTENT" > terraform.tfvars
             echo "Created terraform.tfvars from environment secret"
           else
             echo "TERRAFORM_TFVARS secret not set, using example as fallback"
             cp terraform.tfvars.example terraform.tfvars
           fi
           terraform fmt terraform.tfvars
+          echo "Variables defined in terraform.tfvars:"
+          grep -c '=' terraform.tfvars | xargs -I{} echo "  {} variable assignments found"
+          echo "Required shared_* variables present:"
+          for v in shared_vpc_id shared_public_subnet_ids shared_private_subnet_ids shared_ecs_cluster_arn shared_ecs_cluster_name shared_rds_endpoint shared_rds_address shared_rds_security_group_id shared_rds_master_password_secret_arn; do
+            if grep -q "^${v}" terraform.tfvars; then echo "  ✓ $v"; else echo "  ✗ $v MISSING"; fi
+          done
 
       - name: Terraform Init
         working-directory: ./infra/aws/terraform
