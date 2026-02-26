@@ -28,6 +28,8 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ github.event.inputs.environment || 'dev' }}
 
+    timeout-minutes: 30
+
     steps:
       - uses: actions/checkout@v4
 
@@ -110,24 +112,34 @@ jobs:
 
       - name: Terraform Plan
         working-directory: ./infra/aws/terraform
+        timeout-minutes: 10
         env:
           TF_VAR_database_password: ${{ secrets.DATABASE_PASSWORD }}
           TF_VAR_github_repository: ${{ github.repository }}
           TF_VAR_environment: ${{ github.event.inputs.environment || 'dev' }}
+          TF_LOG: INFO
         run: |
-          echo "Running terraform plan..."
-          terraform plan -out=tfplan
+          echo "::group::Terraform Plan"
+          echo "[$(date -u)] Starting terraform plan..."
+          terraform plan -out=tfplan -lock-timeout=60s
+          echo "[$(date -u)] Terraform plan completed"
+          echo "::endgroup::"
 
       - name: Terraform Apply
         if: github.ref == 'refs/heads/main'
         working-directory: ./infra/aws/terraform
+        timeout-minutes: 15
         env:
           TF_VAR_database_password: ${{ secrets.DATABASE_PASSWORD }}
           TF_VAR_github_repository: ${{ github.repository }}
           TF_VAR_environment: ${{ github.event.inputs.environment || 'dev' }}
+          TF_LOG: INFO
         run: |
-          echo "Applying Terraform changes..."
-          terraform apply -auto-approve tfplan
+          echo "::group::Terraform Apply"
+          echo "[$(date -u)] Starting terraform apply..."
+          terraform apply -auto-approve tfplan -lock-timeout=60s
+          echo "[$(date -u)] Terraform apply completed"
+          echo "::endgroup::"
 
           echo ""
           echo "Deployment Information:"
