@@ -149,7 +149,7 @@ jobs:
         run: |
           echo "::group::Terraform Apply"
           echo "[$(date -u)] Starting terraform apply..."
-          terraform apply -input=false -auto-approve tfplan -lock-timeout=60s
+          terraform apply -input=false tfplan
           echo "[$(date -u)] Terraform apply completed"
           echo "::endgroup::"
 
