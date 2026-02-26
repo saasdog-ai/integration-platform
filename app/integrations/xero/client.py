@@ -114,7 +114,11 @@ class XeroAdapter(IntegrationAdapterInterface):
         self, auth_code: str, redirect_uri: str, connection_config: ConnectionConfig | None = None
     ) -> OAuthTokens:
         """Exchange authorization code for access/refresh tokens."""
-        if not connection_config or not connection_config.client_id or not connection_config.client_secret:
+        if (
+            not connection_config
+            or not connection_config.client_id
+            or not connection_config.client_secret
+        ):
             raise Exception(
                 "Xero client_id and client_secret must be configured in connection_config"
             )
@@ -167,7 +171,11 @@ class XeroAdapter(IntegrationAdapterInterface):
         self, refresh_token: str, connection_config: ConnectionConfig | None = None
     ) -> OAuthTokens:
         """Refresh an expired access token."""
-        if not connection_config or not connection_config.client_id or not connection_config.client_secret:
+        if (
+            not connection_config
+            or not connection_config.client_id
+            or not connection_config.client_secret
+        ):
             raise Exception(
                 "Xero client_id and client_secret must be configured in connection_config"
             )
