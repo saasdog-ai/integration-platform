@@ -31,8 +31,8 @@ XERO_ENTITY_ENDPOINTS: dict[str, str] = {
     "customer": "Contacts",
     "chart_of_accounts": "Accounts",
     "item": "Items",
-    "bill": "Invoices",       # Type=ACCPAY
-    "invoice": "Invoices",    # Type=ACCREC
+    "bill": "Invoices",  # Type=ACCPAY
+    "invoice": "Invoices",  # Type=ACCREC
     "payment": "Payments",
 }
 

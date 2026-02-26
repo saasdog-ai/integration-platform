@@ -103,9 +103,7 @@ class XeroAdapter(IntegrationAdapterInterface):
                     "url": url,
                 },
             )
-            raise Exception(
-                f"Xero API error ({response.status_code}): {error_body[:200]}"
-            )
+            raise Exception(f"Xero API error ({response.status_code}): {error_body[:200]}")
 
         return response.json()
 
@@ -126,9 +124,7 @@ class XeroAdapter(IntegrationAdapterInterface):
             client_secret = client_secret or settings.xero_client_secret
 
         if not client_id or not client_secret:
-            raise Exception(
-                "Xero client_id and client_secret must be configured"
-            )
+            raise Exception("Xero client_id and client_secret must be configured")
 
         # Xero uses HTTP Basic auth for the token endpoint
         credentials = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
@@ -184,9 +180,7 @@ class XeroAdapter(IntegrationAdapterInterface):
             client_secret = client_secret or settings.xero_client_secret
 
         if not client_id or not client_secret:
-            raise Exception(
-                "Xero client_id and client_secret must be configured"
-            )
+            raise Exception("Xero client_id and client_secret must be configured")
 
         credentials = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
 

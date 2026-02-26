@@ -186,6 +186,7 @@ class IntegrationService:
         oauth_client_id = connection_config.client_id
         if not oauth_client_id:
             from app.core.config import get_settings
+
             settings = get_settings()
             # Try common name variants: "Xero" → xero, "QuickBooks Online" → qbo
             _ENV_NAME_MAP = {"quickbooks online": "qbo"}

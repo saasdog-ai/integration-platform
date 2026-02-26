@@ -14,7 +14,9 @@ from typing import Any
 # ---------------------------------------------------------------------------
 
 
-def _map_address_inbound(xero_addresses: list[dict] | None, addr_type: str = "STREET") -> dict | None:
+def _map_address_inbound(
+    xero_addresses: list[dict] | None, addr_type: str = "STREET"
+) -> dict | None:
     """Map a Xero address object to our internal address format.
 
     Xero stores addresses as a list; we pick the one matching addr_type.
@@ -136,9 +138,7 @@ def map_vendor_outbound(internal_data: dict) -> dict:
         result["EmailAddress"] = internal_data["email_address"]
 
     if internal_data.get("phone"):
-        result["Phones"] = [
-            {"PhoneType": "DEFAULT", "PhoneNumber": internal_data["phone"]}
-        ]
+        result["Phones"] = [{"PhoneType": "DEFAULT", "PhoneNumber": internal_data["phone"]}]
 
     if internal_data.get("tax_number"):
         result["TaxNumber"] = internal_data["tax_number"]
@@ -193,9 +193,7 @@ def map_customer_outbound(internal_data: dict) -> dict:
         result["EmailAddress"] = internal_data["email_address"]
 
     if internal_data.get("phone"):
-        result["Phones"] = [
-            {"PhoneType": "DEFAULT", "PhoneNumber": internal_data["phone"]}
-        ]
+        result["Phones"] = [{"PhoneType": "DEFAULT", "PhoneNumber": internal_data["phone"]}]
 
     if internal_data.get("tax_number"):
         result["TaxNumber"] = internal_data["tax_number"]
@@ -253,7 +251,9 @@ def map_bill_inbound(xero_data: dict) -> dict:
         "vendor_name": contact.get("Name"),
         "amount": total,
         "date": _parse_xero_timestamp(xero_data.get("DateString") or xero_data.get("Date")),
-        "due_date": _parse_xero_timestamp(xero_data.get("DueDateString") or xero_data.get("DueDate")),
+        "due_date": _parse_xero_timestamp(
+            xero_data.get("DueDateString") or xero_data.get("DueDate")
+        ),
         "paid_on_date": (
             _parse_xero_timestamp(xero_data.get("FullyPaidOnDate")) if status == "paid" else None
         ),
@@ -300,20 +300,24 @@ def map_bill_outbound(internal_data: dict) -> dict:
     xero_lines = []
     for item in line_items:
         if isinstance(item, dict):
-            xero_lines.append({
-                "Description": item.get("description", ""),
-                "Quantity": float(item.get("quantity", 1)),
-                "UnitAmount": float(item.get("unit_price", 0)),
-                "AccountCode": "400",  # Default expense account
-            })
+            xero_lines.append(
+                {
+                    "Description": item.get("description", ""),
+                    "Quantity": float(item.get("quantity", 1)),
+                    "UnitAmount": float(item.get("unit_price", 0)),
+                    "AccountCode": "400",  # Default expense account
+                }
+            )
 
     if not xero_lines:
-        xero_lines.append({
-            "Description": internal_data.get("description", "Expense"),
-            "Quantity": 1,
-            "UnitAmount": float(internal_data.get("amount", 0)),
-            "AccountCode": "400",
-        })
+        xero_lines.append(
+            {
+                "Description": internal_data.get("description", "Expense"),
+                "Quantity": 1,
+                "UnitAmount": float(internal_data.get("amount", 0)),
+                "AccountCode": "400",
+            }
+        )
 
     result["LineItems"] = xero_lines
     return result
@@ -364,7 +368,9 @@ def map_invoice_inbound(xero_data: dict) -> dict:
         "contact_external_id": contact.get("ContactID"),
         "contact_name": contact.get("Name"),
         "issue_date": _parse_xero_timestamp(xero_data.get("DateString") or xero_data.get("Date")),
-        "due_date": _parse_xero_timestamp(xero_data.get("DueDateString") or xero_data.get("DueDate")),
+        "due_date": _parse_xero_timestamp(
+            xero_data.get("DueDateString") or xero_data.get("DueDate")
+        ),
         "paid_on_date": (
             _parse_xero_timestamp(xero_data.get("FullyPaidOnDate")) if status == "PAID" else None
         ),
@@ -421,20 +427,24 @@ def map_invoice_outbound(internal_data: dict) -> dict:
     xero_lines = []
     for item in line_items:
         if isinstance(item, dict):
-            xero_lines.append({
-                "Description": item.get("description", ""),
-                "Quantity": float(item.get("quantity", 1)),
-                "UnitAmount": float(item.get("unit_price", 0)),
-                "AccountCode": "200",  # Default revenue account
-            })
+            xero_lines.append(
+                {
+                    "Description": item.get("description", ""),
+                    "Quantity": float(item.get("quantity", 1)),
+                    "UnitAmount": float(item.get("unit_price", 0)),
+                    "AccountCode": "200",  # Default revenue account
+                }
+            )
 
     if not xero_lines:
-        xero_lines.append({
-            "Description": internal_data.get("memo", "Service"),
-            "Quantity": 1,
-            "UnitAmount": float(internal_data.get("total_amount", 0)),
-            "AccountCode": "200",
-        })
+        xero_lines.append(
+            {
+                "Description": internal_data.get("memo", "Service"),
+                "Quantity": 1,
+                "UnitAmount": float(internal_data.get("total_amount", 0)),
+                "AccountCode": "200",
+            }
+        )
 
     result["LineItems"] = xero_lines
     return result
