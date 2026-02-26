@@ -91,6 +91,14 @@ resource "aws_ecs_task_definition" "app" {
         {
           name      = "DATABASE_URL"
           valueFrom = aws_secretsmanager_secret.database_url.arn
+        },
+        {
+          name      = "XERO_CLIENT_ID"
+          valueFrom = aws_secretsmanager_secret.xero_client_id.arn
+        },
+        {
+          name      = "XERO_CLIENT_SECRET"
+          valueFrom = aws_secretsmanager_secret.xero_client_secret.arn
         }
       ]
 

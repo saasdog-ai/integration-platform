@@ -43,7 +43,9 @@ resource "aws_iam_role_policy" "ecs_execution_secrets" {
           "secretsmanager:GetSecretValue"
         ]
         Resource = [
-          aws_secretsmanager_secret.database_url.arn
+          aws_secretsmanager_secret.database_url.arn,
+          aws_secretsmanager_secret.xero_client_id.arn,
+          aws_secretsmanager_secret.xero_client_secret.arn
         ]
       }
     ]
@@ -116,7 +118,9 @@ resource "aws_iam_role_policy" "ecs_task_policy" {
           "secretsmanager:GetSecretValue"
         ]
         Resource = [
-          aws_secretsmanager_secret.database_url.arn
+          aws_secretsmanager_secret.database_url.arn,
+          aws_secretsmanager_secret.xero_client_id.arn,
+          aws_secretsmanager_secret.xero_client_secret.arn
         ]
       },
       {

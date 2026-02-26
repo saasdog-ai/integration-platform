@@ -138,3 +138,21 @@ variable "enable_deletion_protection" {
   type        = bool
   default     = false
 }
+
+# -----------------------------------------------------------------------------
+# Integration Credentials
+# -----------------------------------------------------------------------------
+
+variable "xero_client_id" {
+  description = "Xero OAuth client ID"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "xero_client_secret" {
+  description = "Xero OAuth client secret"
+  type        = string
+  sensitive   = true
+  default     = ""
+}

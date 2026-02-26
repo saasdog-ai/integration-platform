@@ -31,6 +31,40 @@ resource "aws_secretsmanager_secret_version" "database_url" {
   secret_string = "postgresql+asyncpg://${var.db_username}:${urlencode(random_password.db_password.result)}@${local.rds_address}:5432/${var.db_name}"
 }
 
+# -----------------------------------------------------------------------------
+# Secrets Manager - Xero OAuth Credentials
+# -----------------------------------------------------------------------------
+
+resource "aws_secretsmanager_secret" "xero_client_id" {
+  name                    = "${local.name_prefix}-xero-client-id-${var.environment}"
+  description             = "Xero OAuth client ID for ${var.app_name}"
+  recovery_window_in_days = var.enable_deletion_protection ? 30 : 0
+
+  tags = merge(local.common_tags, {
+    Name = "${local.name_prefix}-xero-client-id-${var.environment}"
+  })
+}
+
+resource "aws_secretsmanager_secret_version" "xero_client_id" {
+  secret_id     = aws_secretsmanager_secret.xero_client_id.id
+  secret_string = var.xero_client_id
+}
+
+resource "aws_secretsmanager_secret" "xero_client_secret" {
+  name                    = "${local.name_prefix}-xero-client-secret-${var.environment}"
+  description             = "Xero OAuth client secret for ${var.app_name}"
+  recovery_window_in_days = var.enable_deletion_protection ? 30 : 0
+
+  tags = merge(local.common_tags, {
+    Name = "${local.name_prefix}-xero-client-secret-${var.environment}"
+  })
+}
+
+resource "aws_secretsmanager_secret_version" "xero_client_secret" {
+  secret_id     = aws_secretsmanager_secret.xero_client_secret.id
+  secret_string = var.xero_client_secret
+}
+
 # Output for reference
 output "database_url_secret_arn" {
   description = "ARN of the database URL secret"
