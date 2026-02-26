@@ -427,9 +427,9 @@ class TestVendorSyncLifecycle:
 
         # Metadata updated with QBO data
         after_name = (after.metadata or {}).get("data", {}).get("name", "")
-        assert (
-            "Updated in QBO" in after_name
-        ), f"Metadata should reflect QBO change, got: {after_name}"
+        assert "Updated in QBO" in after_name, (
+            f"Metadata should reflect QBO change, got: {after_name}"
+        )
         print(f"  Metadata updated: name={after_name}")
 
         assert after.is_in_sync is True
@@ -519,9 +519,9 @@ class TestVendorSyncLifecycle:
         _show_state("After sync", final)
 
         # QBO should win → direction = INBOUND
-        assert (
-            final.sync_direction == SyncDirection.INBOUND
-        ), f"External should win — expected INBOUND, got {final.sync_direction}"
+        assert final.sync_direction == SyncDirection.INBOUND, (
+            f"External should win — expected INBOUND, got {final.sync_direction}"
+        )
         print("  Winner: QBO (sync_direction = INBOUND)")
 
         # Version vectors equalized
