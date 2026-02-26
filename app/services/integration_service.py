@@ -182,9 +182,19 @@ class IntegrationService:
             "state": formatted_state,
         }
 
-        # Add OAuth client_id from config if available
-        if connection_config.client_id:
-            params["client_id"] = connection_config.client_id
+        # Resolve OAuth client_id: DB config first, then env var fallback
+        oauth_client_id = connection_config.client_id
+        if not oauth_client_id:
+            from app.core.config import get_settings
+            settings = get_settings()
+            # Try common name variants: "Xero" → xero, "QuickBooks Online" → qbo
+            _ENV_NAME_MAP = {"quickbooks online": "qbo"}
+            name_lower = integration.name.lower()
+            name_key = _ENV_NAME_MAP.get(name_lower, name_lower.replace(" ", "_"))
+            oauth_client_id = getattr(settings, f"{name_key}_client_id", None)
+
+        if oauth_client_id:
+            params["client_id"] = oauth_client_id
 
         # Use urlencode for proper URL encoding (prevents injection attacks)
         query = urlencode(params)
