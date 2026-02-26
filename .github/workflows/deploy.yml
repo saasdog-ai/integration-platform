@@ -23,6 +23,22 @@ permissions:
   id-token: write  # Required for OIDC
   contents: read
 
+# All TF_VAR_* values are passed as individual GitHub secrets to avoid
+# GitHub Actions secret masking from corrupting multi-line tfvars content.
+# See: https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions#using-secrets-in-a-workflow
+env:
+  TF_VAR_shared_vpc_id: ${{ secrets.TF_VAR_SHARED_VPC_ID }}
+  TF_VAR_shared_public_subnet_ids: ${{ secrets.TF_VAR_SHARED_PUBLIC_SUBNET_IDS }}
+  TF_VAR_shared_private_subnet_ids: ${{ secrets.TF_VAR_SHARED_PRIVATE_SUBNET_IDS }}
+  TF_VAR_shared_ecs_cluster_arn: ${{ secrets.TF_VAR_SHARED_ECS_CLUSTER_ARN }}
+  TF_VAR_shared_ecs_cluster_name: ${{ secrets.TF_VAR_SHARED_ECS_CLUSTER_NAME }}
+  TF_VAR_shared_rds_endpoint: ${{ secrets.TF_VAR_SHARED_RDS_ENDPOINT }}
+  TF_VAR_shared_rds_address: ${{ secrets.TF_VAR_SHARED_RDS_ADDRESS }}
+  TF_VAR_shared_rds_security_group_id: ${{ secrets.TF_VAR_SHARED_RDS_SECURITY_GROUP_ID }}
+  TF_VAR_shared_rds_master_password_secret_arn: ${{ secrets.TF_VAR_SHARED_RDS_MASTER_PASSWORD_SECRET_ARN }}
+  TF_VAR_github_repository: ${{ github.repository }}
+  TF_VAR_environment: ${{ github.event.inputs.environment || 'dev' }}
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -65,31 +81,8 @@ jobs:
           fi
           echo "DATABASE_PASSWORD secret is configured"
 
-      - name: Write terraform.tfvars from secret
-        working-directory: ./infra/aws/terraform
-        env:
-          TFVARS_CONTENT: ${{ secrets.TERRAFORM_TFVARS }}
-        run: |
-          if [ -n "$TFVARS_CONTENT" ]; then
-            printf '%s\n' "$TFVARS_CONTENT" > terraform.tfvars
-            echo "Created terraform.tfvars from environment secret"
-          else
-            echo "TERRAFORM_TFVARS secret not set, using example as fallback"
-            cp terraform.tfvars.example terraform.tfvars
-          fi
-          terraform fmt terraform.tfvars
-          echo "Variables defined in terraform.tfvars:"
-          grep -c '=' terraform.tfvars | xargs -I{} echo "  {} variable assignments found"
-          echo "Required shared_* variables present:"
-          for v in shared_vpc_id shared_public_subnet_ids shared_private_subnet_ids shared_ecs_cluster_arn shared_ecs_cluster_name shared_rds_endpoint shared_rds_address shared_rds_security_group_id shared_rds_master_password_secret_arn; do
-            if grep -q "^${v}" terraform.tfvars; then echo "  ✓ $v"; else echo "  ✗ $v MISSING"; fi
-          done
-
       - name: Terraform Init
         working-directory: ./infra/aws/terraform
-        env:
-          TF_VAR_github_repository: ${{ github.repository }}
-          TF_VAR_environment: ${{ github.event.inputs.environment || 'dev' }}
         run: |
           # Derive account ID from the authenticated OIDC session (no secret needed)
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
@@ -121,37 +114,21 @@ jobs:
         timeout-minutes: 10
         env:
           TF_VAR_database_password: ${{ secrets.DATABASE_PASSWORD }}
-          TF_VAR_github_repository: ${{ github.repository }}
-          TF_VAR_environment: ${{ github.event.inputs.environment || 'dev' }}
-          TF_VAR_shared_ecs_cluster_name: ${{ secrets.TF_VAR_SHARED_ECS_CLUSTER_NAME }}
-          TF_VAR_shared_rds_address: ${{ secrets.TF_VAR_SHARED_RDS_ADDRESS }}
-          TF_VAR_shared_rds_master_password_secret_arn: ${{ secrets.TF_VAR_SHARED_RDS_MASTER_PASSWORD_SECRET_ARN }}
-          TF_LOG: INFO
         run: |
-          echo "::group::Terraform Plan"
           echo "[$(date -u)] Starting terraform plan..."
           terraform plan -input=false -out=tfplan -lock-timeout=60s
           echo "[$(date -u)] Terraform plan completed"
-          echo "::endgroup::"
 
       - name: Terraform Apply
         if: github.ref == 'refs/heads/main'
         working-directory: ./infra/aws/terraform
-        timeout-minutes: 15
+        timeout-minutes: 20
         env:
           TF_VAR_database_password: ${{ secrets.DATABASE_PASSWORD }}
-          TF_VAR_github_repository: ${{ github.repository }}
-          TF_VAR_environment: ${{ github.event.inputs.environment || 'dev' }}
-          TF_VAR_shared_ecs_cluster_name: ${{ secrets.TF_VAR_SHARED_ECS_CLUSTER_NAME }}
-          TF_VAR_shared_rds_address: ${{ secrets.TF_VAR_SHARED_RDS_ADDRESS }}
-          TF_VAR_shared_rds_master_password_secret_arn: ${{ secrets.TF_VAR_SHARED_RDS_MASTER_PASSWORD_SECRET_ARN }}
-          TF_LOG: INFO
         run: |
-          echo "::group::Terraform Apply"
           echo "[$(date -u)] Starting terraform apply..."
           terraform apply -input=false tfplan
           echo "[$(date -u)] Terraform apply completed"
-          echo "::endgroup::"
 
           echo ""
           echo "Deployment Information:"
