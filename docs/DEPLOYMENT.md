@@ -210,6 +210,61 @@ container_port  = 8000
 github_repository = "your-org/integration-platform"
 ```
 
+## Secrets & Credentials Inventory
+
+All secrets used by the platform, where they live, and how they flow into the running application.
+
+### Storage Locations
+
+| Secret | Storage | How It Gets There | Accessed By |
+|--------|---------|-------------------|-------------|
+| **Database URL** | AWS Secrets Manager | Terraform generates password, builds connection string, stores in Secrets Manager | ECS injects as `DATABASE_URL` env var at container startup |
+| **Admin API Key** | AWS Secrets Manager | Created manually once per environment (see Step 4) | ECS injects as `ADMIN_API_KEY` env var; checked by `app/auth/admin.py` |
+| **OAuth client credentials** (client_id, client_secret per integration) | Database (`available_integrations.connection_config` JSONB) | Seed migration inserts; admin updates via API | `integration_service.py` reads at OAuth connect/callback time |
+| **OAuth tokens** (access_token, refresh_token per user) | Database (`user_integrations.credentials_encrypted`) | Encrypted with KMS after OAuth callback; re-encrypted on token refresh | `sync_orchestrator.py` decrypts at sync time |
+| **KMS encryption key** | AWS KMS | Terraform creates with automatic rotation enabled | App references via `KMS_KEY_ID` env var; encrypts/decrypts OAuth tokens |
+| **JWT signing key** | Environment variable (`JWT_SECRET_KEY`) | Set in deployment config; must be changed from default in production | `app/auth/jwt.py` signs/verifies tokens |
+| **RDS master password** | AWS Secrets Manager (shared-infrastructure) | Terraform generates in shared-infrastructure stack | Used only for DBA tasks (init-database.sql); app uses its own DB user |
+| **SQS queue URL** | ECS env var (`QUEUE_URL`) | Terraform outputs queue URL, set in task definition | `app/infrastructure/queue/` sends/receives sync job messages |
+| **KMS Key ID** | ECS env var (`KMS_KEY_ID`) | Terraform outputs key ID, set in task definition | `app/infrastructure/encryption/aws_kms.py` |
+| **AWS credentials** | IAM task role (production) / env vars (development) | ECS Fargate assigns task role automatically; local dev uses `.env` | boto3 SDK for KMS, SQS, Secrets Manager |
+
+### How Secrets Flow (Production)
+
+```
+Terraform apply
+  ├── Creates KMS key → KMS_KEY_ID → ECS task env var
+  ├── Creates SQS queue → QUEUE_URL → ECS task env var
+  ├── Generates DB password → DATABASE_URL → Secrets Manager → ECS task secret
+  └── Creates admin key shell → (manual: put-secret-value) → Secrets Manager → ECS task secret
+
+ECS Task Startup
+  ├── Execution role reads Secrets Manager → injects DATABASE_URL, ADMIN_API_KEY as env vars
+  └── Task role grants access to KMS, SQS, CloudWatch at runtime
+
+OAuth Flow
+  ├── Client credentials read from DB (available_integrations.connection_config)
+  ├── User authorizes → tokens received → encrypted with KMS → stored in DB
+  └── Sync job decrypts tokens with KMS → calls external API
+```
+
+### Development vs Production
+
+| Secret | Development | Production |
+|--------|-------------|------------|
+| Database URL | `.env` file (`postgres:postgres@localhost:5433`) | Secrets Manager → ECS injection |
+| Admin API Key | Optional (access allowed without it) | Required (Secrets Manager → ECS) |
+| OAuth tokens | Encrypted with local Fernet (derived from JWT secret) | Encrypted with AWS KMS |
+| JWT signing key | Default `CHANGE_THIS_IN_PRODUCTION` | Must be a strong random key |
+| AWS credentials | `.env` or `~/.aws/credentials` | IAM task role (no keys needed) |
+
+### Security Notes
+
+- **No secrets in the Docker image** — all injected at runtime via Secrets Manager or env vars
+- **OAuth client credentials are in the database**, not env vars — this allows per-integration configuration without redeployment, but means the seed migration contains development credentials that should be rotated for production
+- **KMS key rotation** is enabled by default in Terraform
+- **OAuth state tokens** (CSRF protection) are stored in-memory — lost on restart, not shared across replicas
+
 ## Troubleshooting
 
 ### ECS Tasks Failing
