@@ -31,8 +31,31 @@ resource "aws_secretsmanager_secret_version" "database_url" {
   secret_string = "postgresql+asyncpg://${var.db_username}:${urlencode(random_password.db_password.result)}@${local.rds_address}:5432/${var.db_name}"
 }
 
+# -----------------------------------------------------------------------------
+# Secrets Manager - Admin API Key
+# -----------------------------------------------------------------------------
+# Protects /admin/* endpoints. The key value must be created manually:
+#   aws secretsmanager create-secret --name "saasdog-integration-platform-admin-api-key-dev" \
+#     --secret-string "$(openssl rand -base64 32 | tr -d '/+=' | head -c 32)"
+# Terraform only references the secret (does not create or manage the value).
+
+resource "aws_secretsmanager_secret" "admin_api_key" {
+  name                    = "${local.name_prefix}-admin-api-key-${var.environment}"
+  description             = "Admin API key for ${var.app_name} /admin/* endpoints"
+  recovery_window_in_days = var.enable_deletion_protection ? 30 : 0
+
+  tags = merge(local.common_tags, {
+    Name = "${local.name_prefix}-admin-api-key-${var.environment}"
+  })
+}
+
 # Output for reference
 output "database_url_secret_arn" {
   description = "ARN of the database URL secret"
   value       = aws_secretsmanager_secret.database_url.arn
+}
+
+output "admin_api_key_secret_arn" {
+  description = "ARN of the admin API key secret"
+  value       = aws_secretsmanager_secret.admin_api_key.arn
 }

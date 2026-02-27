@@ -106,7 +106,29 @@ terraform apply
 - `ecr_repository_url` - Docker image repository
 - `ecs_service_name` - ECS service name
 
-### Step 4: Build and Deploy Application
+### Step 4: Create Admin API Key
+
+The admin API (`/admin/*` endpoints) requires an API key stored in Secrets Manager. This key is **not** managed by Terraform — you create it once per environment.
+
+```bash
+# Generate and store the key
+aws secretsmanager put-secret-value \
+  --secret-id "$(terraform output -raw admin_api_key_secret_arn)" \
+  --secret-string "$(openssl rand -base64 32 | tr -d '/+=' | head -c 32)"
+
+# Retrieve it (you'll need this for the admin-host-app config)
+aws secretsmanager get-secret-value \
+  --secret-id "$(terraform output -raw admin_api_key_secret_arn)" \
+  --query 'SecretString' --output text
+```
+
+Configure the **admin-host-app** with the same key value:
+- Set `ADMIN_API_KEY` environment variable, or
+- Update `vite.config.ts` → `ADMIN_API_KEY` constant (development only)
+
+The ECS task definition already references this secret — it will be injected as the `ADMIN_API_KEY` environment variable at container startup.
+
+### Step 5: Build and Deploy Application
 
 For CI/CD (recommended), push to main branch. The GitHub Actions workflow will:
 1. Build Docker image
@@ -130,7 +152,7 @@ aws ecs update-service \
   --force-new-deployment
 ```
 
-### Step 5: Verify Deployment
+### Step 6: Verify Deployment
 
 ```bash
 # Check health

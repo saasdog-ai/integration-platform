@@ -91,6 +91,10 @@ resource "aws_ecs_task_definition" "app" {
         {
           name      = "DATABASE_URL"
           valueFrom = aws_secretsmanager_secret.database_url.arn
+        },
+        {
+          name      = "ADMIN_API_KEY"
+          valueFrom = aws_secretsmanager_secret.admin_api_key.arn
         }
       ]
 
