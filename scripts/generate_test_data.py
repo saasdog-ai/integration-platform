@@ -8,7 +8,7 @@ as "not yet synced" for outbound sync testing.
 Usage:
     python scripts/generate_test_data.py
     python scripts/generate_test_data.py --vendors 20 --bills 40 --invoices 30
-    python scripts/generate_test_data.py --client-id cccccccc-cccc-cccc-cccc-cccccccccccc
+    python scripts/generate_test_data.py --client-id aaa00000-0000-0000-0000-000000000001
     python scripts/generate_test_data.py --dry-run --vendors 5
     python scripts/generate_test_data.py --clear  # Remove all test data first
 """
@@ -29,7 +29,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
-DEFAULT_CLIENT_ID = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+DEFAULT_CLIENT_ID = "aaa00000-0000-0000-0000-000000000001"
 DEFAULT_DB_URL = "postgresql+asyncpg://postgres:postgres@localhost:5433/job_runner"
 
 # ---------------------------------------------------------------------------

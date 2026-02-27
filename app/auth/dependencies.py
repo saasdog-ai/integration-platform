@@ -3,7 +3,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.auth.jwt import verify_token
@@ -27,25 +27,37 @@ class AuthenticatedClient:
 
 
 async def get_current_client(
+    request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
 ) -> AuthenticatedClient:
     """
     Extract and validate client from JWT token.
 
-    When auth is disabled (development), uses a fixed test client ID.
+    When auth is disabled (development), uses X-Client-ID header if present,
+    otherwise falls back to a fixed test client ID.
     When auth is enabled, requires valid JWT token with client_id claim.
     """
     from app.core.dependency_injection import get_container
 
     # Development mode: auth disabled
     if not get_container().feature_flag_service.is_auth_enabled():
-        # Use a consistent test client ID in development
-        # This is safer than random UUID - at least data is consistent
-        test_client_id = UUID("cccccccc-cccc-cccc-cccc-cccccccccccc")
+        header_value = request.headers.get("X-Client-ID")
+        if header_value:
+            try:
+                client_id = UUID(header_value)
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid X-Client-ID header format",
+                )
+        else:
+            # Fallback for curl/Postman testing without headers
+            # Matches Alice Johnson in saas-host-app mock users
+            client_id = UUID("aaa00000-0000-0000-0000-000000000001")
         logger.debug(
-            "Auth disabled, using test client_id", extra={"client_id": str(test_client_id)}
+            "Auth disabled, using client_id", extra={"client_id": str(client_id)}
         )
-        return AuthenticatedClient(client_id=test_client_id)
+        return AuthenticatedClient(client_id=client_id)
 
     # Production mode: require valid token
     if credentials is None:

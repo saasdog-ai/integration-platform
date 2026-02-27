@@ -61,7 +61,7 @@ logger = get_logger(__name__)
 # Sample data IDs
 QUICKBOOKS_INTEGRATION_ID = UUID("11111111-1111-1111-1111-111111111111")
 XERO_INTEGRATION_ID = UUID("22222222-2222-2222-2222-222222222222")
-SAMPLE_CLIENT_ID = UUID("cccccccc-cccc-cccc-cccc-cccccccccccc")
+SAMPLE_CLIENT_ID = UUID("aaa00000-0000-0000-0000-000000000001")
 
 
 def print_banner(text: str) -> None:
