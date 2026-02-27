@@ -43,12 +43,20 @@ VALUES
    '{"sync_rules": [{"entity_type": "bill", "direction": "inbound", "enabled": true}, {"entity_type": "vendor", "direction": "inbound", "enabled": true}, {"entity_type": "invoice", "direction": "outbound", "enabled": true}], "sync_frequency": "0 */6 * * *", "auto_sync_enabled": true}'::jsonb,
    NOW(), NOW());
 
--- Seed system default settings for QuickBooks
+-- Seed system default settings for QuickBooks Online
 INSERT INTO system_integration_settings (id, integration_id, settings, created_at, updated_at)
 VALUES
-  ('dddddddd-dddd-dddd-dddd-dddddddddddd',
+  ('dd000000-0000-0000-0000-000000000001',
    '11111111-1111-1111-1111-111111111111',
-   '{"sync_rules": [{"entity_type": "chart_of_accounts", "direction": "inbound", "enabled": true}, {"entity_type": "vendor", "direction": "inbound", "enabled": true}, {"entity_type": "customer", "direction": "inbound", "enabled": true}, {"entity_type": "bill", "direction": "bidirectional", "enabled": false}, {"entity_type": "invoice", "direction": "bidirectional", "enabled": false}], "sync_frequency": "0 0 * * *", "auto_sync_enabled": false}'::jsonb,
+   '{"sync_rules": [{"entity_type": "chart_of_accounts", "direction": "inbound", "enabled": true, "master_if_conflict": "external", "change_source": "polling", "sync_trigger": "deferred"}, {"entity_type": "vendor", "direction": "inbound", "enabled": true, "master_if_conflict": "external", "change_source": "polling", "sync_trigger": "deferred"}, {"entity_type": "customer", "direction": "inbound", "enabled": true, "master_if_conflict": "external", "change_source": "polling", "sync_trigger": "deferred"}, {"entity_type": "item", "direction": "inbound", "enabled": true, "master_if_conflict": "external", "change_source": "polling", "sync_trigger": "deferred"}, {"entity_type": "bill", "direction": "outbound", "enabled": true, "master_if_conflict": "our_system", "change_source": "polling", "sync_trigger": "deferred"}, {"entity_type": "invoice", "direction": "outbound", "enabled": true, "master_if_conflict": "our_system", "change_source": "polling", "sync_trigger": "deferred"}, {"entity_type": "payment", "direction": "outbound", "enabled": true, "master_if_conflict": "our_system", "change_source": "polling", "sync_trigger": "deferred"}], "sync_frequency": "0 */6 * * *", "auto_sync_enabled": false}'::jsonb,
+   NOW(), NOW());
+
+-- Seed system default settings for Xero
+INSERT INTO system_integration_settings (id, integration_id, settings, created_at, updated_at)
+VALUES
+  ('dd000000-0000-0000-0000-000000000002',
+   '22222222-2222-2222-2222-222222222222',
+   '{"sync_rules": [{"entity_type": "chart_of_accounts", "direction": "inbound", "enabled": true, "master_if_conflict": "external", "change_source": "polling", "sync_trigger": "deferred"}, {"entity_type": "vendor", "direction": "inbound", "enabled": true, "master_if_conflict": "external", "change_source": "polling", "sync_trigger": "deferred"}, {"entity_type": "customer", "direction": "inbound", "enabled": true, "master_if_conflict": "external", "change_source": "polling", "sync_trigger": "deferred"}, {"entity_type": "item", "direction": "inbound", "enabled": true, "master_if_conflict": "external", "change_source": "polling", "sync_trigger": "deferred"}, {"entity_type": "bill", "direction": "outbound", "enabled": true, "master_if_conflict": "our_system", "change_source": "polling", "sync_trigger": "deferred"}, {"entity_type": "invoice", "direction": "outbound", "enabled": true, "master_if_conflict": "our_system", "change_source": "polling", "sync_trigger": "deferred"}, {"entity_type": "payment", "direction": "outbound", "enabled": true, "master_if_conflict": "our_system", "change_source": "polling", "sync_trigger": "deferred"}], "sync_frequency": "0 */6 * * *", "auto_sync_enabled": false}'::jsonb,
    NOW(), NOW());
 
 -- Seed some sync jobs
