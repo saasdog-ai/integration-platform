@@ -30,7 +30,7 @@ from app.integrations.xero.constants import (
     INBOUND_ENTITY_ORDER,
     OUTBOUND_ENTITY_ORDER,
 )
-from app.integrations.xero.mappers import INBOUND_MAPPERS, map_vendor_inbound
+from app.integrations.xero.mappers import INBOUND_MAPPERS, OUTBOUND_MAPPERS, map_vendor_inbound
 
 logger = get_logger(__name__)
 
@@ -365,7 +365,7 @@ class XeroSyncStrategy:
 
         for state in outbound_records:
             try:
-                data = state.metadata.get("data", {}) if state.metadata else {}
+                data = await self._prepare_outbound_data(job, entity_type, state, state_repo)
 
                 if state.external_record_id:
                     await adapter.update_record(entity_type, state.external_record_id, data)
@@ -617,7 +617,9 @@ class XeroSyncStrategy:
                     result["records_updated"] += 1
 
                 elif direction == SyncDirection.OUTBOUND:
-                    data = existing.metadata.get("data", {}) if existing.metadata else {}
+                    data = await self._prepare_outbound_data(
+                        job, entity_type, existing, state_repo
+                    )
 
                     if existing.external_record_id:
                         await adapter.update_record(entity_type, existing.external_record_id, data)
@@ -681,7 +683,7 @@ class XeroSyncStrategy:
                 continue
 
             try:
-                data = state.metadata.get("data", {}) if state.metadata else {}
+                data = await self._prepare_outbound_data(job, entity_type, state, state_repo)
 
                 if state.external_record_id:
                     await adapter.update_record(entity_type, state.external_record_id, data)
@@ -742,6 +744,62 @@ class XeroSyncStrategy:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    async def _prepare_outbound_data(
+        self,
+        job: SyncJob,
+        entity_type: str,
+        state: IntegrationStateRecord,
+        state_repo: IntegrationStateRepositoryInterface,
+    ) -> dict:
+        """Read current internal record and map to external format for outbound push.
+
+        Falls back to state metadata if the internal record can't be read
+        or no outbound mapper exists for this entity type.
+        """
+        fallback = state.metadata.get("data", {}) if state.metadata else {}
+        outbound_mapper = OUTBOUND_MAPPERS.get(entity_type)
+        if not outbound_mapper or not state.internal_record_id:
+            return fallback
+
+        try:
+            getter_fn = self._get_internal_getter_fn(entity_type)
+            internal_records = await getter_fn(
+                job.client_id, record_ids=[state.internal_record_id]
+            )
+            if not internal_records:
+                return fallback
+
+            internal_data = dict(internal_records[0])
+
+            # Resolve FK references needed by the outbound mapper
+            if entity_type == "bill" and internal_data.get("vendor_id"):
+                vendor_state = await state_repo.get_record(
+                    job.client_id, job.integration_id, "vendor",
+                    internal_record_id=internal_data["vendor_id"],
+                )
+                if vendor_state and vendor_state.external_record_id:
+                    internal_data["vendor_external_id"] = vendor_state.external_record_id
+
+            if entity_type == "invoice" and internal_data.get("contact_id"):
+                contact_state = await state_repo.get_record(
+                    job.client_id, job.integration_id, "vendor",
+                    internal_record_id=internal_data["contact_id"],
+                )
+                if contact_state and contact_state.external_record_id:
+                    internal_data["contact_external_id"] = contact_state.external_record_id
+
+            return outbound_mapper(internal_data)
+        except Exception as e:
+            logger.warning(
+                "Failed to read internal record for outbound mapping, using metadata fallback",
+                extra={
+                    "entity_type": entity_type,
+                    "internal_record_id": state.internal_record_id,
+                    "error": str(e),
+                },
+            )
+            return fallback
 
     async def _ensure_vendor_synced(
         self,

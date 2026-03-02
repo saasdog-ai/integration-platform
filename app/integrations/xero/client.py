@@ -91,6 +91,10 @@ class XeroAdapter(IntegrationAdapterInterface):
                 json=json_body,
             )
 
+        # Xero returns 304 when nothing has changed since If-Modified-Since
+        if response.status_code == 304:
+            return {}
+
         # Xero returns 2xx for success
         if not response.is_success:
             error_body = response.text
@@ -284,6 +288,19 @@ class XeroAdapter(IntegrationAdapterInterface):
 
         # Apply entity-specific filters for shared endpoints
         where_filter = _get_where_filter(entity_type)
+
+        # Use where clause for incremental filtering instead of If-Modified-Since
+        # header, which Xero can ignore when combined with other where filters.
+        if since:
+            since_clause = (
+                f"UpdatedDateUTC>=DateTime({since.year},{since.month},{since.day},"
+                f"{since.hour},{since.minute},{since.second})"
+            )
+            if where_filter:
+                where_filter = f"{where_filter} AND {since_clause}"
+            else:
+                where_filter = since_clause
+
         if where_filter:
             params["where"] = where_filter
 
@@ -296,7 +313,7 @@ class XeroAdapter(IntegrationAdapterInterface):
             else:
                 params["where"] = ids_clause
 
-        # Build headers with optional If-Modified-Since
+        # Build headers with If-Modified-Since as a fallback hint
         headers = self._auth_headers()
         if since:
             headers["If-Modified-Since"] = since.strftime("%Y-%m-%dT%H:%M:%S")
