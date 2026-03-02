@@ -291,10 +291,14 @@ class XeroAdapter(IntegrationAdapterInterface):
 
         # Use where clause for incremental filtering instead of If-Modified-Since
         # header, which Xero can ignore when combined with other where filters.
+        # Advance by 1 second because Xero's DateTime() only has second
+        # granularity — without this, records at the cursor's sub-second
+        # boundary are re-fetched every sync.
         if since:
+            since_next = since.replace(microsecond=0) + timedelta(seconds=1)
             since_clause = (
-                f"UpdatedDateUTC>=DateTime({since.year},{since.month},{since.day},"
-                f"{since.hour},{since.minute},{since.second})"
+                f"UpdatedDateUTC>=DateTime({since_next.year},{since_next.month},{since_next.day},"
+                f"{since_next.hour},{since_next.minute},{since_next.second})"
             )
             if where_filter:
                 where_filter = f"{where_filter} AND {since_clause}"

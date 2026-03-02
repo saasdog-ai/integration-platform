@@ -229,16 +229,20 @@ class SyncOrchestrator:
                         rule=rule,
                     )
 
-                # Update entity sync status (before serializing datetime for JSON)
+                # Update entity sync status (before serializing datetime for JSON).
+                # Always update when we have a max_external_updated_at so the
+                # inbound cursor advances even if all records failed — otherwise
+                # entities with persistent failures re-fetch everything forever.
                 total_synced = result.get("records_created", 0) + result.get("records_updated", 0)
-                if total_synced > 0:
+                max_ext = result.get("max_external_updated_at")
+                if total_synced > 0 or max_ext is not None:
                     await self._state_repo.update_entity_sync_status(
                         job.client_id,
                         job.integration_id,
                         entity_type,
                         job.id,
                         total_synced,
-                        last_inbound_sync_at=result.get("max_external_updated_at"),
+                        last_inbound_sync_at=max_ext,
                     )
 
                 # Serialize datetime for JSONB storage
