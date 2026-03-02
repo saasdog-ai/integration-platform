@@ -43,6 +43,9 @@ export function createApiClient(config: IntegrationsConfig) {
     if (token) {
       headers['Authorization'] = `Bearer ${token}`
     }
+    if (config.clientId) {
+      headers['X-Client-ID'] = config.clientId
+    }
     return headers
   }
 

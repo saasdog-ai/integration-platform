@@ -14,16 +14,14 @@ depends_on = None
 def upgrade() -> None:
     # Insert QuickBooks Online
     op.execute("""
-        INSERT INTO available_integrations (id, name, provider, description, category, auth_type, connection_config, icon_url, is_active, created_at, updated_at)
+        INSERT INTO available_integrations (id, name, type, description, connection_config, supported_entities, is_active, created_at, updated_at)
         VALUES (
             '11111111-1111-1111-1111-111111111111',
             'QuickBooks Online',
-            'quickbooks',
-            'Intuit QuickBooks Online accounting software',
             'erp',
-            'oauth2',
+            'Intuit QuickBooks Online accounting software',
             '{"scopes": ["com.intuit.quickbooks.accounting"], "client_id": "ABS9sRNgUoYnToKsJI4neyFSxJmdz9iAscnFE2wSdrTXNmrN4s", "token_url": "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer", "client_secret": "Xa6C6mpw7Om0sKQ6srnkS7S4CPySL4fop9r69xRP", "authorization_url": "https://appcenter.intuit.com/connect/oauth2"}',
-            '/icons/quickbooks.svg',
+            '["vendor", "customer", "chart_of_accounts", "item", "bill", "invoice", "payment"]',
             true,
             NOW(),
             NOW()
@@ -33,16 +31,14 @@ def upgrade() -> None:
 
     # Insert Xero
     op.execute("""
-        INSERT INTO available_integrations (id, name, provider, description, category, auth_type, connection_config, icon_url, is_active, created_at, updated_at)
+        INSERT INTO available_integrations (id, name, type, description, connection_config, supported_entities, is_active, created_at, updated_at)
         VALUES (
             '22222222-2222-2222-2222-222222222222',
             'Xero',
-            'xero',
-            'Xero cloud accounting platform',
             'erp',
-            'oauth2',
+            'Xero cloud accounting platform',
             '{"scopes": ["accounting.transactions", "accounting.contacts", "accounting.settings"], "token_url": "https://identity.xero.com/connect/token", "authorization_url": "https://login.xero.com/identity/connect/authorize"}',
-            '/icons/xero.svg',
+            '["vendor", "customer", "invoice"]',
             true,
             NOW(),
             NOW()
@@ -52,16 +48,14 @@ def upgrade() -> None:
 
     # Insert NetSuite
     op.execute("""
-        INSERT INTO available_integrations (id, name, provider, description, category, auth_type, connection_config, icon_url, is_active, created_at, updated_at)
+        INSERT INTO available_integrations (id, name, type, description, connection_config, supported_entities, is_active, created_at, updated_at)
         VALUES (
             '33333333-3333-3333-3333-333333333333',
             'NetSuite',
-            'netsuite',
-            'Oracle NetSuite ERP system',
             'erp',
-            'oauth2',
+            'Oracle NetSuite ERP system',
             '{"scopes": ["rest_webservices"], "token_url": "https://system.netsuite.com/app/login/oauth2/token.nl", "authorization_url": "https://system.netsuite.com/app/login/oauth2/authorize.nl"}',
-            '/icons/netsuite.svg',
+            '["vendor", "customer", "invoice", "bill"]',
             true,
             NOW(),
             NOW()
@@ -71,16 +65,14 @@ def upgrade() -> None:
 
     # Insert Sage Intacct
     op.execute("""
-        INSERT INTO available_integrations (id, name, provider, description, category, auth_type, connection_config, icon_url, is_active, created_at, updated_at)
+        INSERT INTO available_integrations (id, name, type, description, connection_config, supported_entities, is_active, created_at, updated_at)
         VALUES (
             '44444444-4444-4444-4444-444444444444',
             'Sage Intacct',
-            'sage_intacct',
-            'Sage Intacct cloud financial management',
             'erp',
-            'oauth2',
+            'Sage Intacct cloud financial management',
             NULL,
-            '/icons/sage.svg',
+            '["vendor", "customer", "invoice"]',
             true,
             NOW(),
             NOW()
@@ -90,16 +82,14 @@ def upgrade() -> None:
 
     # Insert HubSpot
     op.execute("""
-        INSERT INTO available_integrations (id, name, provider, description, category, auth_type, connection_config, icon_url, is_active, created_at, updated_at)
+        INSERT INTO available_integrations (id, name, type, description, connection_config, supported_entities, is_active, created_at, updated_at)
         VALUES (
             '55555555-5555-5555-5555-555555555555',
             'HubSpot',
-            'hubspot',
-            'HubSpot CRM and marketing platform',
             'crm',
-            'oauth2',
+            'HubSpot CRM and marketing platform',
             '{"scopes": ["crm.objects.contacts.read", "crm.objects.contacts.write"], "token_url": "https://api.hubapi.com/oauth/v1/token", "authorization_url": "https://app.hubspot.com/oauth/authorize"}',
-            '/icons/hubspot.svg',
+            '["contact", "company", "deal"]',
             true,
             NOW(),
             NOW()

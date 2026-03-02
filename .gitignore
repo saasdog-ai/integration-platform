@@ -81,6 +81,7 @@ infra/**/.terraform/
 infra/**/*.tfstate
 infra/**/*.tfstate.*
 infra/**/*.tfplan
+infra/**/tfplan
 infra/**/terraform.tfvars
 infra/**/terraform.tfvars.backup
 infra/**/terraform.tfvars.bak

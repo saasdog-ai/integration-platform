@@ -58,27 +58,16 @@ class InternalDataRepository:
             rows = result.mappings().all()
             return [self._row_to_dict(row) for row in rows]
 
-    async def upsert_vendor(self, client_id: UUID, data: dict[str, Any]) -> str:
+    async def upsert_vendor(
+        self, client_id: UUID, data: dict[str, Any], record_id: str | None = None
+    ) -> str:
         """Create or update a vendor. Returns the internal record ID."""
         factory = _get_session_factory()
         now = datetime.now(UTC)
 
         async with factory() as session:
-            # Check if vendor already exists by external_id
-            external_id = data.get("_external_id")
-            existing = None
-            if external_id:
-                result = await session.execute(
-                    text(
-                        "SELECT id FROM sample_vendors WHERE client_id = :client_id AND external_id = :ext_id"
-                    ),
-                    {"client_id": str(client_id), "ext_id": external_id},
-                )
-                existing = result.first()
-
-            if existing:
-                # Update
-                record_id = str(existing[0])
+            if record_id:
+                # Update existing record
                 address_json = json.dumps(data.get("address")) if data.get("address") else None
                 await session.execute(
                     text(
@@ -112,7 +101,7 @@ class InternalDataRepository:
                     },
                 )
             else:
-                # Insert
+                # Insert new record
                 record_id = str(uuid4())
                 address_json = json.dumps(data.get("address")) if data.get("address") else None
                 await session.execute(
@@ -121,11 +110,11 @@ class InternalDataRepository:
                         INSERT INTO sample_vendors
                             (id, client_id, name, email_address, phone, tax_number,
                              is_supplier, is_customer, status, currency, address,
-                             external_id, created_at, updated_at)
+                             created_at, updated_at)
                         VALUES
                             (:id, :client_id, :name, :email, :phone, :tax_number,
                              :is_supplier, :is_customer, :status, :currency, CAST(:address AS json),
-                             :external_id, :now, :now)
+                             :now, :now)
                     """
                     ),
                     {
@@ -140,7 +129,6 @@ class InternalDataRepository:
                         "status": data.get("status", "ACTIVE"),
                         "currency": data.get("currency", "USD"),
                         "address": address_json,
-                        "external_id": external_id,
                         "now": now,
                     },
                 )
@@ -180,27 +168,18 @@ class InternalDataRepository:
             rows = result.mappings().all()
             return [self._row_to_dict(row) for row in rows]
 
-    async def upsert_bill(self, client_id: UUID, data: dict[str, Any]) -> str:
+    async def upsert_bill(
+        self, client_id: UUID, data: dict[str, Any], record_id: str | None = None
+    ) -> str:
         """Create or update a bill. Returns the internal record ID."""
         factory = _get_session_factory()
         now = datetime.now(UTC)
 
         async with factory() as session:
-            external_id = data.get("_external_id")
-            existing = None
-            if external_id:
-                result = await session.execute(
-                    text(
-                        "SELECT id FROM sample_bills WHERE client_id = :client_id AND external_id = :ext_id"
-                    ),
-                    {"client_id": str(client_id), "ext_id": external_id},
-                )
-                existing = result.first()
-
             line_items_json = json.dumps(data.get("line_items")) if data.get("line_items") else None
 
-            if existing:
-                record_id = str(existing[0])
+            if record_id:
+                # Update existing record
                 await session.execute(
                     text(
                         """
@@ -233,19 +212,9 @@ class InternalDataRepository:
                     },
                 )
             else:
+                # Insert new record
                 record_id = str(uuid4())
-                # Resolve vendor_id from external_id if provided
                 vendor_id = data.get("vendor_id")
-                if not vendor_id and data.get("vendor_external_id"):
-                    vresult = await session.execute(
-                        text(
-                            "SELECT id FROM sample_vendors WHERE client_id = :cid AND external_id = :ext_id"
-                        ),
-                        {"cid": str(client_id), "ext_id": data["vendor_external_id"]},
-                    )
-                    vrow = vresult.first()
-                    if vrow:
-                        vendor_id = str(vrow[0])
 
                 await session.execute(
                     text(
@@ -253,11 +222,11 @@ class InternalDataRepository:
                         INSERT INTO sample_bills
                             (id, client_id, bill_number, vendor_id, amount, date, due_date,
                              paid_on_date, description, currency, status, line_items,
-                             external_id, created_at, updated_at)
+                             created_at, updated_at)
                         VALUES
                             (:id, :client_id, :bill_number, :vendor_id, :amount, :date, :due_date,
                              :paid_on_date, :description, :currency, :status, CAST(:line_items AS json),
-                             :external_id, :now, :now)
+                             :now, :now)
                     """
                     ),
                     {
@@ -273,7 +242,6 @@ class InternalDataRepository:
                         "currency": data.get("currency", "USD"),
                         "status": data.get("status", "pending"),
                         "line_items": line_items_json,
-                        "external_id": external_id,
                         "now": now,
                     },
                 )
@@ -313,27 +281,18 @@ class InternalDataRepository:
             rows = result.mappings().all()
             return [self._row_to_dict(row) for row in rows]
 
-    async def upsert_invoice(self, client_id: UUID, data: dict[str, Any]) -> str:
+    async def upsert_invoice(
+        self, client_id: UUID, data: dict[str, Any], record_id: str | None = None
+    ) -> str:
         """Create or update an invoice. Returns the internal record ID."""
         factory = _get_session_factory()
         now = datetime.now(UTC)
 
         async with factory() as session:
-            external_id = data.get("_external_id")
-            existing = None
-            if external_id:
-                result = await session.execute(
-                    text(
-                        "SELECT id FROM sample_invoices WHERE client_id = :client_id AND external_id = :ext_id"
-                    ),
-                    {"client_id": str(client_id), "ext_id": external_id},
-                )
-                existing = result.first()
-
             line_items_json = json.dumps(data.get("line_items")) if data.get("line_items") else None
 
-            if existing:
-                record_id = str(existing[0])
+            if record_id:
+                # Update existing record
                 await session.execute(
                     text(
                         """
@@ -372,19 +331,9 @@ class InternalDataRepository:
                     },
                 )
             else:
+                # Insert new record
                 record_id = str(uuid4())
-                # Resolve contact_id from external_id if provided
                 contact_id = data.get("contact_id")
-                if not contact_id and data.get("contact_external_id"):
-                    cresult = await session.execute(
-                        text(
-                            "SELECT id FROM sample_vendors WHERE client_id = :cid AND external_id = :ext_id"
-                        ),
-                        {"cid": str(client_id), "ext_id": data["contact_external_id"]},
-                    )
-                    crow = cresult.first()
-                    if crow:
-                        contact_id = str(crow[0])
 
                 await session.execute(
                     text(
@@ -392,12 +341,12 @@ class InternalDataRepository:
                         INSERT INTO sample_invoices
                             (id, client_id, invoice_number, contact_id, issue_date, due_date,
                              paid_on_date, memo, currency, sub_total, total_tax_amount,
-                             total_amount, balance, status, line_items, external_id,
+                             total_amount, balance, status, line_items,
                              created_at, updated_at)
                         VALUES
                             (:id, :client_id, :invoice_number, :contact_id, :issue_date, :due_date,
                              :paid_on_date, :memo, :currency, :sub_total, :total_tax,
-                             :total_amount, :balance, :status, CAST(:line_items AS json), :external_id,
+                             :total_amount, :balance, :status, CAST(:line_items AS json),
                              :now, :now)
                     """
                     ),
@@ -417,7 +366,6 @@ class InternalDataRepository:
                         "balance": data.get("balance", 0),
                         "status": data.get("status", "DRAFT"),
                         "line_items": line_items_json,
-                        "external_id": external_id,
                         "now": now,
                     },
                 )
@@ -457,25 +405,16 @@ class InternalDataRepository:
             rows = result.mappings().all()
             return [self._row_to_dict(row) for row in rows]
 
-    async def upsert_chart_of_accounts(self, client_id: UUID, data: dict[str, Any]) -> str:
+    async def upsert_chart_of_accounts(
+        self, client_id: UUID, data: dict[str, Any], record_id: str | None = None
+    ) -> str:
         """Create or update a chart of accounts record. Returns the internal record ID."""
         factory = _get_session_factory()
         now = datetime.now(UTC)
 
         async with factory() as session:
-            external_id = data.get("_external_id")
-            existing = None
-            if external_id:
-                result = await session.execute(
-                    text(
-                        "SELECT id FROM sample_chart_of_accounts WHERE client_id = :client_id AND external_id = :ext_id"
-                    ),
-                    {"client_id": str(client_id), "ext_id": external_id},
-                )
-                existing = result.first()
-
-            if existing:
-                record_id = str(existing[0])
+            if record_id:
+                # Update existing record
                 await session.execute(
                     text(
                         """
@@ -510,6 +449,7 @@ class InternalDataRepository:
                     },
                 )
             else:
+                # Insert new record
                 record_id = str(uuid4())
                 await session.execute(
                     text(
@@ -517,11 +457,11 @@ class InternalDataRepository:
                         INSERT INTO sample_chart_of_accounts
                             (id, client_id, name, account_number, account_type, account_sub_type,
                              classification, current_balance, currency, description, active,
-                             parent_account_external_id, external_id, created_at, updated_at)
+                             parent_account_external_id, created_at, updated_at)
                         VALUES
                             (:id, :client_id, :name, :account_number, :account_type, :account_sub_type,
                              :classification, :current_balance, :currency, :description, :active,
-                             :parent_account_external_id, :external_id, :now, :now)
+                             :parent_account_external_id, :now, :now)
                     """
                     ),
                     {
@@ -537,40 +477,12 @@ class InternalDataRepository:
                         "description": data.get("description"),
                         "active": data.get("active", True),
                         "parent_account_external_id": data.get("parent_account_external_id"),
-                        "external_id": external_id,
                         "now": now,
                     },
                 )
 
             await session.commit()
             return record_id
-
-    # ------------------------------------------------------------------
-    # Update external_id after outbound sync
-    # ------------------------------------------------------------------
-
-    async def set_external_id(
-        self,
-        table: str,
-        record_id: str,
-        external_id: str,
-    ) -> None:
-        """Set the external_id on an internal record after successful outbound sync."""
-        if table not in (
-            "sample_vendors",
-            "sample_bills",
-            "sample_invoices",
-            "sample_chart_of_accounts",
-        ):
-            raise ValueError(f"Invalid table: {table}")
-
-        factory = _get_session_factory()
-        async with factory() as session:
-            await session.execute(
-                text(f"UPDATE {table} SET external_id = :ext_id, updated_at = :now WHERE id = :id"),
-                {"ext_id": external_id, "now": datetime.now(UTC), "id": record_id},
-            )
-            await session.commit()
 
     # ------------------------------------------------------------------
     # Helpers
@@ -587,10 +499,3 @@ class InternalDataRepository:
                 result[key] = val.isoformat()
         return result
 
-    # Entity type → (table name, getter, upserter)
-    ENTITY_TABLE_MAP: dict[str, str] = {
-        "vendor": "sample_vendors",
-        "bill": "sample_bills",
-        "invoice": "sample_invoices",
-        "chart_of_accounts": "sample_chart_of_accounts",
-    }

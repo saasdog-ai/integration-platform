@@ -194,13 +194,16 @@ class XeroSyncStrategy:
 
         Returns an IntegrationStateRecord ready for batch upsert.
         """
-        # 1. Map Xero data to internal schema
+        # 1. Look up existing state to get internal record_id (if previously synced)
+        existing = await state_repo.get_record_by_external_id(
+            job.client_id, job.integration_id, entity_type, record.id
+        )
+        record_id = existing.internal_record_id if existing else None
+
+        # 2. Map Xero data to internal schema
         mapped_data = mapper_fn(record.data)
 
-        # Tag with external_id so the internal repo can do upsert-by-external-id
-        mapped_data["_external_id"] = record.id
-
-        # Resolve vendor dependency before bill upsert
+        # 3. Resolve FK references via integration_state before upsert
         if entity_type == "bill" and mapped_data.get("vendor_external_id") and adapter:
             await self._ensure_vendor_synced(
                 job,
@@ -208,16 +211,26 @@ class XeroSyncStrategy:
                 adapter,
                 state_repo,
             )
+            # Resolve vendor_external_id → vendor internal_record_id
+            vendor_state = await state_repo.get_record_by_external_id(
+                job.client_id, job.integration_id, "vendor", mapped_data["vendor_external_id"]
+            )
+            if vendor_state and vendor_state.internal_record_id:
+                mapped_data["vendor_id"] = vendor_state.internal_record_id
 
-        # 2. Write to internal database
+        if entity_type == "invoice" and mapped_data.get("contact_external_id"):
+            # Resolve contact_external_id → contact internal_record_id
+            contact_state = await state_repo.get_record_by_external_id(
+                job.client_id, job.integration_id, "vendor", mapped_data["contact_external_id"]
+            )
+            if contact_state and contact_state.internal_record_id:
+                mapped_data["contact_id"] = contact_state.internal_record_id
+
+        # 4. Write to internal database
         upsert_fn = self._get_internal_upsert_fn(entity_type)
-        internal_record_id = await upsert_fn(job.client_id, mapped_data)
+        internal_record_id = await upsert_fn(job.client_id, mapped_data, record_id=record_id)
 
-        # 3. Build IntegrationStateRecord
-        existing = await state_repo.get_record_by_external_id(
-            job.client_id, job.integration_id, entity_type, record.id
-        )
-
+        # 5. Build IntegrationStateRecord
         now = datetime.now(UTC)
 
         if existing:
@@ -581,9 +594,10 @@ class XeroSyncStrategy:
                 if direction == SyncDirection.INBOUND:
                     if mapper_fn:
                         mapped_data = mapper_fn(record.data)
-                        mapped_data["_external_id"] = record.id
                         upsert_fn = self._get_internal_upsert_fn(entity_type)
-                        internal_record_id = await upsert_fn(job.client_id, mapped_data)
+                        internal_record_id = await upsert_fn(
+                            job.client_id, mapped_data, record_id=existing.internal_record_id
+                        )
                         if internal_record_id and not existing.internal_record_id:
                             existing.internal_record_id = internal_record_id
 
@@ -724,86 +738,6 @@ class XeroSyncStrategy:
             },
         )
         return result
-
-    async def _process_outbound_record(
-        self,
-        job: SyncJob,
-        entity_type: str,
-        internal_record: dict[str, Any],
-        mapper_fn: Any,
-        adapter: IntegrationAdapterInterface,
-        state_repo: IntegrationStateRepositoryInterface,
-    ) -> tuple[IntegrationStateRecord, str]:
-        """Map a single internal record and push to Xero.
-
-        Returns (IntegrationStateRecord, external_id).
-        """
-        internal_id = str(internal_record["id"])
-        existing_external_id = internal_record.get("external_id")
-
-        # 1. Map internal data to Xero schema
-        xero_payload = mapper_fn(internal_record)
-
-        # 2. Create or update in Xero
-        if existing_external_id:
-            external_record = await adapter.update_record(
-                entity_type, existing_external_id, xero_payload
-            )
-            external_id = existing_external_id
-        else:
-            external_record = await adapter.create_record(entity_type, xero_payload)
-            external_id = external_record.id
-
-            # Update external_id in internal database
-            table = InternalDataRepository.ENTITY_TABLE_MAP.get(entity_type)
-            if table:
-                await self._internal_repo.set_external_id(table, internal_id, external_id)
-
-        # 3. Build / update IntegrationStateRecord
-        existing_state = await state_repo.get_record(
-            job.client_id,
-            job.integration_id,
-            entity_type,
-            internal_record_id=internal_id,
-        )
-
-        now = datetime.now(UTC)
-
-        if existing_state:
-            existing_state.external_record_id = external_id
-            existing_state.internal_version_id = max(
-                existing_state.internal_version_id, existing_state.external_version_id
-            )
-            existing_state.external_version_id = existing_state.internal_version_id
-            existing_state.last_sync_version_id = existing_state.internal_version_id
-            existing_state.sync_status = RecordSyncStatus.SYNCED
-            existing_state.sync_direction = SyncDirection.OUTBOUND
-            existing_state.last_synced_at = now
-            existing_state.last_job_id = job.id
-            existing_state.updated_at = now
-            await state_repo.upsert_record(existing_state)
-            return existing_state, external_id
-        else:
-            state = IntegrationStateRecord(
-                id=uuid4(),
-                client_id=job.client_id,
-                integration_id=job.integration_id,
-                entity_type=entity_type,
-                internal_record_id=internal_id,
-                external_record_id=external_id,
-                sync_status=RecordSyncStatus.SYNCED,
-                sync_direction=SyncDirection.OUTBOUND,
-                internal_version_id=1,
-                external_version_id=1,
-                last_sync_version_id=1,
-                last_synced_at=now,
-                last_job_id=job.id,
-                metadata={"data": internal_record},
-                created_at=now,
-                updated_at=now,
-            )
-            await state_repo.upsert_record(state)
-            return state, external_id
 
     # ------------------------------------------------------------------
     # Internal helpers

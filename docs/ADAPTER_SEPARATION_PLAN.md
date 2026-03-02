@@ -1,7 +1,7 @@
 # Adapter Separation Plan: Hosted Integration Platform
 
 This document outlines the architecture for separating the integration-platform into:
-1. **Platform** (hosted by SaaSDog, closed source)
+1. **Platform** (hosted by SaaSDog, potentially closed source if we want)
 2. **Adapter SDK** (published to PyPI, open source)
 3. **Customer Integrations** (customer's repo, Claude Code accessible)
 

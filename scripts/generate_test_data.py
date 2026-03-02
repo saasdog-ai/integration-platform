@@ -2,8 +2,8 @@
 """Generate test data in the internal database for sync testing.
 
 Seeds sample_vendors, sample_bills, and sample_invoices with realistic
-test data. Records are created with external_id = NULL so they appear
-as "not yet synced" for outbound sync testing.
+test data. Records are created without external integration state so they
+appear as "not yet synced" for outbound sync testing.
 
 Usage:
     python scripts/generate_test_data.py
@@ -195,7 +195,6 @@ def generate_vendors(count: int, client_id: str) -> list[dict]:
             "status": random.choices(["ACTIVE", "ARCHIVED"], weights=[0.85, 0.15])[0],
             "currency": random.choices(["USD", "CAD", "EUR"], weights=[0.8, 0.1, 0.1])[0],
             "address": json.dumps(_random_address()),
-            "external_id": None,
             "created_at": now - timedelta(days=random.randint(30, 365)),
             "updated_at": now - timedelta(days=random.randint(0, 30)),
         })
@@ -233,7 +232,6 @@ def generate_bills(count: int, client_id: str, vendor_ids: list[str]) -> list[di
             "currency": "USD",
             "status": status,
             "line_items": json.dumps(line_items),
-            "external_id": None,
             "created_at": date,
             "updated_at": now - timedelta(days=random.randint(0, 10)),
         })
@@ -282,7 +280,6 @@ def generate_invoices(count: int, client_id: str, vendor_ids: list[str]) -> list
             "balance": balance,
             "status": status,
             "line_items": json.dumps(line_items),
-            "external_id": None,
             "created_at": issue_date,
             "updated_at": now - timedelta(days=random.randint(0, 10)),
         })
@@ -311,11 +308,11 @@ async def insert_vendors(session: AsyncSession, vendors: list[dict]) -> None:
                 INSERT INTO sample_vendors
                     (id, client_id, name, email_address, phone, tax_number,
                      is_supplier, is_customer, status, currency, address,
-                     external_id, created_at, updated_at)
+                     created_at, updated_at)
                 VALUES
                     (:id, :client_id, :name, :email_address, :phone, :tax_number,
                      :is_supplier, :is_customer, :status, :currency, :address::json,
-                     :external_id, :created_at, :updated_at)
+                     :created_at, :updated_at)
             """),
             v,
         )
@@ -328,11 +325,11 @@ async def insert_bills(session: AsyncSession, bills: list[dict]) -> None:
                 INSERT INTO sample_bills
                     (id, client_id, bill_number, vendor_id, amount, date, due_date,
                      paid_on_date, description, currency, status, line_items,
-                     external_id, created_at, updated_at)
+                     created_at, updated_at)
                 VALUES
                     (:id, :client_id, :bill_number, :vendor_id, :amount, :date, :due_date,
                      :paid_on_date, :description, :currency, :status, :line_items::json,
-                     :external_id, :created_at, :updated_at)
+                     :created_at, :updated_at)
             """),
             b,
         )
@@ -346,12 +343,12 @@ async def insert_invoices(session: AsyncSession, invoices: list[dict]) -> None:
                     (id, client_id, invoice_number, contact_id, issue_date, due_date,
                      paid_on_date, memo, currency, sub_total, total_tax_amount,
                      total_amount, balance, status, line_items,
-                     external_id, created_at, updated_at)
+                     created_at, updated_at)
                 VALUES
                     (:id, :client_id, :invoice_number, :contact_id, :issue_date, :due_date,
                      :paid_on_date, :memo, :currency, :sub_total, :total_tax_amount,
                      :total_amount, :balance, :status, :line_items::json,
-                     :external_id, :created_at, :updated_at)
+                     :created_at, :updated_at)
             """),
             inv,
         )
@@ -413,7 +410,7 @@ async def main(args: argparse.Namespace) -> None:
 
     total = len(vendors) + len(bills) + len(invoices)
     print(f"\n  Total records created: {total}")
-    print(f"  All records have external_id = NULL (ready for outbound sync)")
+    print(f"  All records created (ready for outbound sync via integration_state)")
     print()
 
 

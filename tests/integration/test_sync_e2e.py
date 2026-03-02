@@ -60,24 +60,17 @@ CLIENT_ID = UUID("aaa00000-0000-0000-0000-000000000001")
 class _MockInternalRepo:
     """Fake internal DB so the strategy never touches a real database."""
 
-    ENTITY_TABLE_MAP = {
-        "vendor": "sample_vendors",
-        "bill": "sample_bills",
-        "invoice": "sample_invoices",
-        "chart_of_accounts": "sample_chart_of_accounts",
-    }
+    async def upsert_vendor(self, client_id, data, record_id=None):
+        return record_id or str(uuid4())
 
-    async def upsert_vendor(self, client_id, data):
-        return str(uuid4())
+    async def upsert_bill(self, client_id, data, record_id=None):
+        return record_id or str(uuid4())
 
-    async def upsert_bill(self, client_id, data):
-        return str(uuid4())
+    async def upsert_invoice(self, client_id, data, record_id=None):
+        return record_id or str(uuid4())
 
-    async def upsert_invoice(self, client_id, data):
-        return str(uuid4())
-
-    async def upsert_chart_of_accounts(self, client_id, data):
-        return str(uuid4())
+    async def upsert_chart_of_accounts(self, client_id, data, record_id=None):
+        return record_id or str(uuid4())
 
     async def get_vendors(self, client_id, **kw):
         return []
@@ -90,9 +83,6 @@ class _MockInternalRepo:
 
     async def get_chart_of_accounts(self, client_id, **kw):
         return []
-
-    async def set_external_id(self, table, record_id, external_id):
-        pass
 
 
 class _TestableStrategy(QuickBooksSyncStrategy):

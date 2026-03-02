@@ -25,7 +25,8 @@ import "./index.css"
 import { Routes, Route, Navigate } from "react-router-dom"
 import { ErrorBoundary } from "@/components/ErrorBoundary"
 import { ToastProvider } from "@/contexts/ToastContext"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { QueryClient } from "@tanstack/react-query"
+import { IntegrationsProvider } from "@/providers/ConfigProvider"
 import {
   IntegrationList,
   IntegrationDetail,
@@ -51,6 +52,10 @@ interface MicroFrontendProps {
    * Optional QueryClient from host app for shared caching
    */
   queryClient?: QueryClient
+  /**
+   * Client ID for multi-tenant isolation
+   */
+  clientId?: string
 }
 
 /**
@@ -63,12 +68,12 @@ interface MicroFrontendProps {
  * - /jobs      → Sync jobs list
  * - /jobs/:id  → Job detail
  */
-export function IntegrationsMicroFrontend({ queryClient }: MicroFrontendProps) {
+export function IntegrationsMicroFrontend({ queryClient, clientId }: MicroFrontendProps) {
   const client = queryClient || defaultQueryClient
 
   return (
     <ErrorBoundary>
-      <QueryClientProvider client={client}>
+      <IntegrationsProvider config={{ clientId }} queryClient={client}>
         <ToastProvider>
           <div className="integrations-content" style={{ fontFamily: 'inherit' }}>
             <Routes>
@@ -96,7 +101,7 @@ export function IntegrationsMicroFrontend({ queryClient }: MicroFrontendProps) {
             </Routes>
           </div>
         </ToastProvider>
-      </QueryClientProvider>
+      </IntegrationsProvider>
     </ErrorBoundary>
   )
 }
