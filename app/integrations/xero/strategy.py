@@ -155,6 +155,27 @@ class XeroSyncStrategy:
                         },
                     )
                     result["records_failed"] += 1
+                    # Write failure history even without a state record
+                    try:
+                        entry = IntegrationHistoryRecord(
+                            id=uuid4(),
+                            client_id=job.client_id,
+                            state_record_id=uuid4(),
+                            integration_id=job.integration_id,
+                            entity_type=entity_type,
+                            internal_record_id=None,
+                            external_record_id=record.id,
+                            sync_status=RecordSyncStatus.FAILED,
+                            sync_direction=SyncDirection.INBOUND,
+                            job_id=job.id,
+                            error_code="SYNC_FAILED",
+                            error_message=str(e)[:500],
+                            error_details=None,
+                            created_at=datetime.now(UTC),
+                        )
+                        await state_repo.batch_create_history([entry])
+                    except Exception:
+                        pass  # Best-effort history write
 
             if not next_token:
                 break
@@ -399,6 +420,9 @@ class XeroSyncStrategy:
                     },
                 )
                 result["records_failed"] += 1
+                await self._write_failure_history(
+                    state, state_repo, job.id, SyncDirection.OUTBOUND, e
+                )
 
         # 3. Write history
         if successful_states:
@@ -662,6 +686,26 @@ class XeroSyncStrategy:
                     },
                 )
                 result["records_failed"] += 1
+                try:
+                    entry = IntegrationHistoryRecord(
+                        id=uuid4(),
+                        client_id=job.client_id,
+                        state_record_id=None,
+                        integration_id=job.integration_id,
+                        entity_type=entity_type,
+                        internal_record_id=None,
+                        external_record_id=record.id,
+                        sync_status=RecordSyncStatus.FAILED,
+                        sync_direction=SyncDirection.INBOUND,
+                        job_id=job.id,
+                        error_code="SYNC_FAILED",
+                        error_message=str(e)[:500],
+                        error_details=None,
+                        created_at=datetime.now(UTC),
+                    )
+                    await state_repo.batch_create_history([entry])
+                except Exception:
+                    pass
 
         # 3. Handle internal-only records
         synced_records = await state_repo.get_records_by_status(
@@ -715,6 +759,9 @@ class XeroSyncStrategy:
                     },
                 )
                 result["records_failed"] += 1
+                await self._write_failure_history(
+                    state, state_repo, job.id, SyncDirection.OUTBOUND, e
+                )
 
         # 4. Flush remaining inbound records
         if records_to_upsert:
@@ -876,6 +923,40 @@ class XeroSyncStrategy:
                     "records_count": len(records),
                     "error": str(e),
                 },
+            )
+
+    async def _write_failure_history(
+        self,
+        state: IntegrationStateRecord,
+        state_repo: IntegrationStateRepositoryInterface,
+        job_id: UUID,
+        direction: SyncDirection,
+        error: Exception,
+    ) -> None:
+        """Write a history entry for a failed sync attempt."""
+        try:
+            error_msg = str(error)[:500]
+            entry = IntegrationHistoryRecord(
+                id=uuid4(),
+                client_id=state.client_id,
+                state_record_id=state.id,
+                integration_id=state.integration_id,
+                entity_type=state.entity_type,
+                internal_record_id=state.internal_record_id,
+                external_record_id=state.external_record_id,
+                sync_status=RecordSyncStatus.FAILED,
+                sync_direction=direction,
+                job_id=job_id,
+                error_code="SYNC_FAILED",
+                error_message=error_msg,
+                error_details=None,
+                created_at=datetime.now(UTC),
+            )
+            await state_repo.batch_create_history([entry])
+        except Exception as hist_err:
+            logger.error(
+                "Failed to write failure history entry",
+                extra={"job_id": str(job_id), "error": str(hist_err)},
             )
 
     def _get_internal_upsert_fn(self, entity_type: str):
