@@ -6,7 +6,13 @@ from uuid import UUID, uuid4
 import pytest
 
 from app.domain.entities import IntegrationStateRecord, SyncJob, SyncRule
-from app.domain.enums import RecordSyncStatus, SyncDirection, SyncJobStatus, SyncJobTrigger, SyncJobType
+from app.domain.enums import (
+    RecordSyncStatus,
+    SyncDirection,
+    SyncJobStatus,
+    SyncJobTrigger,
+    SyncJobType,
+)
 from app.integrations.xero.constants import INBOUND_ENTITY_ORDER, OUTBOUND_ENTITY_ORDER
 from app.integrations.xero.mappers import (
     _get_where_filter,
