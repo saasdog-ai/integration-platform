@@ -227,6 +227,8 @@ def map_bill_inbound(xero_data: dict) -> dict:
             "unit_price": float(line.get("UnitAmount", 0)),
             "total": float(line.get("LineAmount", 0)),
         }
+        if line.get("AccountCode"):
+            mapped_line["account_code"] = line["AccountCode"]
         line_items.append(mapped_line)
 
     total = float(xero_data.get("Total", 0))
@@ -265,10 +267,13 @@ def map_bill_inbound(xero_data: dict) -> dict:
 
 
 def map_bill_outbound(internal_data: dict) -> dict:
-    """Map sample_bills fields to Xero Invoice (ACCPAY) payload."""
+    """Map sample_bills fields to Xero Invoice (ACCPAY) payload.
+
+    Does NOT set Status — Xero defaults new invoices to DRAFT, and
+    updates must not regress status (AUTHORISED → DRAFT is rejected).
+    """
     result: dict[str, Any] = {
         "Type": "ACCPAY",
-        "Status": "DRAFT",
     }
 
     if internal_data.get("bill_number"):
@@ -295,19 +300,19 @@ def map_bill_outbound(internal_data: dict) -> dict:
     if internal_data.get("vendor_external_id"):
         result["Contact"] = {"ContactID": internal_data["vendor_external_id"]}
 
-    # Line items
+    # Line items — preserve AccountCode from inbound round-trip
     line_items = _safe_json(internal_data.get("line_items")) or []
     xero_lines = []
     for item in line_items:
         if isinstance(item, dict):
-            xero_lines.append(
-                {
-                    "Description": item.get("description", ""),
-                    "Quantity": float(item.get("quantity", 1)),
-                    "UnitAmount": float(item.get("unit_price", 0)),
-                    "AccountCode": "400",  # Default expense account
-                }
-            )
+            xero_line: dict[str, Any] = {
+                "Description": item.get("description", ""),
+                "Quantity": float(item.get("quantity", 1)),
+                "UnitAmount": float(item.get("unit_price", 0)),
+            }
+            if item.get("account_code"):
+                xero_line["AccountCode"] = item["account_code"]
+            xero_lines.append(xero_line)
 
     if not xero_lines:
         xero_lines.append(
@@ -315,7 +320,6 @@ def map_bill_outbound(internal_data: dict) -> dict:
                 "Description": internal_data.get("description", "Expense"),
                 "Quantity": 1,
                 "UnitAmount": float(internal_data.get("amount", 0)),
-                "AccountCode": "400",
             }
         )
 
@@ -341,6 +345,8 @@ def map_invoice_inbound(xero_data: dict) -> dict:
             "unit_price": float(line.get("UnitAmount", 0)),
             "total": float(line.get("LineAmount", 0)),
         }
+        if line.get("AccountCode"):
+            mapped_line["account_code"] = line["AccountCode"]
         line_items.append(mapped_line)
 
     total_amount = float(xero_data.get("Total", 0))
@@ -389,10 +395,13 @@ def map_invoice_inbound(xero_data: dict) -> dict:
 
 
 def map_invoice_outbound(internal_data: dict) -> dict:
-    """Map sample_invoices fields to Xero Invoice (ACCREC) payload."""
+    """Map sample_invoices fields to Xero Invoice (ACCREC) payload.
+
+    Does NOT set Status — Xero defaults new invoices to DRAFT, and
+    updates must not regress status (AUTHORISED → DRAFT is rejected).
+    """
     result: dict[str, Any] = {
         "Type": "ACCREC",
-        "Status": "DRAFT",
     }
 
     if internal_data.get("invoice_number"):
@@ -422,19 +431,19 @@ def map_invoice_outbound(internal_data: dict) -> dict:
     if internal_data.get("contact_external_id"):
         result["Contact"] = {"ContactID": internal_data["contact_external_id"]}
 
-    # Line items
+    # Line items — preserve AccountCode from inbound round-trip
     line_items = _safe_json(internal_data.get("line_items")) or []
     xero_lines = []
     for item in line_items:
         if isinstance(item, dict):
-            xero_lines.append(
-                {
-                    "Description": item.get("description", ""),
-                    "Quantity": float(item.get("quantity", 1)),
-                    "UnitAmount": float(item.get("unit_price", 0)),
-                    "AccountCode": "200",  # Default revenue account
-                }
-            )
+            xero_line: dict[str, Any] = {
+                "Description": item.get("description", ""),
+                "Quantity": float(item.get("quantity", 1)),
+                "UnitAmount": float(item.get("unit_price", 0)),
+            }
+            if item.get("account_code"):
+                xero_line["AccountCode"] = item["account_code"]
+            xero_lines.append(xero_line)
 
     if not xero_lines:
         xero_lines.append(
@@ -442,7 +451,6 @@ def map_invoice_outbound(internal_data: dict) -> dict:
                 "Description": internal_data.get("memo", "Service"),
                 "Quantity": 1,
                 "UnitAmount": float(internal_data.get("total_amount", 0)),
-                "AccountCode": "200",
             }
         )
 

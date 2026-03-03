@@ -98,15 +98,35 @@ class XeroAdapter(IntegrationAdapterInterface):
         # Xero returns 2xx for success
         if not response.is_success:
             error_body = response.text
+
+            # Extract ValidationErrors from Xero's JSON error response.
+            # Xero buries them inside Elements[*].ValidationErrors[*].Message,
+            # after the full invoice object — raw truncation never reaches them.
+            validation_msgs: list[str] = []
+            try:
+                err_json = response.json()
+                for element in err_json.get("Elements", []):
+                    for ve in element.get("ValidationErrors", []):
+                        msg = ve.get("Message", "")
+                        if msg:
+                            validation_msgs.append(msg)
+            except Exception:
+                pass
+
+            detail = "; ".join(validation_msgs) if validation_msgs else error_body[:500]
+
             logger.error(
                 "Xero API error",
                 extra={
                     "status_code": response.status_code,
-                    "response_body": error_body[:500],
                     "url": url,
+                    "validation_errors": validation_msgs,
+                    "response_body": error_body[:1000],
                 },
             )
-            raise Exception(f"Xero API error ({response.status_code}): {error_body[:200]}")
+            raise Exception(
+                f"Xero API error ({response.status_code}): {detail}"
+            )
 
         return response.json()
 

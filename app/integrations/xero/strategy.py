@@ -24,7 +24,7 @@ from app.domain.interfaces import (
     IntegrationAdapterInterface,
     IntegrationStateRepositoryInterface,
 )
-from app.integrations.quickbooks.internal_repo import InternalDataRepository
+from app.integrations.shared.internal_repo import InternalDataRepository
 from app.integrations.xero.constants import (
     ENTITY_DISPLAY_NAMES,
     INBOUND_ENTITY_ORDER,
@@ -836,7 +836,21 @@ class XeroSyncStrategy:
                 if contact_state and contact_state.external_record_id:
                     internal_data["contact_external_id"] = contact_state.external_record_id
 
-            return outbound_mapper(internal_data)
+            mapped = outbound_mapper(internal_data)
+
+            # Xero requires AccountCode on every LineItem. If the internal DB
+            # doesn't have account_code (e.g., bill synced before the mapper
+            # started preserving it), backfill from the raw Xero data stored
+            # in state metadata from the last inbound sync.
+            if entity_type in ("bill", "invoice") and mapped.get("LineItems"):
+                original_lines = fallback.get("LineItems") or []
+                for i, line in enumerate(mapped["LineItems"]):
+                    if "AccountCode" not in line and i < len(original_lines):
+                        orig_code = original_lines[i].get("AccountCode")
+                        if orig_code:
+                            line["AccountCode"] = orig_code
+
+            return mapped
         except Exception as e:
             logger.warning(
                 "Failed to read internal record for outbound mapping, using metadata fallback",

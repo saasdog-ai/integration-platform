@@ -1,9 +1,12 @@
 """Tests for Xero integration — mappers, strategy ordering, adapter helpers."""
 
 from datetime import UTC, datetime
+from uuid import UUID, uuid4
 
-from app.domain.entities import SyncRule
-from app.domain.enums import SyncDirection
+import pytest
+
+from app.domain.entities import IntegrationStateRecord, SyncJob, SyncRule
+from app.domain.enums import RecordSyncStatus, SyncDirection, SyncJobStatus, SyncJobTrigger, SyncJobType
 from app.integrations.xero.constants import INBOUND_ENTITY_ORDER, OUTBOUND_ENTITY_ORDER
 from app.integrations.xero.mappers import (
     _get_where_filter,
@@ -317,11 +320,58 @@ class TestBillMappers:
         assert len(result["LineItems"]) == 1
         assert result["LineItems"][0]["Quantity"] == 2.0
 
+    def test_outbound_no_status(self):
+        """Outbound must not set Status — Xero rejects DRAFT on updates to approved bills."""
+        internal = {"bill_number": "B-003", "amount": 100}
+        result = map_bill_outbound(internal)
+        assert "Status" not in result
+
     def test_outbound_default_line(self):
         internal = {"amount": 999, "description": "Misc"}
         result = map_bill_outbound(internal)
         assert len(result["LineItems"]) == 1
         assert result["LineItems"][0]["UnitAmount"] == 999.0
+        assert "AccountCode" not in result["LineItems"][0]
+
+    def test_inbound_preserves_account_code(self):
+        """AccountCode from Xero line items must survive inbound→outbound round-trip."""
+        xero = {
+            "Total": 500,
+            "AmountDue": 500,
+            "Status": "DRAFT",
+            "LineItems": [
+                {
+                    "Description": "Work",
+                    "Quantity": 1,
+                    "UnitAmount": 500,
+                    "LineAmount": 500,
+                    "AccountCode": "429",
+                },
+            ],
+        }
+        inbound = map_bill_inbound(xero)
+        assert inbound["line_items"][0]["account_code"] == "429"
+
+        outbound = map_bill_outbound(inbound)
+        assert outbound["LineItems"][0]["AccountCode"] == "429"
+
+    def test_outbound_account_code_from_line_items(self):
+        internal = {
+            "line_items": [
+                {"description": "A", "quantity": 1, "unit_price": 100, "account_code": "300"},
+            ],
+        }
+        result = map_bill_outbound(internal)
+        assert result["LineItems"][0]["AccountCode"] == "300"
+
+    def test_outbound_no_account_code_when_missing(self):
+        internal = {
+            "line_items": [
+                {"description": "A", "quantity": 1, "unit_price": 100},
+            ],
+        }
+        result = map_bill_outbound(internal)
+        assert "AccountCode" not in result["LineItems"][0]
 
 
 # ---------------------------------------------------------------------------
@@ -400,6 +450,44 @@ class TestInvoiceMappers:
         assert result["Reference"] == "Test memo"
         assert len(result["LineItems"]) == 1
         assert result["LineItems"][0]["Quantity"] == 5.0
+
+    def test_outbound_no_status(self):
+        """Outbound must not set Status — Xero rejects DRAFT on updates to approved invoices."""
+        internal = {"invoice_number": "INV-003", "total_amount": 100}
+        result = map_invoice_outbound(internal)
+        assert "Status" not in result
+
+    def test_inbound_preserves_account_code(self):
+        """AccountCode from Xero line items must survive inbound→outbound round-trip."""
+        xero = {
+            "Total": 1000,
+            "AmountDue": 1000,
+            "TotalTax": 0,
+            "Status": "DRAFT",
+            "LineItems": [
+                {
+                    "Description": "Consulting",
+                    "Quantity": 10,
+                    "UnitAmount": 100,
+                    "LineAmount": 1000,
+                    "AccountCode": "200",
+                },
+            ],
+        }
+        inbound = map_invoice_inbound(xero)
+        assert inbound["line_items"][0]["account_code"] == "200"
+
+        outbound = map_invoice_outbound(inbound)
+        assert outbound["LineItems"][0]["AccountCode"] == "200"
+
+    def test_outbound_no_account_code_when_missing(self):
+        internal = {
+            "line_items": [
+                {"description": "A", "quantity": 1, "unit_price": 100},
+            ],
+        }
+        result = map_invoice_outbound(internal)
+        assert "AccountCode" not in result["LineItems"][0]
 
 
 # ---------------------------------------------------------------------------
@@ -546,6 +634,187 @@ class TestStrategyOrdering:
         ordered = self.strategy.get_ordered_rules(rules, SyncDirection.INBOUND)
         assert ordered[0].entity_type == "vendor"
         assert ordered[1].entity_type == "custom_entity"
+
+
+# ---------------------------------------------------------------------------
+# Strategy — _prepare_outbound_data AccountCode backfill
+# ---------------------------------------------------------------------------
+
+
+class _MockInternalRepo:
+    """Stub internal data repository for unit tests."""
+
+    def __init__(self, bills=None):
+        self._bills = bills or []
+
+    async def upsert_vendor(self, client_id, data, record_id=None):
+        return record_id or str(uuid4())
+
+    async def upsert_bill(self, client_id, data, record_id=None):
+        return record_id or str(uuid4())
+
+    async def upsert_invoice(self, client_id, data, record_id=None):
+        return record_id or str(uuid4())
+
+    async def upsert_chart_of_accounts(self, client_id, data, record_id=None):
+        return record_id or str(uuid4())
+
+    async def get_vendors(self, client_id, **kw):
+        return []
+
+    async def get_bills(self, client_id, **kw):
+        return self._bills
+
+    async def get_invoices(self, client_id, **kw):
+        return []
+
+    async def get_chart_of_accounts(self, client_id, **kw):
+        return []
+
+
+class _MockStateRepo:
+    """Minimal state repo stub for _prepare_outbound_data tests."""
+
+    async def get_record(self, *args, **kwargs):
+        return None
+
+
+class TestPrepareOutboundData:
+    """Test that _prepare_outbound_data backfills AccountCode from metadata."""
+
+    @pytest.mark.asyncio
+    async def test_backfills_account_code_from_metadata(self):
+        """Line items without account_code get AccountCode from raw Xero metadata."""
+        bill_record = {
+            "id": "int-bill-1",
+            "client_id": "cid",
+            "bill_number": "B-001",
+            "amount": 500,
+            "date": "2024-06-01",
+            "line_items": [
+                {"description": "Work", "quantity": 1, "unit_price": 500, "total": 500},
+            ],
+        }
+
+        repo = _MockInternalRepo(bills=[bill_record])
+        strategy = XeroSyncStrategy(internal_repo=repo)
+
+        now = datetime.now(UTC)
+        job = SyncJob(
+            id=uuid4(),
+            client_id=UUID("aaa00000-0000-0000-0000-000000000001"),
+            integration_id=uuid4(),
+            job_type=SyncJobType.INCREMENTAL,
+            triggered_by=SyncJobTrigger.USER,
+            status=SyncJobStatus.RUNNING,
+            created_at=now,
+            updated_at=now,
+        )
+
+        state = IntegrationStateRecord(
+            id=uuid4(),
+            client_id=job.client_id,
+            integration_id=job.integration_id,
+            entity_type="bill",
+            internal_record_id="int-bill-1",
+            external_record_id="xero-inv-1",
+            sync_status=RecordSyncStatus.SYNCED,
+            sync_direction=SyncDirection.OUTBOUND,
+            internal_version_id=2,
+            external_version_id=1,
+            last_sync_version_id=1,
+            last_synced_at=now,
+            last_job_id=job.id,
+            metadata={
+                "data": {
+                    "Type": "ACCPAY",
+                    "LineItems": [
+                        {
+                            "Description": "Work",
+                            "Quantity": 1,
+                            "UnitAmount": 500,
+                            "AccountCode": "429",
+                        },
+                    ],
+                }
+            },
+            created_at=now,
+            updated_at=now,
+        )
+
+        result = await strategy._prepare_outbound_data(
+            job, "bill", state, _MockStateRepo()
+        )
+
+        assert result["LineItems"][0]["AccountCode"] == "429"
+
+    @pytest.mark.asyncio
+    async def test_preserves_account_code_from_internal(self):
+        """Line items that already have account_code keep it (no overwrite from metadata)."""
+        bill_record = {
+            "id": "int-bill-2",
+            "client_id": "cid",
+            "bill_number": "B-002",
+            "amount": 300,
+            "date": "2024-06-01",
+            "line_items": [
+                {
+                    "description": "New work",
+                    "quantity": 1,
+                    "unit_price": 300,
+                    "total": 300,
+                    "account_code": "610",
+                },
+            ],
+        }
+
+        repo = _MockInternalRepo(bills=[bill_record])
+        strategy = XeroSyncStrategy(internal_repo=repo)
+
+        now = datetime.now(UTC)
+        job = SyncJob(
+            id=uuid4(),
+            client_id=UUID("aaa00000-0000-0000-0000-000000000001"),
+            integration_id=uuid4(),
+            job_type=SyncJobType.INCREMENTAL,
+            triggered_by=SyncJobTrigger.USER,
+            status=SyncJobStatus.RUNNING,
+            created_at=now,
+            updated_at=now,
+        )
+
+        state = IntegrationStateRecord(
+            id=uuid4(),
+            client_id=job.client_id,
+            integration_id=job.integration_id,
+            entity_type="bill",
+            internal_record_id="int-bill-2",
+            external_record_id="xero-inv-2",
+            sync_status=RecordSyncStatus.SYNCED,
+            sync_direction=SyncDirection.OUTBOUND,
+            internal_version_id=2,
+            external_version_id=1,
+            last_sync_version_id=1,
+            last_synced_at=now,
+            last_job_id=job.id,
+            metadata={
+                "data": {
+                    "Type": "ACCPAY",
+                    "LineItems": [
+                        {"Description": "Old", "AccountCode": "429"},
+                    ],
+                }
+            },
+            created_at=now,
+            updated_at=now,
+        )
+
+        result = await strategy._prepare_outbound_data(
+            job, "bill", state, _MockStateRepo()
+        )
+
+        # Should use the internal account_code (610), not the metadata one (429)
+        assert result["LineItems"][0]["AccountCode"] == "610"
 
 
 # ---------------------------------------------------------------------------

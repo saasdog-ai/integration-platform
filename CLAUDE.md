@@ -2,7 +2,7 @@
 
 ## What Is This Project?
 
-A production-ready integration platform for syncing data between a SaaS application and external providers (ERPs like QuickBooks Online, CRMs, HRIS systems). Built as an alternative to expensive integration vendors (Workato, MuleSoft, Tray.io). The included QuickBooks integration is a fully working reference implementation.
+A production-ready integration platform for syncing data between a SaaS application and external providers (ERPs like QuickBooks Online, CRMs, HRIS systems). Built as an alternative to expensive integration vendors (Workato, MuleSoft, Tray.io). Includes fully working QuickBooks Online and Xero integrations as reference implementations.
 
 ## Tech Stack
 
@@ -12,7 +12,7 @@ A production-ready integration platform for syncing data between a SaaS applicat
 - **Encryption**: AWS KMS / Azure Key Vault / Fernet (development)
 - **UI**: React micro-frontend (Vite, TypeScript, module federation)
 - **Infrastructure**: Docker, Docker Compose, Terraform (AWS ECS/Fargate)
-- **Testing**: pytest (async), 318 tests (unit + integration)
+- **Testing**: pytest (async), 485 tests (unit + integration)
 
 ## Architecture
 
@@ -30,13 +30,15 @@ app/
     encryption/  KMS/KeyVault/Fernet
     queue/       SQS/in-memory
   integrations/
-    quickbooks/  QBO-specific: strategy, mappers, constants, internal repo, client
+    shared/      Shared components: InternalDataRepository (sample DB access)
+    quickbooks/  QBO-specific: strategy, mappers, constants, client
+    xero/        Xero-specific: strategy, mappers, constants, client
   services/      Business logic: sync_orchestrator, sync_job_runner, integration_service, settings_service
 ```
 
 ### Key Patterns
 
-- **Strategy pattern**: `QuickBooksSyncStrategy` handles QBO-specific sync logic; registered in `sync_orchestrator._SYNC_STRATEGIES`
+- **Strategy pattern**: `QuickBooksSyncStrategy` and `XeroSyncStrategy` handle integration-specific sync logic; registered in `sync_orchestrator._SYNC_STRATEGIES`
 - **Adapter pattern**: `IntegrationAdapterInterface` with factory-based creation
 - **Repository pattern**: All DB access behind interfaces (`domain/interfaces.py`), implementations in `infrastructure/db/repositories.py`
 - **DI container**: `core/dependency_injection.py`
@@ -107,19 +109,28 @@ The `sync_direction` field on `IntegrationStateRecord` always reflects the *actu
 6. Strategy handles entity ordering, schema mapping, version equalization
 7. History entries written for audit
 
-### QuickBooks Integration (`app/integrations/quickbooks/`)
+### Integration Files
 
-| File | Purpose |
-|------|---------|
-| `client.py` | `QuickBooksAdapter` — OAuth, API calls to QBO |
-| `strategy.py` | `QuickBooksSyncStrategy` — entity ordering, inbound/outbound/bidirectional sync |
-| `mappers.py` | Data mapping QBO <-> internal schema (INBOUND_MAPPERS, OUTBOUND_MAPPERS) |
-| `constants.py` | Entity names, ordering, QBO API endpoints |
-| `internal_repo.py` | `InternalDataRepository` — reads/writes to sample_vendors, sample_bills, etc. |
+Both integrations live under `app/integrations/{name}/` and share the same structure:
 
-Entity dependency order: vendor, customer, chart_of_accounts, item, bill, invoice, payment.
+| File | QBO (`quickbooks/`) | Xero (`xero/`) |
+|------|---------------------|-----------------|
+| `client.py` | `QuickBooksAdapter` — OAuth, QBO REST API | `XeroAdapter` — OAuth, Xero API v2.0 |
+| `strategy.py` | `QuickBooksSyncStrategy` | `XeroSyncStrategy` |
+| `mappers.py` | QBO ↔ internal schema | Xero ↔ internal schema (7 entities incl. item, payment) |
+| `constants.py` | Entity ordering, QBO endpoints | Entity ordering, Xero endpoints, OAuth URLs |
 
-The strategy's `__init__` accepts an optional `internal_repo` parameter for test injection.
+Shared: `app/integrations/shared/internal_repo.py` — `InternalDataRepository` (reads/writes sample_* tables). Both strategies import from here. In a real deployment, replace this with an API client to the customer's internal system.
+
+Entity dependency order (both): vendor, customer, chart_of_accounts, item, bill, invoice, payment.
+
+Each strategy's `__init__` accepts an optional `internal_repo` parameter for test injection.
+
+**Intentional API-driven differences:**
+- Xero maps "customer" → vendor table (shared Contacts endpoint); QBO keeps them separate
+- Xero handles `/Date(ms)/` timestamp format; QBO uses ISO format
+- Xero uses `where` clause for `since` filtering; QBO uses API-native params
+- Xero has item/payment inbound mappers; QBO doesn't (different API scopes)
 
 ## API Endpoints
 
@@ -165,29 +176,39 @@ The strategy's `__init__` accepts an optional `internal_repo` parameter for test
 ```
 tests/
   conftest.py              Shared fixtures
-  unit/                    Unit tests (285 tests)
+  unit/                    Unit tests
     test_adapters.py       Adapter factory, mock adapter
     test_api.py            API endpoints
     test_auth.py           Authentication
+    test_admin_auth.py     Admin authentication
+    test_admin_crud.py     Admin CRUD operations
+    test_change_detection.py  Change detection modes
     test_config.py         Configuration
     test_domain.py         Entities, enums
     test_encryption.py     Encryption services
     test_exceptions.py     Exception handling
+    test_feature_flags.py  Feature flags
     test_health.py         Health endpoints
     test_integration_service.py  Integration lifecycle
     test_middleware.py     Middleware
+    test_oauth_state.py    OAuth state handling
     test_queue.py          Queue implementations
     test_quickbooks.py     QBO adapter & strategy
+    test_xero.py           Xero adapter & strategy
+    test_scheduler.py      Scheduler
     test_services.py       Service layer
     test_sync_job_runner.py  Job runner
     test_sync_orchestrator.py  Orchestration
-    test_version_vectors.py  Version vectors & bidirectional sync (30 tests)
-  integration/             Integration tests (3 tests)
+    test_version_vectors.py  Version vectors & bidirectional sync
+  integration/             Integration tests
     test_sync_e2e.py       E2E: outbound -> inbound -> bidirectional lifecycle
+    test_scheduler_e2e.py  Scheduler E2E
   mocks/
     adapters.py            MockIntegrationAdapter, MockAdapterFactory
     encryption.py          MockEncryptionService
+    feature_flags.py       MockFeatureFlagService
     repositories.py        MockIntegrationRepository, MockSyncJobRepository, MockIntegrationStateRepository
+    scheduler.py           MockScheduler
 ```
 
 Run tests:
@@ -229,6 +250,7 @@ Key environment variables:
 - `APP_ENV` — development / production
 - `CLOUD_PROVIDER` — local / aws / azure / gcp
 - `QBO_CLIENT_ID`, `QBO_CLIENT_SECRET`, `QBO_ENVIRONMENT` — QuickBooks OAuth
+- `XERO_CLIENT_ID`, `XERO_CLIENT_SECRET` — Xero OAuth
 - `QUEUE_URL` — SQS queue (production)
 - `JOB_RUNNER_ENABLED`, `JOB_RUNNER_MAX_WORKERS` — background processing
 - `SYNC_GLOBALLY_DISABLED` — kill switch
@@ -307,3 +329,121 @@ The ALB URL is configured in these files. Update when ALB changes.
 - Version vectors equalized after every sync: `iv = ev = lsv = max(iv, ev)`
 - Composite PK on `integration_state` for partition-ready scaling
 - History is append-only; cleanup via retention policy
+
+## Adding a New Integration
+
+Use this checklist to add a new integration (e.g., "Sage"). Copy the `quickbooks/` directory as a starting point and adapt each file.
+
+### 1. Create integration files (`app/integrations/{name}/`)
+
+| File | Purpose | Key requirements |
+|------|---------|------------------|
+| `__init__.py` | Package init | Empty file |
+| `constants.py` | Entity ordering, API endpoints, display names | Define `INBOUND_ENTITY_ORDER`, `OUTBOUND_ENTITY_ORDER`, `ENTITY_DISPLAY_NAMES`, and API-specific constants (base URLs, OAuth endpoints, page sizes, endpoint mappings) |
+| `mappers.py` | Inbound/outbound data mapping | Export `INBOUND_MAPPERS` and `OUTBOUND_MAPPERS` dicts (entity_type → mapper_fn), plus named `map_vendor_inbound` for FK resolution. Each mapper is a pure function: `dict → dict` |
+| `client.py` | API adapter (HTTP calls) | Implement `IntegrationAdapterInterface` from `domain/interfaces.py`. Methods: `fetch_records`, `get_record`, `create_record`, `update_record`, `delete_record`, `check_connection`, `get_auth_url`, `exchange_code`, `refresh_token`, `revoke_token`. Handle pagination and `since` filtering per the external API |
+| `strategy.py` | Sync strategy | Implement the 10 required methods (see Strategy Contract below). Import from your own `constants.py` and `mappers.py`, and import `InternalDataRepository` from `shared/internal_repo.py` for DB access |
+
+### 2. Register in two places
+
+**Adapter factory** (`app/infrastructure/adapters/factory.py`):
+```python
+from app.integrations.{name}.client import {Name}Adapter
+_factory_instance.register("{Integration Display Name}", {Name}Adapter)
+```
+
+**Strategy registry** (`app/services/sync_orchestrator.py` → `_init_strategies()`):
+```python
+from app.integrations.{name}.strategy import {Name}SyncStrategy
+register_sync_strategy("{Integration Display Name}", {Name}SyncStrategy)
+```
+
+The display name string (e.g., `"QuickBooks Online"`, `"Xero"`) must match the `name` column in `available_integrations`.
+
+### 3. Database seeding
+
+Add rows to the seed SQL (`scripts/seed_sample_data.sql`) and/or create an Alembic migration:
+
+- **`available_integrations`**: One row with a fixed UUID, name, type, supported_entities JSON list, and connection_config JSON (OAuth URLs, scopes)
+- **`system_integration_settings`**: One row with default sync rules (entity types, directions, change detection modes). Use the QBO or Xero seed as a template. Referenced by `integration_id` FK to `available_integrations`
+
+### 4. Strategy contract (10 required methods)
+
+```
+get_entity_order(direction) → list[str]
+get_ordered_rules(rules, direction) → list[SyncRule]
+sync_entity_inbound(job, entity_type, adapter, state_repo, since?, record_ids?) → dict
+sync_entity_outbound(job, entity_type, adapter, state_repo, since?, record_ids?, rule?) → dict
+sync_entity_bidirectional(job, entity_type, adapter, state_repo, rule, since?, outbound_since?, record_ids?) → dict
+_process_inbound_record(job, entity_type, record, mapper_fn, state_repo, adapter?) → IntegrationStateRecord
+_flush_inbound_batch(records, state_repo, job) → (created, updated, failed)
+_prepare_outbound_data(job, entity_type, state, state_repo) → dict
+_write_history_entries(records, state_repo, job_id) → None
+_write_failure_history(state, state_repo, job_id, direction, error) → None
+```
+
+**Error handling (CRITICAL)**: `_write_failure_history` must be called in ALL 4 failure paths:
+1. **Inbound** `sync_entity_inbound`: inline `IntegrationHistoryRecord` in the per-record exception handler
+2. **Standalone outbound** `sync_entity_outbound`: call `_write_failure_history()` in the per-record exception handler
+3. **Bidirectional external records** `sync_entity_bidirectional`: inline `IntegrationHistoryRecord` in the per-record exception handler
+4. **Bidirectional internal-only outbound** `sync_entity_bidirectional` (section 3): call `_write_failure_history()` in the per-record exception handler
+
+Missing any of these paths means failed records are silently dropped from the audit log.
+
+**Version vector equalization** — after every successful sync (all directions):
+```python
+max_v = max(state.internal_version_id, state.external_version_id)
+state.internal_version_id = max_v
+state.external_version_id = max_v
+state.last_sync_version_id = max_v
+```
+
+### 5. Mapper contract
+
+```python
+INBOUND_MAPPERS: dict[str, Callable[[dict], dict]] = {
+    "vendor": map_vendor_inbound,
+    "bill": map_bill_inbound,
+    # ... one entry per supported entity type
+}
+
+OUTBOUND_MAPPERS: dict[str, Callable[[dict], dict]] = {
+    "vendor": map_vendor_outbound,
+    "bill": map_bill_outbound,
+    # ... outbound mappers only needed for entities that support outbound sync
+}
+```
+
+**FK resolution pattern**: Inbound mappers for bills should include `vendor_external_id` in their output. The strategy's `_process_inbound_record` resolves this to `vendor_id` via `state_repo.get_record_by_external_id()`. Same pattern for invoices with `contact_external_id`.
+
+### 6. Adapter contract (`IntegrationAdapterInterface`)
+
+Key methods to implement:
+- `fetch_records(entity_type, since?, page_token?, record_ids?)` → `(list[ExternalRecord], next_token)` — must handle pagination and return `ExternalRecord` objects with `id`, `data` (raw API response), and `updated_at`
+- `get_record(entity_type, record_id)` → `ExternalRecord | None`
+- `create_record(entity_type, data)` → `ExternalRecord`
+- `update_record(entity_type, record_id, data)` → `ExternalRecord`
+- OAuth methods: `get_auth_url`, `exchange_code`, `refresh_token`, `revoke_token`
+
+Constructor signature: `__init__(self, integration_name, access_token, external_account_id)`
+
+### 7. Critical patterns to get right
+
+- **Outbound data via `_prepare_outbound_data`**: Always re-read the internal record fresh from the DB and map it. Never use stale metadata from the state record. Falls back to metadata only if the internal read fails.
+- **FK resolution on outbound**: `_prepare_outbound_data` must resolve internal FKs (e.g., `vendor_id` → `vendor_external_id`) via `state_repo.get_record()` before calling the outbound mapper.
+- **Cursor advancement for failing entities**: The orchestrator advances the `since` cursor based on `max_external_updated_at` from the strategy result. If an entity completely fails, return `max_external_updated_at = None` so the cursor stays put and retries next sync.
+- **Customer → vendor table mapping**: If the external API uses a shared endpoint for vendors and customers (like Xero's Contacts), map `_get_internal_upsert_fn("customer")` to `self._internal_repo.upsert_vendor` and filter via API query params.
+- **`internal_repo` reuse**: All integrations share `shared/internal_repo.py` for DB access. Import from `app.integrations.shared.internal_repo` — don't duplicate it. In production, customers replace this with their own data access layer.
+
+### 8. Testing
+
+Create `tests/unit/test_{name}.py` covering:
+- Adapter unit tests (mocked HTTP): fetch_records pagination, create/update/delete, auth URL, token exchange/refresh
+- Strategy unit tests (mocked adapter + state_repo): inbound sync, outbound sync, bidirectional with conflicts, error handling (verify failure history is written)
+- Mapper unit tests: inbound and outbound mapping for each entity type
+
+Reference files:
+- `tests/unit/test_quickbooks.py` — QBO adapter + strategy tests
+- `tests/unit/test_xero.py` — Xero adapter + strategy tests
+- `tests/unit/test_version_vectors.py` — version vector and bidirectional sync tests (integration-agnostic)
+- `tests/integration/test_sync_e2e.py` — E2E lifecycle test

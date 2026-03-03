@@ -29,7 +29,7 @@ from app.integrations.quickbooks.constants import (
     INBOUND_ENTITY_ORDER,
     OUTBOUND_ENTITY_ORDER,
 )
-from app.integrations.quickbooks.internal_repo import InternalDataRepository
+from app.integrations.shared.internal_repo import InternalDataRepository
 from app.integrations.quickbooks.mappers import INBOUND_MAPPERS, OUTBOUND_MAPPERS, map_vendor_inbound
 
 logger = get_logger(__name__)
