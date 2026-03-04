@@ -5,6 +5,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from app.domain.entities import (
+    AuditLogEntry,
     AvailableIntegration,
     EntitySyncStatus,
     IntegrationHistoryRecord,
@@ -354,6 +355,7 @@ class MockIntegrationStateRepository(IntegrationStateRepositoryInterface):
         self._records: dict[tuple[UUID, UUID], IntegrationStateRecord] = {}
         self._entity_sync_status: dict[tuple[UUID, UUID, str], EntitySyncStatus] = {}
         self._history: dict[tuple[UUID, UUID], IntegrationHistoryRecord] = {}
+        self._audit_log: list[AuditLogEntry] = []
 
     async def get_record(
         self,
@@ -406,6 +408,7 @@ class MockIntegrationStateRepository(IntegrationStateRepositoryInterface):
             and r.integration_id == integration_id
             and r.entity_type == entity_type
             and r.sync_status == status
+            and not r.do_not_sync
         ]
         return records[:limit]
 
@@ -578,6 +581,118 @@ class MockIntegrationStateRepository(IntegrationStateRepositoryInterface):
         existing.records_synced_count = 0
         existing.updated_at = datetime.now(UTC)
         return existing
+
+    async def resolve_record_ids(
+        self,
+        client_id: UUID,
+        integration_id: UUID,
+        entity_type: str,
+        internal_record_ids: list[str] | None = None,
+        external_record_ids: list[str] | None = None,
+    ) -> list[UUID]:
+        """Resolve internal or external record IDs to state record UUIDs."""
+        result = []
+        for (_cid, _rid), record in self._records.items():
+            if record.client_id != client_id or record.integration_id != integration_id:
+                continue
+            if record.entity_type != entity_type:
+                continue
+            if internal_record_ids and record.internal_record_id in internal_record_ids:
+                result.append(record.id)
+            elif external_record_ids and record.external_record_id in external_record_ids:
+                result.append(record.id)
+        return result
+
+    async def force_sync_records(
+        self,
+        client_id: UUID,
+        integration_id: UUID,
+        state_ids: list[UUID],
+    ) -> tuple[int, list[dict]]:
+        """Bulk force-sync: clear errors, equalize vectors, mark SYNCED."""
+        updated = 0
+        skipped: list[dict] = []
+        for sid in state_ids:
+            key = (client_id, sid)
+            record = self._records.get(key)
+            if not record or record.integration_id != integration_id:
+                skipped.append({"state_id": str(sid), "reason": "Record not found"})
+                continue
+            if record.sync_status not in (RecordSyncStatus.FAILED, RecordSyncStatus.CONFLICT):
+                skipped.append({
+                    "state_id": str(sid),
+                    "reason": f"Record status is '{record.sync_status.value}', not failed or conflict",
+                })
+                continue
+            max_v = max(record.internal_version_id, record.external_version_id)
+            record.internal_version_id = max_v
+            record.external_version_id = max_v
+            record.last_sync_version_id = max_v
+            record.sync_status = RecordSyncStatus.SYNCED
+            record.error_code = None
+            record.error_message = None
+            record.error_details = None
+            record.force_synced_at = datetime.now(UTC)
+            record.last_synced_at = datetime.now(UTC)
+            updated += 1
+        return updated, skipped
+
+    async def set_do_not_sync(
+        self,
+        client_id: UUID,
+        integration_id: UUID,
+        state_ids: list[UUID],
+        do_not_sync: bool,
+    ) -> tuple[int, list[dict]]:
+        """Bulk set do_not_sync flag."""
+        updated = 0
+        skipped: list[dict] = []
+        for sid in state_ids:
+            key = (client_id, sid)
+            record = self._records.get(key)
+            if not record or record.integration_id != integration_id:
+                skipped.append({"state_id": str(sid), "reason": "Record not found"})
+                continue
+            record.do_not_sync = do_not_sync
+            if do_not_sync:
+                record.error_code = None
+                record.error_message = None
+                record.error_details = None
+            else:
+                if not record.is_in_sync:
+                    record.sync_status = RecordSyncStatus.PENDING
+            updated += 1
+        return updated, skipped
+
+    async def get_records_paginated(
+        self,
+        client_id: UUID,
+        integration_id: UUID,
+        entity_type: str | None = None,
+        sync_status: RecordSyncStatus | None = None,
+        do_not_sync: bool | None = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[list[IntegrationStateRecord], int]:
+        """Get paginated records for the records browser."""
+        filtered = []
+        for record in self._records.values():
+            if record.client_id != client_id or record.integration_id != integration_id:
+                continue
+            if entity_type and record.entity_type != entity_type:
+                continue
+            if sync_status and record.sync_status != sync_status:
+                continue
+            if do_not_sync is not None and record.do_not_sync != do_not_sync:
+                continue
+            filtered.append(record)
+        total = len(filtered)
+        start = (page - 1) * page_size
+        return filtered[start : start + page_size], total
+
+    async def write_audit_entry(self, entry: AuditLogEntry) -> None:
+        """Write a single audit log entry."""
+        self._audit_log.append(entry)
 
     async def bump_version_vectors(
         self,

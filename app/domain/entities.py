@@ -173,6 +173,8 @@ class IntegrationStateRecord(BaseEntity):
     error_message: str | None = None
     error_details: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
+    do_not_sync: bool = False
+    force_synced_at: datetime | None = None
 
     @property
     def is_in_sync(self) -> bool:
@@ -208,6 +210,22 @@ class IntegrationHistoryRecord(BaseModel):
     error_code: str | None = None
     error_message: str | None = None
     error_details: dict[str, Any] | None = None
+    created_at: datetime
+
+
+class AuditLogEntry(BaseModel):
+    """User/admin action audit trail."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    client_id: UUID
+    integration_id: UUID | None = None
+    action: str
+    entity_type: str | None = None
+    target_record_ids: list[UUID] | None = None
+    details: dict[str, Any] | None = None
+    performed_by: str | None = None
     created_at: datetime
 
 

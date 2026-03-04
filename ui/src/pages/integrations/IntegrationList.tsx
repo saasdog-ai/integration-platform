@@ -207,6 +207,13 @@ export function IntegrationList() {
                     <Button
                       variant="outline"
                       size="sm"
+                      onClick={() => navigate(`${integration.id}/records`)}
+                    >
+                      Records
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
                       onClick={() => navigate(`${integration.id}`)}
                     >
                       Settings

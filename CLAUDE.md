@@ -12,7 +12,7 @@ A production-ready integration platform for syncing data between a SaaS applicat
 - **Encryption**: AWS KMS / Azure Key Vault / Fernet (development)
 - **UI**: React micro-frontend (Vite, TypeScript, module federation)
 - **Infrastructure**: Docker, Docker Compose, Terraform (AWS ECS/Fargate)
-- **Testing**: pytest (async), 485 tests (unit + integration)
+- **Testing**: pytest (async), 519 tests (unit + integration)
 
 ## Architecture
 
@@ -56,6 +56,7 @@ app/
 | `entity_sync_status` | Last sync time per entity type |
 | `integration_state` | Record-level sync state (composite PK: `client_id + id`) |
 | `integration_history` | Append-only sync audit log |
+| `audit_log` | User/admin action audit trail (overrides, settings, connect/disconnect) |
 | `sample_vendors` | Internal vendor records |
 | `sample_bills` | Internal bill records |
 | `sample_invoices` | Internal invoice records |
@@ -63,7 +64,7 @@ app/
 
 ### Migrations (`alembic/versions/`)
 
-001 Initial schema, 002 job_params column, 004 disconnected_at, 005 last_job_id, 006 unique constraints, 007 integration_history, 008 sample data tables, 009 split sync cursors, 010 equalize version vectors.
+001 Initial schema, 002 job_params column, 004 disconnected_at, 005 last_job_id, 006 unique constraints, 007 integration_history, 008 sample data tables, 009 split sync cursors, 010 equalize version vectors, 011-016 various, 017 audit_log table + sync override columns.
 
 ## Sync System
 
@@ -147,6 +148,9 @@ Each strategy's `__init__` accepts an optional `internal_repo` parameter for tes
 - `DELETE /integrations/{id}` — disconnect
 - `GET /integrations/{id}/sync-status` — entity sync statuses
 - `POST /integrations/{id}/sync-status/{entity}/reset` — reset cursor
+- `GET /integrations/{id}/records` — browse records (paginated, filterable by entity_type, sync_status, do_not_sync)
+- `POST /integrations/{id}/records/force-sync` — bulk force-sync failing records (clear errors, equalize version vectors)
+- `POST /integrations/{id}/records/do-not-sync` — bulk toggle do-not-sync flag on records
 
 ### Settings (`/integrations/{id}/settings`)
 - `GET` / `PUT` — user settings
@@ -195,6 +199,7 @@ tests/
     test_queue.py          Queue implementations
     test_quickbooks.py     QBO adapter & strategy
     test_xero.py           Xero adapter & strategy
+    test_sync_overrides.py Force-sync, do-not-sync, audit log, record browser
     test_scheduler.py      Scheduler
     test_services.py       Service layer
     test_sync_job_runner.py  Job runner

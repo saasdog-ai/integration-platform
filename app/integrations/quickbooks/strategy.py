@@ -29,8 +29,12 @@ from app.integrations.quickbooks.constants import (
     INBOUND_ENTITY_ORDER,
     OUTBOUND_ENTITY_ORDER,
 )
+from app.integrations.quickbooks.mappers import (
+    INBOUND_MAPPERS,
+    OUTBOUND_MAPPERS,
+    map_vendor_inbound,
+)
 from app.integrations.shared.internal_repo import InternalDataRepository
-from app.integrations.quickbooks.mappers import INBOUND_MAPPERS, OUTBOUND_MAPPERS, map_vendor_inbound
 
 logger = get_logger(__name__)
 
@@ -218,6 +222,14 @@ class QuickBooksSyncStrategy:
         existing = await state_repo.get_record_by_external_id(
             job.client_id, job.integration_id, entity_type, record.id
         )
+
+        # Skip records flagged as do-not-sync: track external version but
+        # don't write to the internal system
+        if existing and existing.do_not_sync:
+            existing.external_version_id += 1
+            existing.last_sync_version_id = existing.external_version_id
+            return existing
+
         record_id = existing.internal_record_id if existing else None
 
         # 2. Map QBO data to internal schema

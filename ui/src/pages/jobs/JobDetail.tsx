@@ -287,6 +287,7 @@ export function JobDetail() {
     status?: RecordSyncStatus
   }>({})
   const [expandedError, setExpandedError] = useState<string | null>(null)
+  const [showForceSyncConfirm, setShowForceSyncConfirm] = useState(false)
 
   // Fetch job details with auto-refresh for active jobs
   const { data: job, isLoading } = useQuery({
@@ -312,6 +313,24 @@ export function JobDetail() {
     },
     onError: (error: Error) => {
       toast.error('Failed to cancel job', error.message)
+    },
+  })
+
+  // Force sync failed records mutation
+  const forceSyncMutation = useMutation({
+    mutationFn: (stateIds: string[]) =>
+      api.forceSyncRecords(job!.integration_id, { state_ids: stateIds }),
+    onSuccess: (result) => {
+      toast.success(
+        'Force sync complete',
+        `${result.records_updated} records updated${result.records_skipped > 0 ? `, ${result.records_skipped} skipped` : ''}`
+      )
+      setShowForceSyncConfirm(false)
+      queryClient.invalidateQueries({ queryKey: ['sync-job-records', jobId] })
+    },
+    onError: (error: Error) => {
+      toast.error('Force sync failed', error.message)
+      setShowForceSyncConfirm(false)
     },
   })
 
@@ -398,7 +417,17 @@ export function JobDetail() {
                   {recordsData && ` (${recordsData.total} total)`}
                 </CardDescription>
               </div>
-              <div className="flex gap-2">
+              <div className="flex gap-2 items-center">
+                {recordsData && recordsData.records.some((r) => r.sync_status === 'failed' || r.sync_status === 'conflict') && (
+                  <Button
+                    size="sm"
+                    onClick={() => setShowForceSyncConfirm(true)}
+                    disabled={forceSyncMutation.isPending}
+                  >
+                    {forceSyncMutation.isPending ? <Spinner size="sm" className="mr-1" /> : null}
+                    Force Sync Failed
+                  </Button>
+                )}
                 <div>
                   <label htmlFor="records-status-filter" className="sr-only">
                     Filter by status
@@ -503,6 +532,41 @@ export function JobDetail() {
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {/* Force Sync Confirm Dialog */}
+      {showForceSyncConfirm && recordsData && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-lg shadow-lg p-6 max-w-sm w-full mx-4">
+            <h3 className="text-lg font-semibold mb-2">Force Sync Failed Records</h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              Force sync {recordsData.records.filter((r) => r.sync_status === 'failed' || r.sync_status === 'conflict').length} failed/conflict records on this page? This will clear errors and mark them for re-sync.
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowForceSyncConfirm(false)}
+                disabled={forceSyncMutation.isPending}
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => {
+                  const failedIds = recordsData.records
+                    .filter((r) => r.sync_status === 'failed' || r.sync_status === 'conflict')
+                    .map((r) => r.id)
+                  forceSyncMutation.mutate(failedIds)
+                }}
+                disabled={forceSyncMutation.isPending}
+              >
+                {forceSyncMutation.isPending ? <Spinner size="sm" className="mr-1" /> : null}
+                Confirm
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

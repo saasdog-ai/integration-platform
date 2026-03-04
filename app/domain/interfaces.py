@@ -6,6 +6,7 @@ from typing import Any
 from uuid import UUID
 
 from app.domain.entities import (
+    AuditLogEntry,
     AvailableIntegration,
     ConnectionConfig,
     EntitySyncStatus,
@@ -471,6 +472,65 @@ class IntegrationStateRepositoryInterface(ABC):
         Returns:
             Total number of rows deleted.
         """
+        pass
+
+    @abstractmethod
+    async def resolve_record_ids(
+        self,
+        client_id: UUID,
+        integration_id: UUID,
+        entity_type: str,
+        internal_record_ids: list[str] | None = None,
+        external_record_ids: list[str] | None = None,
+    ) -> list[UUID]:
+        """Resolve internal or external record IDs to state record UUIDs."""
+        pass
+
+    @abstractmethod
+    async def force_sync_records(
+        self,
+        client_id: UUID,
+        integration_id: UUID,
+        state_ids: list[UUID],
+    ) -> tuple[int, list[dict]]:
+        """
+        Bulk force-sync: clear errors, equalize version vectors, mark SYNCED.
+        Only updates records with sync_status IN ('failed', 'conflict').
+        Returns (updated_count, skipped_details).
+        """
+        pass
+
+    @abstractmethod
+    async def set_do_not_sync(
+        self,
+        client_id: UUID,
+        integration_id: UUID,
+        state_ids: list[UUID],
+        do_not_sync: bool,
+    ) -> tuple[int, list[dict]]:
+        """
+        Bulk set do_not_sync flag.
+        Returns (updated_count, skipped_details).
+        """
+        pass
+
+    @abstractmethod
+    async def get_records_paginated(
+        self,
+        client_id: UUID,
+        integration_id: UUID,
+        entity_type: str | None = None,
+        sync_status: RecordSyncStatus | None = None,
+        do_not_sync: bool | None = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[list[IntegrationStateRecord], int]:
+        """Get paginated records for the records browser."""
+        pass
+
+    @abstractmethod
+    async def write_audit_entry(self, entry: AuditLogEntry) -> None:
+        """Write a single audit log entry."""
         pass
 
     @abstractmethod

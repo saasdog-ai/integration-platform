@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.domain.enums import (
     ChangeSourceType,
@@ -240,6 +240,8 @@ class SyncRecordResponse(BaseResponse):
     error_code: str | None = None
     error_message: str | None = None
     error_details: dict[str, Any] | None = None
+    do_not_sync: bool = False
+    force_synced_at: datetime | None = None
 
 
 class SyncRecordsResponse(BaseResponse):
@@ -377,3 +379,51 @@ class UpdateAvailableIntegrationRequest(BaseModel):
     connection_config: dict[str, Any] | None = None
     supported_entities: list[str] | None = None
     is_active: bool | None = None
+
+
+# =============================================================================
+# Manual Override DTOs
+# =============================================================================
+
+
+class RecordSelector(BaseModel):
+    """Flexible record selector — exactly one of the three ID lists must be provided."""
+
+    state_ids: list[UUID] | None = None
+    entity_type: str | None = None
+    internal_record_ids: list[str] | None = None
+    external_record_ids: list[str] | None = None
+
+    @model_validator(mode="after")
+    def validate_exactly_one_selector(self) -> "RecordSelector":
+        selectors = [self.state_ids, self.internal_record_ids, self.external_record_ids]
+        provided = [s for s in selectors if s]
+        if len(provided) != 1:
+            raise ValueError(
+                "Provide exactly one of: state_ids, internal_record_ids, external_record_ids"
+            )
+        if (self.internal_record_ids or self.external_record_ids) and not self.entity_type:
+            raise ValueError(
+                "entity_type is required when using internal_record_ids or external_record_ids"
+            )
+        return self
+
+
+class ForceSyncRequest(RecordSelector):
+    """Request to force-sync records (clear errors, equalize version vectors)."""
+
+    pass
+
+
+class DoNotSyncRequest(RecordSelector):
+    """Request to toggle do-not-sync flag on records."""
+
+    do_not_sync: bool
+
+
+class OverrideResultResponse(BaseResponse):
+    """Response for bulk override operations."""
+
+    records_updated: int
+    records_skipped: int
+    skipped_details: list[dict[str, str]] = Field(default_factory=list)

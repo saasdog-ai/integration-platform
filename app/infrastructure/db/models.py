@@ -334,13 +334,14 @@ class IntegrationStateModel(Base):
         ),
         # Composite index for get_pending_records query
         # Covers: WHERE client_id = ? AND integration_id = ? AND entity_type = ? AND sync_status = 'pending'
+        # Excludes do_not_sync records so they are never loaded for sync
         Index(
             "ix_integration_state_part_pending",
             "client_id",
             "integration_id",
             "entity_type",
             "sync_status",
-            postgresql_where="sync_status IN ('pending', 'failed')",
+            postgresql_where="sync_status IN ('pending', 'failed') AND do_not_sync = false",
         ),
         # Index for job record lookup
         Index(
@@ -348,6 +349,14 @@ class IntegrationStateModel(Base):
             "client_id",
             "last_job_id",
             postgresql_where="last_job_id IS NOT NULL",
+        ),
+        # Index for records browser (ORDER BY updated_at DESC)
+        # Created via raw SQL in migration 018 for DESC support
+        Index(
+            "ix_integration_state_browse",
+            "client_id",
+            "integration_id",
+            "updated_at",
         ),
     )
 
@@ -385,6 +394,10 @@ class IntegrationStateModel(Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_details: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     metadata_: Mapped[dict[str, Any] | None] = mapped_column("metadata", JSONB, nullable=True)
+    do_not_sync: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    force_synced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -442,6 +455,51 @@ class IntegrationHistoryModel(Base):
     error_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_details: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
+class AuditLogModel(Base):
+    """
+    Audit trail for user/admin actions.
+
+    Captures manual overrides (force-sync, do-not-sync), settings changes,
+    connect/disconnect, and other user-initiated actions. Separate from
+    integration_history which is reserved for sync operations only.
+    """
+
+    __tablename__ = "audit_log"
+    __table_args__ = (
+        Index(
+            "ix_audit_log_client_action",
+            "client_id",
+            "action",
+        ),
+        Index(
+            "ix_audit_log_created",
+            "created_at",
+        ),
+    )
+
+    # Composite primary key (same pattern as integration_state)
+    id: Mapped[UUID] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=False,
+        default=uuid4,
+    )
+    client_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+
+    __mapper_args__ = {"primary_key": [client_id, id]}
+
+    integration_id: Mapped[UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    action: Mapped[str] = mapped_column(String(50), nullable=False)
+    entity_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    target_record_ids: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    details: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    performed_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

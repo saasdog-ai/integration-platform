@@ -16,6 +16,9 @@ import type {
   EntitySyncStatusListResponse,
   ResetLastSyncTimeRequest,
   EntitySyncStatusResetResponse,
+  ForceSyncRequest,
+  DoNotSyncRequest,
+  OverrideResultResponse,
 } from '@/types'
 import type { IntegrationsConfig } from '@/providers/ConfigProvider'
 
@@ -315,6 +318,60 @@ export function createApiClient(config: IntegrationsConfig) {
         body: JSON.stringify(request),
       })
       return handleResponse<EntitySyncStatusResetResponse>(response)
+    },
+
+    // ========================
+    // Manual Overrides & Records Browser
+    // ========================
+
+    async getIntegrationRecords(
+      integrationId: string,
+      params?: {
+        entity_type?: string
+        sync_status?: RecordSyncStatus
+        do_not_sync?: boolean
+        page?: number
+        page_size?: number
+      }
+    ): Promise<SyncRecordsResponse> {
+      const searchParams = new URLSearchParams()
+      if (params?.entity_type) searchParams.set('entity_type', params.entity_type)
+      if (params?.sync_status) searchParams.set('sync_status', params.sync_status)
+      if (params?.do_not_sync !== undefined) searchParams.set('do_not_sync', String(params.do_not_sync))
+      if (params?.page) searchParams.set('page', params.page.toString())
+      if (params?.page_size) searchParams.set('page_size', params.page_size.toString())
+
+      const queryString = searchParams.toString()
+      const url = `${apiBaseUrl}/integrations/${integrationId}/records${queryString ? `?${queryString}` : ''}`
+
+      const response = await fetchWithTimeout(url, {
+        headers: getAuthHeaders(),
+      })
+      return handleResponse<SyncRecordsResponse>(response)
+    },
+
+    async forceSyncRecords(
+      integrationId: string,
+      request: ForceSyncRequest
+    ): Promise<OverrideResultResponse> {
+      const response = await fetchWithTimeout(`${apiBaseUrl}/integrations/${integrationId}/records/force-sync`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(request),
+      })
+      return handleResponse<OverrideResultResponse>(response)
+    },
+
+    async setDoNotSync(
+      integrationId: string,
+      request: DoNotSyncRequest
+    ): Promise<OverrideResultResponse> {
+      const response = await fetchWithTimeout(`${apiBaseUrl}/integrations/${integrationId}/records/do-not-sync`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(request),
+      })
+      return handleResponse<OverrideResultResponse>(response)
     },
 
     // ========================

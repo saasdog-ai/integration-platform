@@ -174,6 +174,8 @@ export interface SyncRecord {
   error_code: string | null
   error_message: string | null
   error_details: Record<string, unknown> | null
+  do_not_sync: boolean
+  force_synced_at: string | null
 }
 
 /**
@@ -218,4 +220,30 @@ export interface ResetLastSyncTimeRequest {
  */
 export interface EntitySyncStatusResetResponse extends EntitySyncStatus {
   message: string
+}
+
+/**
+ * Override result response from force-sync / do-not-sync endpoints
+ */
+export interface OverrideResultResponse {
+  records_updated: number
+  records_skipped: number
+  skipped_details: Array<{ state_id: string; reason: string }>
+}
+
+/**
+ * Request to force-sync records
+ */
+export interface ForceSyncRequest {
+  state_ids?: string[]
+  entity_type?: string
+  internal_record_ids?: string[]
+  external_record_ids?: string[]
+}
+
+/**
+ * Request to toggle do-not-sync flag on records
+ */
+export interface DoNotSyncRequest extends ForceSyncRequest {
+  do_not_sync: boolean
 }

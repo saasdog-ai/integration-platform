@@ -4,11 +4,13 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, delete, select, update
+from sqlalchemy import and_, case, delete, select, update
+from sqlalchemy import func as sa_func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.domain.entities import (
+    AuditLogEntry,
     AvailableIntegration,
     ConnectionConfig,
     EntitySyncStatus,
@@ -36,6 +38,7 @@ from app.domain.interfaces import (
 )
 from app.infrastructure.db.database import advisory_lock, get_session_context
 from app.infrastructure.db.models import (
+    AuditLogModel,
     AvailableIntegrationModel,
     EntitySyncStatusModel,
     IntegrationHistoryModel,
@@ -193,6 +196,8 @@ def _model_to_integration_state(
         error_message=model.error_message,
         error_details=model.error_details,
         metadata=model.metadata_,
+        do_not_sync=model.do_not_sync,
+        force_synced_at=model.force_synced_at,
         created_at=model.created_at,
         updated_at=model.updated_at,
     )
@@ -900,6 +905,7 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
                         IntegrationStateModel.integration_id == integration_id,
                         IntegrationStateModel.entity_type == entity_type,
                         IntegrationStateModel.sync_status == status.value,
+                        IntegrationStateModel.do_not_sync == False,  # noqa: E712
                     )
                 )
                 .limit(limit)
@@ -1166,6 +1172,240 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
             await session.flush()
             await session.refresh(model)
             return _model_to_entity_sync_status(model)
+
+    async def resolve_record_ids(
+        self,
+        client_id: UUID,
+        integration_id: UUID,
+        entity_type: str,
+        internal_record_ids: list[str] | None = None,
+        external_record_ids: list[str] | None = None,
+    ) -> list[UUID]:
+        """Resolve internal or external record IDs to state record UUIDs."""
+        async with get_session_context() as session:
+            conditions = [
+                IntegrationStateModel.client_id == client_id,
+                IntegrationStateModel.integration_id == integration_id,
+                IntegrationStateModel.entity_type == entity_type,
+            ]
+            if internal_record_ids:
+                conditions.append(
+                    IntegrationStateModel.internal_record_id.in_(internal_record_ids)
+                )
+            elif external_record_ids:
+                conditions.append(
+                    IntegrationStateModel.external_record_id.in_(external_record_ids)
+                )
+            else:
+                return []
+
+            result = await session.execute(
+                select(IntegrationStateModel.id).where(and_(*conditions))
+            )
+            return list(result.scalars().all())
+
+    async def force_sync_records(
+        self,
+        client_id: UUID,
+        integration_id: UUID,
+        state_ids: list[UUID],
+    ) -> tuple[int, list[dict]]:
+        """Bulk force-sync: clear errors, equalize vectors, mark SYNCED."""
+        async with get_session_context() as session:
+            # First, find which records are eligible (failed or conflict)
+            result = await session.execute(
+                select(IntegrationStateModel).where(
+                    and_(
+                        IntegrationStateModel.client_id == client_id,
+                        IntegrationStateModel.integration_id == integration_id,
+                        IntegrationStateModel.id.in_(state_ids),
+                    )
+                )
+            )
+            models = result.scalars().all()
+
+            eligible_ids = []
+            skipped: list[dict] = []
+            for m in models:
+                if m.sync_status in ("failed", "conflict"):
+                    eligible_ids.append(m.id)
+                else:
+                    skipped.append({
+                        "state_id": str(m.id),
+                        "reason": f"Record status is '{m.sync_status}', not failed or conflict",
+                    })
+
+            # Check for IDs not found at all
+            found_ids = {m.id for m in models}
+            for sid in state_ids:
+                if sid not in found_ids:
+                    skipped.append({
+                        "state_id": str(sid),
+                        "reason": "Record not found",
+                    })
+
+            if not eligible_ids:
+                return 0, skipped
+
+            # Bulk update: clear errors, equalize vectors, mark SYNCED
+            now = datetime.now(UTC)
+            greatest = sa_func.greatest(
+                IntegrationStateModel.internal_version_id,
+                IntegrationStateModel.external_version_id,
+            )
+            await session.execute(
+                update(IntegrationStateModel)
+                .where(
+                    and_(
+                        IntegrationStateModel.client_id == client_id,
+                        IntegrationStateModel.id.in_(eligible_ids),
+                    )
+                )
+                .values(
+                    sync_status="synced",
+                    error_code=None,
+                    error_message=None,
+                    error_details=None,
+                    internal_version_id=greatest,
+                    external_version_id=greatest,
+                    last_sync_version_id=greatest,
+                    force_synced_at=now,
+                    last_synced_at=now,
+                )
+            )
+
+            return len(eligible_ids), skipped
+
+    async def set_do_not_sync(
+        self,
+        client_id: UUID,
+        integration_id: UUID,
+        state_ids: list[UUID],
+        do_not_sync: bool,
+    ) -> tuple[int, list[dict]]:
+        """Bulk set do_not_sync flag."""
+        async with get_session_context() as session:
+            # Verify all records exist and belong to this client+integration
+            result = await session.execute(
+                select(IntegrationStateModel).where(
+                    and_(
+                        IntegrationStateModel.client_id == client_id,
+                        IntegrationStateModel.integration_id == integration_id,
+                        IntegrationStateModel.id.in_(state_ids),
+                    )
+                )
+            )
+            models = result.scalars().all()
+
+            found_ids = {m.id for m in models}
+            skipped: list[dict] = []
+            for sid in state_ids:
+                if sid not in found_ids:
+                    skipped.append({
+                        "state_id": str(sid),
+                        "reason": "Record not found",
+                    })
+
+            eligible_ids = list(found_ids)
+            if not eligible_ids:
+                return 0, skipped
+
+            values: dict[str, Any] = {"do_not_sync": do_not_sync}
+
+            if do_not_sync:
+                # Toggling ON: clear errors (intentionally excluded)
+                values["error_code"] = None
+                values["error_message"] = None
+                values["error_details"] = None
+            else:
+                # Toggling OFF: if versions mismatch, set to PENDING
+                # We need to handle this per-record, so use CASE expression
+                values["sync_status"] = case(
+                    (
+                        IntegrationStateModel.internal_version_id
+                        != IntegrationStateModel.last_sync_version_id,
+                        "pending",
+                    ),
+                    (
+                        IntegrationStateModel.external_version_id
+                        != IntegrationStateModel.last_sync_version_id,
+                        "pending",
+                    ),
+                    else_=IntegrationStateModel.sync_status,
+                )
+
+            await session.execute(
+                update(IntegrationStateModel)
+                .where(
+                    and_(
+                        IntegrationStateModel.client_id == client_id,
+                        IntegrationStateModel.id.in_(eligible_ids),
+                    )
+                )
+                .values(**values)
+            )
+
+            return len(eligible_ids), skipped
+
+    async def get_records_paginated(
+        self,
+        client_id: UUID,
+        integration_id: UUID,
+        entity_type: str | None = None,
+        sync_status: RecordSyncStatus | None = None,
+        do_not_sync: bool | None = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[list[IntegrationStateRecord], int]:
+        """Get paginated records for the records browser."""
+        async with get_session_context() as session:
+            conditions = [
+                IntegrationStateModel.client_id == client_id,
+                IntegrationStateModel.integration_id == integration_id,
+            ]
+            if entity_type:
+                conditions.append(IntegrationStateModel.entity_type == entity_type)
+            if sync_status:
+                conditions.append(IntegrationStateModel.sync_status == sync_status.value)
+            if do_not_sync is not None:
+                conditions.append(IntegrationStateModel.do_not_sync == do_not_sync)
+
+            where_clause = and_(*conditions)
+
+            # Count total
+            count_result = await session.execute(
+                select(sa_func.count()).select_from(IntegrationStateModel).where(where_clause)
+            )
+            total = count_result.scalar() or 0
+
+            # Fetch page
+            offset = (page - 1) * page_size
+            result = await session.execute(
+                select(IntegrationStateModel)
+                .where(where_clause)
+                .order_by(IntegrationStateModel.updated_at.desc())
+                .offset(offset)
+                .limit(page_size)
+            )
+            models = result.scalars().all()
+            return [_model_to_integration_state(m) for m in models], total
+
+    async def write_audit_entry(self, entry: AuditLogEntry) -> None:
+        """Write a single audit log entry."""
+        async with get_session_context() as session:
+            model = AuditLogModel(
+                id=entry.id,
+                client_id=entry.client_id,
+                integration_id=entry.integration_id,
+                action=entry.action,
+                entity_type=entry.entity_type,
+                target_record_ids=[str(rid) for rid in entry.target_record_ids]
+                if entry.target_record_ids
+                else None,
+                details=entry.details,
+                performed_by=entry.performed_by,
+            )
+            session.add(model)
 
     async def bump_version_vectors(
         self,

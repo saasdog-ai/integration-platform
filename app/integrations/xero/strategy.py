@@ -219,6 +219,14 @@ class XeroSyncStrategy:
         existing = await state_repo.get_record_by_external_id(
             job.client_id, job.integration_id, entity_type, record.id
         )
+
+        # Skip records flagged as do-not-sync: track external version but
+        # don't write to the internal system
+        if existing and existing.do_not_sync:
+            existing.external_version_id += 1
+            existing.last_sync_version_id = existing.external_version_id
+            return existing
+
         record_id = existing.internal_record_id if existing else None
 
         # 2. Map Xero data to internal schema

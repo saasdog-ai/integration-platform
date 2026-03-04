@@ -1,8 +1,9 @@
 """Integration management endpoints."""
 
-from uuid import UUID
+from datetime import UTC, datetime
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.api.dto import (
     AvailableIntegrationResponse,
@@ -10,18 +11,23 @@ from app.api.dto import (
     ConnectIntegrationRequest,
     ConnectIntegrationResponse,
     ConnectionConfigResponse,
+    DoNotSyncRequest,
     EntitySyncStatusItem,
     EntitySyncStatusListResponse,
     EntitySyncStatusResponse,
+    ForceSyncRequest,
     NotifyChangeRequest,
     NotifyChangeResponse,
     OAuthCallbackRequest,
+    OverrideResultResponse,
     ResetLastSyncTimeRequest,
+    SyncRecordResponse,
+    SyncRecordsResponse,
     UserIntegrationResponse,
     UserIntegrationsResponse,
     WebhookReceiveResponse,
 )
-from app.auth import get_client_id
+from app.auth import AuthenticatedClient, get_client_id, get_current_client
 from app.core.exceptions import (
     ConflictError,
     IntegrationError,
@@ -30,8 +36,8 @@ from app.core.exceptions import (
     ValidationError,
 )
 from app.core.logging import get_logger
-from app.domain.entities import AvailableIntegration, ChangeEvent, UserIntegration
-from app.domain.enums import ChangeSourceType
+from app.domain.entities import AuditLogEntry, AvailableIntegration, ChangeEvent, UserIntegration
+from app.domain.enums import ChangeSourceType, RecordSyncStatus
 from app.domain.interfaces import IntegrationStateRepositoryInterface
 from app.services.integration_service import IntegrationService
 from app.services.sync_orchestrator import SyncOrchestrator
@@ -454,4 +460,213 @@ async def receive_webhook(
     raise HTTPException(
         status_code=status.HTTP_501_NOT_IMPLEMENTED,
         detail=f"Webhook handler for provider '{provider}' is not implemented",
+    )
+
+
+# =============================================================================
+# Manual Override Endpoints
+# =============================================================================
+
+
+async def _resolve_state_ids(
+    request: ForceSyncRequest | DoNotSyncRequest,
+    integration_id: UUID,
+    client_id: UUID,
+    state_repo: IntegrationStateRepositoryInterface,
+) -> list[UUID]:
+    """Resolve any selector form to a list of state record UUIDs."""
+    if request.state_ids:
+        return request.state_ids
+    return await state_repo.resolve_record_ids(
+        client_id=client_id,
+        integration_id=integration_id,
+        entity_type=request.entity_type,  # type: ignore[arg-type]  # validated by model
+        internal_record_ids=request.internal_record_ids,
+        external_record_ids=request.external_record_ids,
+    )
+
+
+@router.post(
+    "/{integration_id}/records/force-sync",
+    response_model=OverrideResultResponse,
+    summary="Force-sync failing records",
+)
+async def force_sync_records(
+    integration_id: UUID,
+    request: ForceSyncRequest,
+    client: AuthenticatedClient = Depends(get_current_client),
+    service: IntegrationService = Depends(get_integration_service),
+    state_repo: IntegrationStateRepositoryInterface = Depends(get_state_repository),
+) -> OverrideResultResponse:
+    """
+    Mark failing records as synced: clear errors, equalize version vectors.
+
+    If a user later modifies a force-synced record, the normal sync loop
+    will detect the version change and re-attempt sync.
+    """
+    # Verify the integration belongs to this client
+    try:
+        await service.get_user_integration(client.client_id, integration_id)
+    except NotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Integration not found: {integration_id}",
+        ) from None
+
+    state_ids = await _resolve_state_ids(request, integration_id, client.client_id, state_repo)
+    if not state_ids:
+        return OverrideResultResponse(records_updated=0, records_skipped=0)
+
+    updated, skipped = await state_repo.force_sync_records(
+        client_id=client.client_id,
+        integration_id=integration_id,
+        state_ids=state_ids,
+    )
+
+    # Write audit log
+    await state_repo.write_audit_entry(
+        AuditLogEntry(
+            id=uuid4(),
+            client_id=client.client_id,
+            integration_id=integration_id,
+            action="force_sync",
+            entity_type=request.entity_type,
+            target_record_ids=state_ids,
+            details={"records_updated": updated, "records_skipped": len(skipped)},
+            performed_by=client.user_id,
+            created_at=datetime.now(UTC),
+        )
+    )
+
+    return OverrideResultResponse(
+        records_updated=updated,
+        records_skipped=len(skipped),
+        skipped_details=skipped,
+    )
+
+
+@router.post(
+    "/{integration_id}/records/do-not-sync",
+    response_model=OverrideResultResponse,
+    summary="Toggle do-not-sync flag on records",
+)
+async def set_do_not_sync(
+    integration_id: UUID,
+    request: DoNotSyncRequest,
+    client: AuthenticatedClient = Depends(get_current_client),
+    service: IntegrationService = Depends(get_integration_service),
+    state_repo: IntegrationStateRepositoryInterface = Depends(get_state_repository),
+) -> OverrideResultResponse:
+    """
+    Toggle the do-not-sync flag on records to exclude or re-include them in sync.
+
+    When toggled ON, records are skipped in both inbound and outbound sync.
+    When toggled OFF, records with version mismatches are set to PENDING.
+    """
+    # Verify the integration belongs to this client
+    try:
+        await service.get_user_integration(client.client_id, integration_id)
+    except NotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Integration not found: {integration_id}",
+        ) from None
+
+    state_ids = await _resolve_state_ids(request, integration_id, client.client_id, state_repo)
+    if not state_ids:
+        return OverrideResultResponse(records_updated=0, records_skipped=0)
+
+    updated, skipped = await state_repo.set_do_not_sync(
+        client_id=client.client_id,
+        integration_id=integration_id,
+        state_ids=state_ids,
+        do_not_sync=request.do_not_sync,
+    )
+
+    # Write audit log
+    action = "do_not_sync_enabled" if request.do_not_sync else "do_not_sync_disabled"
+    await state_repo.write_audit_entry(
+        AuditLogEntry(
+            id=uuid4(),
+            client_id=client.client_id,
+            integration_id=integration_id,
+            action=action,
+            entity_type=request.entity_type,
+            target_record_ids=state_ids,
+            details={"do_not_sync": request.do_not_sync, "records_updated": updated},
+            performed_by=client.user_id,
+            created_at=datetime.now(UTC),
+        )
+    )
+
+    return OverrideResultResponse(
+        records_updated=updated,
+        records_skipped=len(skipped),
+        skipped_details=skipped,
+    )
+
+
+@router.get(
+    "/{integration_id}/records",
+    response_model=SyncRecordsResponse,
+    summary="Browse integration records",
+)
+async def list_integration_records(
+    integration_id: UUID,
+    client_id: UUID = Depends(get_client_id),
+    service: IntegrationService = Depends(get_integration_service),
+    state_repo: IntegrationStateRepositoryInterface = Depends(get_state_repository),
+    entity_type: str | None = Query(None),
+    sync_status: str | None = Query(None),
+    do_not_sync: bool | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+) -> SyncRecordsResponse:
+    """Browse all records for an integration with optional filters."""
+    # Verify the integration belongs to this client
+    try:
+        await service.get_user_integration(client_id, integration_id)
+    except NotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Integration not found: {integration_id}",
+        ) from None
+
+    status_enum = RecordSyncStatus(sync_status) if sync_status else None
+
+    records, total = await state_repo.get_records_paginated(
+        client_id=client_id,
+        integration_id=integration_id,
+        entity_type=entity_type,
+        sync_status=status_enum,
+        do_not_sync=do_not_sync,
+        page=page,
+        page_size=page_size,
+    )
+
+    total_pages = (total + page_size - 1) // page_size if total > 0 else 1
+
+    return SyncRecordsResponse(
+        records=[
+            SyncRecordResponse(
+                id=r.id,
+                entity_type=r.entity_type,
+                internal_record_id=r.internal_record_id,
+                external_record_id=r.external_record_id,
+                sync_direction=r.sync_direction,
+                sync_status=r.sync_status.value,
+                is_success=r.sync_status == RecordSyncStatus.SYNCED,
+                updated_at=r.updated_at,
+                error_code=r.error_code,
+                error_message=r.error_message,
+                error_details=r.error_details,
+                do_not_sync=r.do_not_sync,
+                force_synced_at=r.force_synced_at,
+            )
+            for r in records
+        ],
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
     )

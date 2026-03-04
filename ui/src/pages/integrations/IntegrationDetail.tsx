@@ -101,6 +101,11 @@ export function IntegrationDetail() {
           </div>
         </div>
         <div className="flex gap-2">
+          {isConnected && (
+            <Button variant="outline" onClick={() => navigate('records')}>
+              View Records
+            </Button>
+          )}
           {isConnected ? (
             <Button
               onClick={() => syncMutation.mutate()}

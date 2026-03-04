@@ -1,5 +1,5 @@
 import { Badge } from '@/components/ui/badge'
-import type { IntegrationStatus, SyncJobStatus } from '@/types'
+import type { IntegrationStatus, SyncJobStatus, RecordSyncStatus } from '@/types'
 
 interface IntegrationStatusBadgeProps {
   status: IntegrationStatus
@@ -34,4 +34,32 @@ export function SyncJobStatusBadge({ status }: SyncJobStatusBadgeProps) {
   const { variant, label } = variants[status] || { variant: 'pending', label: status }
 
   return <Badge variant={variant}>{label}</Badge>
+}
+
+interface RecordSyncStatusBadgeProps {
+  status: RecordSyncStatus
+  forceSyncedAt?: string | null
+  doNotSync?: boolean
+}
+
+export function RecordSyncStatusBadge({ status, forceSyncedAt, doNotSync }: RecordSyncStatusBadgeProps) {
+  if (doNotSync) return <Badge variant="secondary">Excluded</Badge>
+
+  const variants: Record<RecordSyncStatus, { variant: 'success' | 'warning' | 'error' | 'pending', label: string }> = {
+    synced: { variant: 'success', label: 'Synced' },
+    failed: { variant: 'error', label: 'Failed' },
+    pending: { variant: 'pending', label: 'Pending' },
+    conflict: { variant: 'warning', label: 'Conflict' },
+  }
+
+  const { variant, label } = variants[status] || { variant: 'pending', label: status }
+
+  return (
+    <span className="flex items-center gap-1">
+      <Badge variant={variant}>{label}</Badge>
+      {forceSyncedAt && status === 'synced' && (
+        <span className="text-xs text-muted-foreground">(forced)</span>
+      )}
+    </span>
+  )
 }
