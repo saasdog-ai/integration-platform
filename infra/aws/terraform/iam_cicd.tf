@@ -117,8 +117,8 @@ resource "aws_iam_role_policy" "cicd_deploy" {
           "iam:PassRole"
         ]
         Resource = [
-          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.app_name}-ecs-task-execution-${var.environment}",
-          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.app_name}-ecs-task-${var.environment}"
+          aws_iam_role.ecs_task_execution_role.arn,
+          aws_iam_role.ecs_task_role.arn
         ]
       },
       {
