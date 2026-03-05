@@ -109,13 +109,32 @@ jobs:
         working-directory: ./infra/aws/terraform
         run: terraform validate
 
+      - name: Wait for Docker image in ECR
+        run: |
+          ENV="${{ github.event.inputs.environment || 'dev' }}"
+          REPO="saasdog-integration-platform-${ENV}"
+          TAG="${{ github.sha }}"
+          echo "Waiting for image ${REPO}:${TAG} to be available in ECR..."
+          for i in $(seq 1 30); do
+            if aws ecr describe-images --repository-name "$REPO" --image-ids imageTag="$TAG" --region us-east-1 > /dev/null 2>&1; then
+              echo "Image found after ${i} attempts"
+              exit 0
+            fi
+            echo "Attempt ${i}/30: image not yet available, waiting 20s..."
+            sleep 20
+          done
+          echo "ERROR: Image ${REPO}:${TAG} not found after 10 minutes"
+          exit 1
+
       - name: Terraform Plan
         working-directory: ./infra/aws/terraform
         timeout-minutes: 10
         env:
           TF_VAR_database_password: ${{ secrets.DATABASE_PASSWORD }}
+          TF_VAR_image_tag: ${{ github.sha }}
         run: |
           echo "[$(date -u)] Starting terraform plan..."
+          echo "Image tag: ${TF_VAR_image_tag}"
           terraform plan -input=false -out=tfplan -lock-timeout=60s
           echo "[$(date -u)] Terraform plan completed"
 
@@ -125,6 +144,7 @@ jobs:
         timeout-minutes: 20
         env:
           TF_VAR_database_password: ${{ secrets.DATABASE_PASSWORD }}
+          TF_VAR_image_tag: ${{ github.sha }}
         run: |
           echo "[$(date -u)] Starting terraform apply..."
           terraform apply -input=false tfplan

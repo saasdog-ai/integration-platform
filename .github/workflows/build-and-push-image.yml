@@ -118,6 +118,7 @@ jobs:
           context: .
           push: ${{ github.event_name != 'pull_request' }}
           tags: |
+            ${{ steps.ecr-repo.outputs.repository_uri }}:${{ github.sha }}
             ${{ steps.ecr-repo.outputs.repository_uri }}:${{ steps.image-tag.outputs.tag }}
             ${{ steps.ecr-repo.outputs.repository_uri }}:latest
           platforms: linux/amd64
@@ -129,22 +130,5 @@ jobs:
           echo "Image URI: ${{ steps.ecr-repo.outputs.repository_uri }}:${{ steps.image-tag.outputs.tag }}"
           echo "Latest tag: ${{ steps.ecr-repo.outputs.repository_uri }}:latest"
 
-      - name: Update ECS service
-        if: github.event_name != 'pull_request'
-        run: |
-          ENV="${{ github.event.inputs.environment || 'dev' }}"
-          CLUSTER="saasdog-shared-ecs-${ENV}"
-          SERVICE="saasdog-integration-platform-${ENV}"
-
-          echo "Updating ECS service..."
-          echo "Cluster: ${CLUSTER}"
-          echo "Service: ${SERVICE}"
-
-          aws ecs update-service \
-            --cluster "${CLUSTER}" \
-            --service "${SERVICE}" \
-            --force-new-deployment \
-            --region ${{ env.AWS_REGION }}
-
-          echo ""
-          echo "ECS service update initiated. New tasks will pull the latest image."
+      # ECS deployment is handled by the Deploy workflow (Terraform) using
+      # the git SHA as the image tag. No force-new-deployment needed here.

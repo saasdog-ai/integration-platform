@@ -119,6 +119,12 @@ variable "container_port" {
   default     = 8000
 }
 
+variable "image_tag" {
+  description = "Docker image tag to deploy (set by CI/CD to git SHA)"
+  type        = string
+  default     = "latest"
+}
+
 # -----------------------------------------------------------------------------
 # CI/CD Configuration
 # -----------------------------------------------------------------------------
