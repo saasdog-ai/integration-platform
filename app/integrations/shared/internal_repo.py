@@ -485,6 +485,133 @@ class InternalDataRepository:
             return record_id
 
     # ------------------------------------------------------------------
+    # Items
+    # ------------------------------------------------------------------
+
+    async def get_items(
+        self,
+        client_id: UUID,
+        since: datetime | None = None,
+        record_ids: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Get items from the internal system."""
+        factory = _get_session_factory()
+        async with factory() as session:
+            conditions = ["client_id = :client_id"]
+            params: dict[str, Any] = {"client_id": str(client_id)}
+
+            if since:
+                conditions.append("updated_at > :since")
+                params["since"] = since
+
+            if record_ids:
+                conditions.append("id = ANY(:record_ids)")
+                params["record_ids"] = record_ids
+
+            where = " AND ".join(conditions)
+            result = await session.execute(
+                text(f"SELECT * FROM sample_items WHERE {where} ORDER BY created_at"),
+                params,
+            )
+            rows = result.mappings().all()
+            return [self._row_to_dict(row) for row in rows]
+
+    async def upsert_item(
+        self, client_id: UUID, data: dict[str, Any], record_id: str | None = None
+    ) -> str:
+        """Create or update an item. Returns the internal record ID."""
+        factory = _get_session_factory()
+        now = datetime.now(UTC)
+
+        async with factory() as session:
+            if record_id:
+                await session.execute(
+                    text(
+                        """
+                        UPDATE sample_items SET
+                            name = COALESCE(:name, name),
+                            code = COALESCE(:code, code),
+                            description = COALESCE(:description, description),
+                            purchase_description = COALESCE(:purchase_description, purchase_description),
+                            sale_description = COALESCE(:sale_description, sale_description),
+                            purchase_unit_price = COALESCE(:purchase_unit_price, purchase_unit_price),
+                            sale_unit_price = COALESCE(:sale_unit_price, sale_unit_price),
+                            item_type = COALESCE(:item_type, item_type),
+                            is_sold = :is_sold,
+                            is_purchased = :is_purchased,
+                            active = :active,
+                            updated_at = :now
+                        WHERE id = :id
+                    """
+                    ),
+                    {
+                        "id": record_id,
+                        "name": data.get("name"),
+                        "code": data.get("code"),
+                        "description": data.get("description"),
+                        "purchase_description": data.get("purchase_description"),
+                        "sale_description": data.get("sale_description"),
+                        "purchase_unit_price": data.get("purchase_unit_price"),
+                        "sale_unit_price": data.get("sale_unit_price"),
+                        "item_type": data.get("item_type"),
+                        "is_sold": data.get("is_sold", True),
+                        "is_purchased": data.get("is_purchased", True),
+                        "active": data.get("active", True),
+                        "now": now,
+                    },
+                )
+            else:
+                record_id = str(uuid4())
+                await session.execute(
+                    text(
+                        """
+                        INSERT INTO sample_items
+                            (id, client_id, name, code, description, purchase_description,
+                             sale_description, purchase_unit_price, sale_unit_price,
+                             item_type, is_sold, is_purchased, active,
+                             created_at, updated_at)
+                        VALUES
+                            (:id, :client_id, :name, :code, :description, :purchase_description,
+                             :sale_description, :purchase_unit_price, :sale_unit_price,
+                             :item_type, :is_sold, :is_purchased, :active,
+                             :now, :now)
+                    """
+                    ),
+                    {
+                        "id": record_id,
+                        "client_id": str(client_id),
+                        "name": data.get("name", "Unknown Item"),
+                        "code": data.get("code"),
+                        "description": data.get("description"),
+                        "purchase_description": data.get("purchase_description"),
+                        "sale_description": data.get("sale_description"),
+                        "purchase_unit_price": data.get("purchase_unit_price"),
+                        "sale_unit_price": data.get("sale_unit_price"),
+                        "item_type": data.get("item_type"),
+                        "is_sold": data.get("is_sold", True),
+                        "is_purchased": data.get("is_purchased", True),
+                        "active": data.get("active", True),
+                        "now": now,
+                    },
+                )
+
+            await session.commit()
+            return record_id
+
+    async def get_item_by_code(self, client_id: UUID, code: str) -> dict[str, Any] | None:
+        """Get an item by its code within a client. Used for Xero ItemCode resolution."""
+        factory = _get_session_factory()
+        async with factory() as session:
+            result = await session.execute(
+                text(
+                    "SELECT * FROM sample_items WHERE client_id = :client_id AND code = :code LIMIT 1"
+                ),
+                {"client_id": str(client_id), "code": code},
+            )
+            row = result.mappings().first()
+            return self._row_to_dict(row) if row else None
+
+    # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 

@@ -28,6 +28,7 @@ from app.integrations.xero.mappers import (
     map_invoice_inbound,
     map_invoice_outbound,
     map_item_inbound,
+    map_item_outbound,
     map_payment_inbound,
     map_vendor_inbound,
     map_vendor_outbound,
@@ -379,6 +380,45 @@ class TestBillMappers:
         result = map_bill_outbound(internal)
         assert "AccountCode" not in result["LineItems"][0]
 
+    def test_inbound_extracts_item_code(self):
+        xero = {
+            "Total": 100,
+            "AmountDue": 100,
+            "Status": "DRAFT",
+            "LineItems": [
+                {
+                    "Description": "Widget",
+                    "Quantity": 2,
+                    "UnitAmount": 50,
+                    "LineAmount": 100,
+                    "ItemCode": "W-001",
+                },
+            ],
+        }
+        result = map_bill_inbound(xero)
+        assert result["line_items"][0]["item_code"] == "W-001"
+
+    def test_inbound_no_item_code_when_missing(self):
+        xero = {
+            "Total": 100,
+            "AmountDue": 100,
+            "Status": "DRAFT",
+            "LineItems": [
+                {"Description": "Work", "Quantity": 1, "UnitAmount": 100, "LineAmount": 100},
+            ],
+        }
+        result = map_bill_inbound(xero)
+        assert "item_code" not in result["line_items"][0]
+
+    def test_outbound_item_code_round_trip(self):
+        internal = {
+            "line_items": [
+                {"description": "Widget", "quantity": 2, "unit_price": 50, "item_code": "W-001"},
+            ],
+        }
+        result = map_bill_outbound(internal)
+        assert result["LineItems"][0]["ItemCode"] == "W-001"
+
 
 # ---------------------------------------------------------------------------
 # Invoice mappers
@@ -545,13 +585,18 @@ class TestItemMapper:
             "Description": "A fine widget",
             "IsSold": True,
             "IsPurchased": True,
-            "PurchaseDetails": {"UnitPrice": 10.00},
+            "PurchaseDetails": {"UnitPrice": 10.00, "AccountCode": "300"},
             "SalesDetails": {"UnitPrice": 25.00},
         }
         result = map_item_inbound(xero)
         assert result["name"] == "Widget"
         assert result["code"] == "W-001"
         assert result["description"] == "A fine widget"
+        assert result["purchase_unit_price"] == 10.00
+        assert result["sale_unit_price"] == 25.00
+        assert result["purchase_description"] == "300"
+        assert result["sale_description"] == "A fine widget"
+        assert result["item_type"] is None
         assert result["is_sold"] is True
         assert result["is_purchased"] is True
 
@@ -559,6 +604,32 @@ class TestItemMapper:
         result = map_item_inbound({})
         assert result["name"] == ""
         assert result["code"] is None
+        assert result["purchase_unit_price"] is None
+        assert result["sale_unit_price"] is None
+
+    def test_outbound_round_trip(self):
+        xero = {
+            "Name": "Widget",
+            "Code": "W-001",
+            "Description": "A fine widget",
+            "IsSold": True,
+            "IsPurchased": True,
+            "PurchaseDetails": {"UnitPrice": 10.00},
+            "SalesDetails": {"UnitPrice": 25.00},
+        }
+        internal = map_item_inbound(xero)
+        outbound = map_item_outbound(internal)
+        assert outbound["Name"] == "Widget"
+        assert outbound["Code"] == "W-001"
+        assert outbound["IsSold"] is True
+        assert outbound["IsPurchased"] is True
+        assert outbound["PurchaseDetails"] == {"UnitPrice": 10.00}
+        assert outbound["SalesDetails"] == {"UnitPrice": 25.00}
+
+    def test_outbound_minimal(self):
+        result = map_item_outbound({"name": "Simple"})
+        assert result["Name"] == "Simple"
+        assert "Code" not in result
 
 
 # ---------------------------------------------------------------------------
@@ -641,6 +712,16 @@ class TestStrategyOrdering:
         assert ordered[0].entity_type == "vendor"
         assert ordered[1].entity_type == "custom_entity"
 
+    def test_item_upsert_fn_registered(self):
+        """_get_internal_upsert_fn('item') must not raise."""
+        fn = self.strategy._get_internal_upsert_fn("item")
+        assert callable(fn)
+
+    def test_item_getter_fn_registered(self):
+        """_get_internal_getter_fn('item') must not raise."""
+        fn = self.strategy._get_internal_getter_fn("item")
+        assert callable(fn)
+
 
 # ---------------------------------------------------------------------------
 # Strategy — _prepare_outbound_data AccountCode backfill
@@ -676,6 +757,15 @@ class _MockInternalRepo:
 
     async def get_chart_of_accounts(self, client_id, **kw):
         return []
+
+    async def upsert_item(self, client_id, data, record_id=None):
+        return record_id or str(uuid4())
+
+    async def get_items(self, client_id, **kw):
+        return []
+
+    async def get_item_by_code(self, client_id, code):
+        return None
 
 
 class _MockStateRepo:
@@ -931,7 +1021,7 @@ class TestMapperRegistries:
     def test_outbound_mappers(self):
         from app.integrations.xero.mappers import OUTBOUND_MAPPERS
 
-        expected = {"vendor", "customer", "bill", "invoice"}
+        expected = {"vendor", "customer", "bill", "invoice", "item"}
         assert set(OUTBOUND_MAPPERS.keys()) == expected
 
 

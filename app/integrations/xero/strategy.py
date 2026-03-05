@@ -30,7 +30,12 @@ from app.integrations.xero.constants import (
     INBOUND_ENTITY_ORDER,
     OUTBOUND_ENTITY_ORDER,
 )
-from app.integrations.xero.mappers import INBOUND_MAPPERS, OUTBOUND_MAPPERS, map_vendor_inbound
+from app.integrations.xero.mappers import (
+    INBOUND_MAPPERS,
+    OUTBOUND_MAPPERS,
+    map_item_inbound,
+    map_vendor_inbound,
+)
 
 logger = get_logger(__name__)
 
@@ -254,6 +259,14 @@ class XeroSyncStrategy:
             )
             if contact_state and contact_state.internal_record_id:
                 mapped_data["contact_id"] = contact_state.internal_record_id
+
+        # Resolve item references in bill/invoice line items
+        if entity_type in ("bill", "invoice") and mapped_data.get("line_items") and adapter:
+            for line_item in mapped_data["line_items"]:
+                if line_item.get("item_code"):
+                    await self._ensure_item_synced_by_code(
+                        job, line_item["item_code"], adapter, state_repo
+                    )
 
         # 4. Write to internal database
         upsert_fn = self._get_internal_upsert_fn(entity_type)
@@ -908,6 +921,44 @@ class XeroSyncStrategy:
         await state_repo.batch_upsert_records([vendor_state])
         await self._write_history_entries([vendor_state], state_repo, job.id)
 
+    async def _ensure_item_synced_by_code(
+        self,
+        job: SyncJob,
+        item_code: str,
+        adapter: IntegrationAdapterInterface,
+        state_repo: IntegrationStateRepositoryInterface,
+    ) -> None:
+        """Auto-fetch and sync an item by code if not already present internally."""
+        # Items normally sync before bills, so check internal DB first
+        existing_item = await self._internal_repo.get_item_by_code(job.client_id, item_code)
+        if existing_item:
+            return
+
+        # Fallback: fetch all items from Xero and find the matching code
+        try:
+            records, _ = await adapter.fetch_records("item")
+            for rec in records:
+                if rec.data.get("Code") == item_code:
+                    item_state = await self._process_inbound_record(
+                        job=job,
+                        entity_type="item",
+                        record=rec,
+                        mapper_fn=map_item_inbound,
+                        state_repo=state_repo,
+                    )
+                    await state_repo.batch_upsert_records([item_state])
+                    await self._write_history_entries([item_state], state_repo, job.id)
+                    return
+            logger.warning(
+                "Item not found in Xero during bill dependency resolution",
+                extra={"job_id": str(job.id), "item_code": item_code},
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to fetch item from Xero during dependency resolution",
+                extra={"job_id": str(job.id), "item_code": item_code, "error": str(e)},
+            )
+
     async def _write_history_entries(
         self,
         records: list[IntegrationStateRecord],
@@ -989,6 +1040,7 @@ class XeroSyncStrategy:
             "bill": self._internal_repo.upsert_bill,
             "invoice": self._internal_repo.upsert_invoice,
             "chart_of_accounts": self._internal_repo.upsert_chart_of_accounts,
+            "item": self._internal_repo.upsert_item,
         }
         fn = fns.get(entity_type)
         if not fn:
@@ -1003,6 +1055,7 @@ class XeroSyncStrategy:
             "bill": self._internal_repo.get_bills,
             "invoice": self._internal_repo.get_invoices,
             "chart_of_accounts": self._internal_repo.get_chart_of_accounts,
+            "item": self._internal_repo.get_items,
         }
         fn = fns.get(entity_type)
         if not fn:

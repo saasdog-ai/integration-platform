@@ -141,14 +141,16 @@ def map_bill_inbound(qbo_data: dict) -> dict:
             "total": float(line.get("Amount", 0)),
         }
         # Extract quantity/unit_price from detail if available
-        detail = (
-            line.get("ItemBasedExpenseLineDetail")
-            or line.get("AccountBasedExpenseLineDetail")
-            or {}
-        )
+        item_detail = line.get("ItemBasedExpenseLineDetail") or {}
+        account_detail = line.get("AccountBasedExpenseLineDetail") or {}
+        detail = item_detail or account_detail
         if detail.get("Qty"):
             mapped_line["quantity"] = float(detail["Qty"])
             mapped_line["unit_price"] = float(detail.get("UnitPrice", 0))
+        # Extract item reference from ItemBasedExpenseLineDetail
+        item_ref = item_detail.get("ItemRef") or {}
+        if item_ref.get("value"):
+            mapped_line["item_external_id"] = item_ref["value"]
         line_items.append(mapped_line)
 
     # Map status: QBO doesn't have a status field on Bill directly;
@@ -413,6 +415,61 @@ def map_chart_of_accounts_inbound(qbo_data: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Item
+# ---------------------------------------------------------------------------
+
+
+def map_item_inbound(qbo_data: dict) -> dict:
+    """Map QBO Item response to sample_items fields."""
+    return {
+        "name": qbo_data.get("Name", ""),
+        "code": qbo_data.get("Sku"),
+        "description": qbo_data.get("Description"),
+        "purchase_description": qbo_data.get("PurchaseDesc"),
+        "sale_description": qbo_data.get("Description"),
+        "purchase_unit_price": float(qbo_data["PurchaseCost"])
+        if qbo_data.get("PurchaseCost") is not None
+        else None,
+        "sale_unit_price": float(qbo_data["UnitPrice"])
+        if qbo_data.get("UnitPrice") is not None
+        else None,
+        "item_type": qbo_data.get("Type"),
+        "is_sold": True,
+        "is_purchased": True,
+        "active": qbo_data.get("Active", True),
+    }
+
+
+def map_item_outbound(internal_data: dict) -> dict:
+    """Map sample_items fields to QBO Item create/update payload."""
+    result: dict[str, Any] = {
+        "Name": internal_data["name"],
+    }
+
+    if internal_data.get("code"):
+        result["Sku"] = internal_data["code"]
+
+    if internal_data.get("description"):
+        result["Description"] = internal_data["description"]
+
+    if internal_data.get("purchase_description"):
+        result["PurchaseDesc"] = internal_data["purchase_description"]
+
+    if internal_data.get("purchase_unit_price") is not None:
+        result["PurchaseCost"] = float(internal_data["purchase_unit_price"])
+
+    if internal_data.get("sale_unit_price") is not None:
+        result["UnitPrice"] = float(internal_data["sale_unit_price"])
+
+    if internal_data.get("item_type"):
+        result["Type"] = internal_data["item_type"]
+
+    result["Active"] = internal_data.get("active", True)
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Registry — maps entity_type to mapper functions
 # ---------------------------------------------------------------------------
 
@@ -421,10 +478,12 @@ INBOUND_MAPPERS: dict[str, Any] = {
     "bill": map_bill_inbound,
     "invoice": map_invoice_inbound,
     "chart_of_accounts": map_chart_of_accounts_inbound,
+    "item": map_item_inbound,
 }
 
 OUTBOUND_MAPPERS: dict[str, Any] = {
     "vendor": map_vendor_outbound,
     "bill": map_bill_outbound,
     "invoice": map_invoice_outbound,
+    "item": map_item_outbound,
 }

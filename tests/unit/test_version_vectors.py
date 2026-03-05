@@ -91,6 +91,15 @@ class _MockInternalRepo:
     async def get_chart_of_accounts(self, client_id, **kw):
         return []
 
+    async def upsert_item(self, client_id, data, record_id=None):
+        return record_id or str(uuid4())
+
+    async def get_items(self, client_id, **kw):
+        return []
+
+    async def get_item_by_code(self, client_id, code):
+        return None
+
 
 @pytest.fixture
 def strategy():

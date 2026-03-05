@@ -32,6 +32,7 @@ from app.integrations.quickbooks.constants import (
 from app.integrations.quickbooks.mappers import (
     INBOUND_MAPPERS,
     OUTBOUND_MAPPERS,
+    map_item_inbound,
     map_vendor_inbound,
 )
 from app.integrations.shared.internal_repo import InternalDataRepository
@@ -257,6 +258,14 @@ class QuickBooksSyncStrategy:
             )
             if contact_state and contact_state.internal_record_id:
                 mapped_data["contact_id"] = contact_state.internal_record_id
+
+        # Resolve item references in bill/invoice line items
+        if entity_type in ("bill", "invoice") and mapped_data.get("line_items") and adapter:
+            for line_item in mapped_data["line_items"]:
+                if line_item.get("item_external_id"):
+                    await self._ensure_item_synced(
+                        job, line_item["item_external_id"], adapter, state_repo
+                    )
 
         # 4. Write to internal database
         upsert_fn = self._get_internal_upsert_fn(entity_type)
@@ -934,6 +943,44 @@ class QuickBooksSyncStrategy:
         await state_repo.batch_upsert_records([vendor_state])
         await self._write_history_entries([vendor_state], state_repo, job.id)
 
+    async def _ensure_item_synced(
+        self,
+        job: SyncJob,
+        item_external_id: str,
+        adapter: IntegrationAdapterInterface,
+        state_repo: IntegrationStateRepositoryInterface,
+    ) -> None:
+        """Auto-fetch and sync an item if not already present in integration state."""
+        existing = await state_repo.get_record_by_external_id(
+            job.client_id,
+            job.integration_id,
+            "item",
+            item_external_id,
+        )
+        if existing:
+            return
+
+        item_record = await adapter.get_record("item", item_external_id)
+        if not item_record:
+            logger.warning(
+                "Item not found in QBO during bill dependency resolution",
+                extra={
+                    "job_id": str(job.id),
+                    "item_external_id": item_external_id,
+                },
+            )
+            return
+
+        item_state = await self._process_inbound_record(
+            job=job,
+            entity_type="item",
+            record=item_record,
+            mapper_fn=map_item_inbound,
+            state_repo=state_repo,
+        )
+        await state_repo.batch_upsert_records([item_state])
+        await self._write_history_entries([item_state], state_repo, job.id)
+
     async def _write_history_entries(
         self,
         records: list[IntegrationStateRecord],
@@ -1014,6 +1061,7 @@ class QuickBooksSyncStrategy:
             "bill": self._internal_repo.upsert_bill,
             "invoice": self._internal_repo.upsert_invoice,
             "chart_of_accounts": self._internal_repo.upsert_chart_of_accounts,
+            "item": self._internal_repo.upsert_item,
         }
         fn = fns.get(entity_type)
         if not fn:
@@ -1027,6 +1075,7 @@ class QuickBooksSyncStrategy:
             "bill": self._internal_repo.get_bills,
             "invoice": self._internal_repo.get_invoices,
             "chart_of_accounts": self._internal_repo.get_chart_of_accounts,
+            "item": self._internal_repo.get_items,
         }
         fn = fns.get(entity_type)
         if not fn:

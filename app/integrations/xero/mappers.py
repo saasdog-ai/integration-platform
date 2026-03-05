@@ -229,6 +229,8 @@ def map_bill_inbound(xero_data: dict) -> dict:
         }
         if line.get("AccountCode"):
             mapped_line["account_code"] = line["AccountCode"]
+        if line.get("ItemCode"):
+            mapped_line["item_code"] = line["ItemCode"]
         line_items.append(mapped_line)
 
     total = float(xero_data.get("Total", 0))
@@ -312,6 +314,8 @@ def map_bill_outbound(internal_data: dict) -> dict:
             }
             if item.get("account_code"):
                 xero_line["AccountCode"] = item["account_code"]
+            if item.get("item_code"):
+                xero_line["ItemCode"] = item["item_code"]
             xero_lines.append(xero_line)
 
     if not xero_lines:
@@ -347,6 +351,8 @@ def map_invoice_inbound(xero_data: dict) -> dict:
         }
         if line.get("AccountCode"):
             mapped_line["account_code"] = line["AccountCode"]
+        if line.get("ItemCode"):
+            mapped_line["item_code"] = line["ItemCode"]
         line_items.append(mapped_line)
 
     total_amount = float(xero_data.get("Total", 0))
@@ -443,6 +449,8 @@ def map_invoice_outbound(internal_data: dict) -> dict:
             }
             if item.get("account_code"):
                 xero_line["AccountCode"] = item["account_code"]
+            if item.get("item_code"):
+                xero_line["ItemCode"] = item["item_code"]
             xero_lines.append(xero_line)
 
     if not xero_lines:
@@ -493,12 +501,43 @@ def map_item_inbound(xero_data: dict) -> dict:
         "name": xero_data.get("Name", ""),
         "code": xero_data.get("Code"),
         "description": xero_data.get("Description"),
-        "purchase_description": purchase.get("UnitPrice"),
-        "sale_description": sales.get("UnitPrice"),
+        "purchase_description": purchase.get("AccountCode"),
+        "sale_description": xero_data.get("Description"),
+        "purchase_unit_price": float(purchase["UnitPrice"])
+        if purchase.get("UnitPrice") is not None
+        else None,
+        "sale_unit_price": float(sales["UnitPrice"])
+        if sales.get("UnitPrice") is not None
+        else None,
+        "item_type": None,
         "is_sold": xero_data.get("IsSold", False),
         "is_purchased": xero_data.get("IsPurchased", False),
         "active": True,  # Xero items don't have a status field; assume active
     }
+
+
+def map_item_outbound(internal_data: dict) -> dict:
+    """Map internal item fields to Xero Item create/update payload."""
+    result: dict[str, Any] = {
+        "Name": internal_data["name"],
+    }
+
+    if internal_data.get("code"):
+        result["Code"] = internal_data["code"]
+
+    if internal_data.get("description"):
+        result["Description"] = internal_data["description"]
+
+    result["IsSold"] = internal_data.get("is_sold", True)
+    result["IsPurchased"] = internal_data.get("is_purchased", True)
+
+    if internal_data.get("purchase_unit_price") is not None:
+        result["PurchaseDetails"] = {"UnitPrice": float(internal_data["purchase_unit_price"])}
+
+    if internal_data.get("sale_unit_price") is not None:
+        result["SalesDetails"] = {"UnitPrice": float(internal_data["sale_unit_price"])}
+
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -543,4 +582,5 @@ OUTBOUND_MAPPERS: dict[str, Any] = {
     "customer": map_customer_outbound,
     "bill": map_bill_outbound,
     "invoice": map_invoice_outbound,
+    "item": map_item_outbound,
 }

@@ -14,6 +14,8 @@ from app.integrations.quickbooks.mappers import (
     map_bill_outbound,
     map_invoice_inbound,
     map_invoice_outbound,
+    map_item_inbound,
+    map_item_outbound,
     map_vendor_inbound,
     map_vendor_outbound,
 )
@@ -307,6 +309,105 @@ class TestInvoiceMappers:
 
 
 # ---------------------------------------------------------------------------
+# Item mappers
+# ---------------------------------------------------------------------------
+
+
+class TestItemMappers:
+    def test_inbound_full(self):
+        qbo = {
+            "Name": "Widget",
+            "Sku": "W-001",
+            "Description": "A fine widget",
+            "PurchaseDesc": "Purchase widget",
+            "PurchaseCost": 10.00,
+            "UnitPrice": 25.00,
+            "Type": "Inventory",
+            "Active": True,
+        }
+        result = map_item_inbound(qbo)
+        assert result["name"] == "Widget"
+        assert result["code"] == "W-001"
+        assert result["description"] == "A fine widget"
+        assert result["purchase_description"] == "Purchase widget"
+        assert result["purchase_unit_price"] == 10.00
+        assert result["sale_unit_price"] == 25.00
+        assert result["item_type"] == "Inventory"
+        assert result["active"] is True
+
+    def test_inbound_minimal(self):
+        result = map_item_inbound({})
+        assert result["name"] == ""
+        assert result["code"] is None
+        assert result["purchase_unit_price"] is None
+        assert result["sale_unit_price"] is None
+
+    def test_outbound_round_trip(self):
+        qbo = {
+            "Name": "Widget",
+            "Sku": "W-001",
+            "Description": "A fine widget",
+            "PurchaseDesc": "Purchase widget",
+            "PurchaseCost": 10.00,
+            "UnitPrice": 25.00,
+            "Type": "Inventory",
+            "Active": True,
+        }
+        internal = map_item_inbound(qbo)
+        outbound = map_item_outbound(internal)
+        assert outbound["Name"] == "Widget"
+        assert outbound["Sku"] == "W-001"
+        assert outbound["PurchaseCost"] == 10.00
+        assert outbound["UnitPrice"] == 25.00
+        assert outbound["Type"] == "Inventory"
+        assert outbound["Active"] is True
+
+    def test_outbound_minimal(self):
+        result = map_item_outbound({"name": "Simple"})
+        assert result["Name"] == "Simple"
+        assert "Sku" not in result
+
+
+class TestBillItemRef:
+    def test_inbound_extracts_item_external_id(self):
+        qbo = {
+            "TotalAmt": 100,
+            "Balance": 100,
+            "Line": [
+                {
+                    "Amount": 100,
+                    "Description": "Widget purchase",
+                    "DetailType": "ItemBasedExpenseLineDetail",
+                    "ItemBasedExpenseLineDetail": {
+                        "ItemRef": {"value": "42", "name": "Widget"},
+                        "Qty": 2,
+                        "UnitPrice": 50,
+                    },
+                },
+            ],
+        }
+        result = map_bill_inbound(qbo)
+        assert result["line_items"][0]["item_external_id"] == "42"
+        assert result["line_items"][0]["quantity"] == 2.0
+
+    def test_inbound_no_item_ref_when_account_based(self):
+        qbo = {
+            "TotalAmt": 100,
+            "Balance": 100,
+            "Line": [
+                {
+                    "Amount": 100,
+                    "Description": "Expense",
+                    "DetailType": "AccountBasedExpenseLineDetail",
+                    "AccountBasedExpenseLineDetail": {},
+                },
+            ],
+        }
+        result = map_bill_inbound(qbo)
+        assert "item_external_id" not in result["line_items"][0]
+
+
+# ---------------------------------------------------------------------------
 # Strategy — entity ordering
 # ---------------------------------------------------------------------------
 
@@ -353,6 +454,28 @@ class TestStrategyOrdering:
         ordered = self.strategy.get_ordered_rules(rules, SyncDirection.INBOUND)
         assert ordered[0].entity_type == "vendor"
         assert ordered[1].entity_type == "custom_entity"
+
+    def test_item_upsert_fn_registered(self):
+        """_get_internal_upsert_fn('item') must not raise."""
+        fn = self.strategy._get_internal_upsert_fn("item")
+        assert callable(fn)
+
+    def test_item_getter_fn_registered(self):
+        """_get_internal_getter_fn('item') must not raise."""
+        fn = self.strategy._get_internal_getter_fn("item")
+        assert callable(fn)
+
+
+class TestMapperRegistries:
+    def test_inbound_mappers_has_item(self):
+        from app.integrations.quickbooks.mappers import INBOUND_MAPPERS
+
+        assert "item" in INBOUND_MAPPERS
+
+    def test_outbound_mappers_has_item(self):
+        from app.integrations.quickbooks.mappers import OUTBOUND_MAPPERS
+
+        assert "item" in OUTBOUND_MAPPERS
 
 
 # ---------------------------------------------------------------------------
