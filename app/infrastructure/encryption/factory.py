@@ -38,21 +38,20 @@ def get_encryption_service() -> EncryptionServiceInterface:
         _encryption_instance = AzureKeyVaultEncryptionService()
         logger.info("Using Azure Key Vault encryption service")
 
-    elif settings.cloud_provider == "gcp":
-        # GCP Cloud KMS would go here
-        logger.warning("GCP Cloud KMS not implemented, falling back to local encryption")
-        from app.infrastructure.encryption.local_encryption import (
-            LocalEncryptionService,
-        )
+    elif settings.cloud_provider == "gcp" and settings.gcp_kms_keyring and settings.gcp_kms_key:
+        from app.infrastructure.encryption.gcp_kms import GCPKMSEncryptionService
 
-        _encryption_instance = LocalEncryptionService()
+        _encryption_instance = GCPKMSEncryptionService()
+        logger.info("Using GCP Cloud KMS encryption service")
 
     else:
         # Default to local encryption for development
         if settings.is_production:
             raise RuntimeError(
                 "Production requires a cloud encryption backend "
-                "(set CLOUD_PROVIDER=aws with KMS_KEY_ID, or CLOUD_PROVIDER=azure with AZURE_KEYVAULT_URL)"
+                "(set CLOUD_PROVIDER=aws with KMS_KEY_ID, "
+                "CLOUD_PROVIDER=azure with AZURE_KEYVAULT_URL, "
+                "or CLOUD_PROVIDER=gcp with GCP_KMS_KEYRING and GCP_KMS_KEY)"
             )
 
         from app.infrastructure.encryption.local_encryption import (

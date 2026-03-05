@@ -31,22 +31,16 @@ def get_message_queue() -> MessageQueueInterface:
         logger.info("Using AWS SQS message queue")
 
     elif settings.cloud_provider == "azure":
-        # Azure Queue Storage would go here
-        # from app.infrastructure.queue.azure_queue import AzureQueue
-        # _queue_instance = AzureQueue()
-        logger.warning("Azure Queue not implemented, falling back to in-memory queue")
-        from app.infrastructure.queue.memory_queue import InMemoryQueue
+        from app.infrastructure.queue.azure_queue import AzureQueue
 
-        _queue_instance = InMemoryQueue()
+        _queue_instance = AzureQueue()
+        logger.info("Using Azure Queue Storage message queue")
 
     elif settings.cloud_provider == "gcp":
-        # GCP Pub/Sub would go here
-        # from app.infrastructure.queue.gcp_queue import GCPPubSubQueue
-        # _queue_instance = GCPPubSubQueue()
-        logger.warning("GCP Pub/Sub not implemented, falling back to in-memory queue")
-        from app.infrastructure.queue.memory_queue import InMemoryQueue
+        from app.infrastructure.queue.gcp_queue import GCPPubSubQueue
 
-        _queue_instance = InMemoryQueue()
+        _queue_instance = GCPPubSubQueue()
+        logger.info("Using GCP Pub/Sub message queue")
 
     else:
         # Default to in-memory queue for local development

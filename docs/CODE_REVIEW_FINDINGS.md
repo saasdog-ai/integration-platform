@@ -1,213 +1,306 @@
-# Code Review Findings — Security, Readability & Code Quality
+# Code Review Findings — Security, Production Readiness, Code Quality
 
-Senior principal engineer review of the integration-platform codebase, focusing on **security**, **readability**, and **code quality**. Findings are ordered by severity (Critical → High → Medium).
+Senior principal engineer review of the integration-platform codebase. Focus: **security**, **production readiness**, **code quality**, and **readability**. Findings are ordered by severity (Critical → High → Medium → Low).
+
+**Review date:** March 2025  
+**Scope:** `app/` (API, auth, core, domain, infrastructure, integrations, services), `tests/`, config and startup.
 
 ---
 
-## Critical
+## Executive summary
 
-### 1. Admin API has no authentication or authorization
+The codebase is well-structured with clear hexagonal architecture, version-vector sync, multi-tenant isolation, and solid reference integrations (QuickBooks, Xero). Several previously critical items (admin API auth, OAuth state validation, credential error leakage) have been addressed. Remaining work centers on: tightening production safeguards (APP_ENV, encryption backend), reducing sensitive data in logs, gating dev-only endpoints, clarifying job status semantics, fixing middleware/client_id wiring, and improving observability and test coverage at the edges.
 
-**Location:** `app/api/admin.py` — entire router
+---
 
-**Issue:** All `/admin/*` endpoints are mounted without any auth dependency. Any caller who can reach the API can:
+## 1. Security
 
-- List all user integrations across all clients (`GET /admin/integrations`)
-- List and reset sync status for any client/integration (`GET/POST .../sync-status`, `.../reset`)
-- Create, read, and update the available integrations catalog (`POST/GET/PUT /admin/integrations/available`)
+### 1.1 [High] Production safety depends on correct `APP_ENV`
 
-This enables full cross-tenant data exposure and catalog manipulation.
+**Location:** `app/core/config.py` — `_validate_production_settings`, `model_post_init`
+
+**Issue:** All production checks (AUTH_ENABLED, JWT_SECRET_KEY, ADMIN_API_KEY, JWKS for RS algorithms) run only when `app_env == "production"`. If a production deployment omits or missets `APP_ENV` (e.g. leaves it default or uses a typo), the app can start with development defaults: no JWT auth, no admin key requirement, and local encryption.
 
 **Recommendation:**
 
-- Protect the admin router with a dedicated dependency (e.g. `require_admin` or `require_service_role`) that validates an admin role, API key, or separate JWT scope.
-- If admin is only meant for internal/network access, document that and enforce at the edge (e.g. IP allowlist, VPC, or separate service with its own auth). Do not rely on “we only call it from our scripts” without enforcement.
+- Make `app_env` a validated literal: `Literal["development", "staging", "production"]` and fail fast if the value is not in that set.
+- In deployment (Terraform, ECS task defs, Helm), make `APP_ENV` an explicit required variable with no default for production.
+- On startup, log a prominent warning when `app_env != "production"` and when `auth_enabled` is false, so misconfiguration is visible in logs.
 
 ---
 
-### 2. OAuth callback does not validate `state` (CSRF risk)
+### 1.2 [High] Local encryption allowed in production
 
-**Location:** `app/services/integration_service.py` — `complete_oauth_callback`; `app/api/integrations.py` — `oauth_callback`
+**Location:** `app/infrastructure/encryption/factory.py`, `app/core/config.py`
 
-**Issue:** The OAuth flow accepts a `state` parameter when building the authorization URL and validates its format (length/chars), but:
-
-- The callback handler does **not** receive or validate `state` from the provider’s redirect.
-- There is no server-side storage of `state` (e.g. in session or short-lived cache) tied to the client/integration to compare on callback.
-
-So the platform does not perform OAuth CSRF protection. An attacker could trick a user into completing an OAuth flow and have the tokens associated with the attacker’s context if callback routing is abused.
+**Issue:** When `cloud_provider` is not `aws`/`azure` (or GCP, which falls back to local), or when KMS/Key Vault IDs are not set, the factory returns `LocalEncryptionService`. Production config validation does not disallow this. Long-lived integration credentials could be encrypted with a single in-process key derived from JWT secret.
 
 **Recommendation:**
 
-- Store `state` server-side when generating the auth URL (e.g. keyed by a random token, with client_id/integration_id and short TTL).
-- On callback, require the `state` from the redirect query and validate it against the stored value, then delete it (one-time use).
-- Document that the frontend must send the same `state` it received from the redirect into the `POST .../callback` body if the backend needs it to look up the stored state.
+- In `_validate_production_settings`, require a production-capable encryption backend: e.g. if `app_env == "production"` then require `(cloud_provider == "aws" and kms_key_id) or (cloud_provider == "azure" and azure_keyvault_url)` (or equivalent for GCP when implemented), and raise if not met.
+- In the factory, after resolving the service, if `app_env == "production"` and the instance is `LocalEncryptionService`, raise at startup. Log which encryption backend is active on startup for operational visibility.
 
 ---
 
-## High
+### 1.3 [High] Sensitive data in external API error logs
 
-### 3. Credential decryption errors can leak internal details to API responses
+**Location:** `app/integrations/xero/client.py` (e.g. lines 100, 171, `response_body`: error_body / error_body[:1000]), `app/integrations/quickbooks/client.py` (e.g. lines 153, 158 — `response_body`: error_body)
 
-**Location:** `app/services/sync_orchestrator.py` (e.g. ~line 539)
-
-**Issue:** In production, credential decryption failures are raised as:
-
-```python
-raise SyncError(f"Failed to decrypt credentials: {e}") from e
-```
-
-`SyncError` is then mapped to an HTTP response with `detail=str(e)`. The underlying exception `e` (e.g. from `cryptography` or KMS) can contain stack traces, internal error codes, or key IDs, which are then sent to the client.
+**Issue:** On token exchange failure and other API errors, adapters log full `response.text` (or up to 1000 chars). OAuth token endpoints can return auth codes, refresh tokens, or error details that are sensitive. These logs can end up in central logging and create a credential/PII leak surface.
 
 **Recommendation:**
 
-- Use a generic user-facing message for credential/decryption failures, e.g. `SyncError("Integration credentials could not be accessed. Please reconnect the integration.")`.
-- Log the real exception (with sanitization) server-side only; do not include it in the API response.
+- Introduce a shared helper (e.g. in `app/core/utils.py` or the shared HTTP client) that redacts or truncates response bodies for URLs that contain token/oauth paths before logging.
+- Use it in both Xero and QuickBooks clients for any log field that includes response body. Prefer logging only status code and a redacted/sanitized summary for auth endpoints; keep full sanitized details server-side only.
 
 ---
 
-### 4. Development auth bypass is undocumented and inconsistent with README
+### 1.4 [Medium] Admin API dev bypass and operational discipline
 
-**Location:** `app/auth/dependencies.py` (`get_current_client`), `README.md` (API section)
+**Location:** `app/auth/admin.py` — `require_admin_api_key`
 
-**Issue:**
-
-- When `auth_enabled` is false, every request is treated as the same fixed client: `UUID("cccccccc-cccc-cccc-cccc-cccccccccccc")`. There is no support for an `X-Client-ID` header in code.
-- The README states that “All endpoints require a `X-Client-ID` header” and shows examples using `X-Client-ID`. That does not match implementation (JWT in production, fixed UUID in dev).
+**Issue:** When `is_development` is true and `admin_api_key` is not set, admin endpoints allow unauthenticated access. This is documented but creates a sharp edge: if a non-production environment is mistakenly set to `development` or launched without `ADMIN_API_KEY`, admin APIs are open.
 
 **Recommendation:**
 
-- In development, either:
-  - Support an optional `X-Client-ID` header and use it when present (and valid UUID), falling back to the fixed test client when absent, or
-  - Clearly document that in dev no header is used and a single test client is assumed.
-- Update the README to describe actual behavior: JWT in production, and in dev either fixed client or optional `X-Client-ID` if you add it.
+- When allowing the dev bypass, log a clear warning (e.g. "Admin API access allowed without key in development").
+- Ensure deployment and runbooks require `ADMIN_API_KEY` in every non-local environment. Consider monitoring 503s from admin routes as a misconfiguration signal (missing key in production).
 
 ---
 
-### 5. `request.state.client_id` is never set — middleware and rate limiter see no client
+### 1.5 [Medium] Readiness endpoint exposes internal error details
 
-**Location:** `app/core/middleware.py` (e.g. `RequestContextMiddleware`, `ClientContextMiddleware`, `RateLimitMiddleware`)
+**Location:** `app/api/health.py` — `readiness_check`
 
-**Issue:** Middleware reads `request.state.client_id` to set `client_id_ctx` and for rate limiting. However, nothing in the app ever sets `request.state.client_id`. Authentication is done in route dependencies (`get_current_client` / `get_client_id`), which run after middleware and do not touch `request.state`. So:
-
-- `client_id_ctx` is effectively never set from auth.
-- Rate limiting falls back to IP for every request, so all authenticated traffic from the same IP is rate-limited as one “client”.
+**Issue:** `/health/ready` returns `database`, `queue`, and `encryption` status strings that can include full exception text (e.g. `f"unhealthy: {e}"`). Anyone who can hit the endpoint may see connection strings, hostnames, or internal error messages.
 
 **Recommendation:**
 
-- Either set `request.state.client_id` in a middleware that runs after authentication (e.g. a middleware that calls a shared auth helper and sets `request.state.client_id`), or
-- Use a different mechanism for rate limiting that has access to the resolved client (e.g. dependency or post-route hook). Until then, document that in-process rate limiting is per-IP when auth is used.
+- Return generic status values to the client (e.g. "healthy" / "unhealthy") and avoid embedding raw exception messages in the response. Log full errors server-side only.
+- If this endpoint is only for internal load balancers, document that and restrict access at the edge; otherwise keep the response minimal.
 
 ---
 
-### 6. OAuth state validation message says “128” but code allows 256
-
-**Location:** `app/services/integration_service.py` (state validation)
-
-**Issue:** The regex allows 1–256 characters: `r"^[a-zA-Z0-9_\-\.:]{1,256}$"`, but the user-facing message says “max 128 characters.” This is misleading and could cause unnecessary validation errors if the UI enforces 128.
-
-**Recommendation:** Change the error message to “max 256 characters” or reduce the regex to 128 and keep the message; align code and message.
-
----
-
-## Medium (Security / Consistency)
-
-### 7. Production config validation allows deploying with default JWT secret if auth is off
-
-**Location:** `app/core/config.py` — `_validate_production_settings`
-
-**Issue:** Production checks require `AUTH_ENABLED=true` and a non-default `JWT_SECRET_KEY`. If someone deploys with `APP_ENV=production` but forgets to set `AUTH_ENABLED`, validation fails (good). If they set `AUTH_ENABLED=false` in production (e.g. behind a gateway that does auth), the default `JWT_SECRET_KEY` is not rejected. Any later switch to auth would then use a known default secret.
-
-**Recommendation:** In production, always require a non-default `JWT_SECRET_KEY` (and optionally warn or fail if `AUTH_ENABLED=false`), so that flipping auth on later cannot accidentally use the default.
-
-### 8. Public catalog endpoints are unauthenticated
+### 1.6 [Medium] Catalog endpoints unauthenticated
 
 **Location:** `app/api/integrations.py` — `list_available_integrations`, `get_available_integration`
 
-**Issue:** These two routes do not use `Depends(get_client_id)`. That may be intentional (public catalog), but it is inconsistent with the README (“All endpoints require X-Client-ID”) and with the rest of the integrations API.
+**Issue:** These two routes do not use `Depends(get_client_id)`. The rest of the integrations API is tenant-scoped and authenticated. README states "All endpoints require a X-Client-ID header" for examples, which can imply everything is protected.
 
-**Recommendation:** If the catalog is intentionally public, document it and consider rate limiting or abuse protections. If not, add the same auth dependency as other integration endpoints.
+**Recommendation:**
 
----
-
-## Readability & Code Quality
-
-### 9. Duplicate response/DTO mapping logic
-
-**Location:** `app/api/admin.py` and `app/api/integrations.py`
-
-**Issue:** `_to_user_integration_response` and `_to_available_integration_response` are duplicated (or near-duplicated) between the two modules. Same for admin’s `_to_available_integration_response`.
-
-**Recommendation:** Move shared mappers to a single place (e.g. `app/api/dto.py` or `app/api/mappers.py`) and reuse in both routers to avoid drift and duplication.
-
-### 10. Broad `except Exception` and re-raise as domain errors
-
-**Location:** Multiple (e.g. `sync_orchestrator`, `integration_service`, `sync_job_runner`, QBO client)
-
-**Issue:** Several places use `except Exception as e` and then raise a domain exception (e.g. `SyncError`, `IntegrationError`) with `str(e)` or `f"... {e}"`. That can:
-
-- Swallow programming errors (e.g. `AttributeError`, `TypeError`) and turn them into “sync failed” or “integration error.”
-- Leak internal details if those messages are returned to the client (see finding #3).
-
-**Recommendation:** Catch specific exception types where possible; for a generic fallback, use a generic user-facing message and log the real exception (with sanitization) instead of putting `str(e)` in the response.
-
-### 11. Inconsistent use of “integration_id” in path vs body
-
-**Location:** `app/api/integrations.py` — e.g. `connect_integration(integration_id: UUID, ...)`; README and DTOs
-
-**Issue:** Path uses `integration_id` for “available integration” (catalog) vs “user integration” (connection). For routes like `GET /{integration_id}` the path parameter is the **user integration** id (connection), not the catalog id. Naming is correct but can confuse; the README example uses the catalog UUID in the path for “Get connected integration,” which is wrong (it should be the user integration id).
-
-**Recommendation:** In README and OpenAPI descriptions, clarify when the path id is “user integration (connection) id” vs “available integration (catalog) id.” Add a short comment above the route if helpful.
-
-### 12. Magic string for dev client UUID
-
-**Location:** `app/auth/dependencies.py`
-
-**Issue:** The development client id `UUID("cccccccc-cccc-cccc-cccc-cccccccccccc")` is hardcoded. Tests and docs may depend on this value.
-
-**Recommendation:** Define it once (e.g. in `app/core/config.py` as `Settings.dev_client_id` or a constant in `auth/dependencies.py`) and reference it everywhere, so it can be changed or overridden in one place.
+- If the catalog is intentionally public, document it clearly (e.g. in README and OpenAPI) and consider rate limiting or abuse protections.
+- If not, add the same auth dependency as other integration endpoints for consistency.
 
 ---
 
-## Summary Table
+### 1.7 [Low] Dev client UUID as magic value
 
-| #  | Severity  | Area      | Summary                                              |
-|----|-----------|-----------|------------------------------------------------------|
-| 1  | Critical  | Security  | Admin API has no authentication/authorization        |
-| 2  | Critical  | Security  | OAuth callback does not validate `state` (CSRF)     |
-| 3  | High      | Security  | Credential decryption errors leak to API response    |
-| 4  | High      | Security  | Dev auth bypass vs README (X-Client-ID not used)      |
-| 5  | High      | Security  | `request.state.client_id` never set; rate limit by IP only |
-| 6  | High      | Quality   | OAuth state message says 128 chars, code allows 256  |
-| 7  | Medium    | Security  | Production JWT secret not enforced when auth disabled |
-| 8  | Medium    | Security  | Catalog endpoints unauthenticated (document or protect) |
-| 9  | Medium    | Quality   | Duplicate DTO mapping in admin and integrations API  |
-| 10 | Medium    | Quality   | Broad `except Exception` and message leakage risk    |
-| 11 | Low       | Readability | Path vs body “integration_id” semantics in README   |
-| 12 | Low       | Readability | Dev client UUID as magic string                      |
+**Location:** `app/auth/dependencies.py` — fallback `client_id` when auth is disabled and no `X-Client-ID` header
+
+**Issue:** The fallback UUID `aaa00000-0000-0000-0000-000000000001` is hardcoded. Tests and docs may depend on it; changing it would require updates in multiple places.
+
+**Recommendation:**
+
+- Define the value once (e.g. `app/core/config.py` as `Settings.dev_client_id` or a named constant in `auth`) and reference it everywhere so it can be overridden or changed in one place.
 
 ---
 
-## Recommended order of work
+## 2. Production readiness
 
-1. **Immediate:** Add authentication/authorization to the admin API (#1) and fix OAuth state validation (#2).
-2. **Short-term:** Harden credential error responses (#3), align dev auth and README (#4), fix or document client_id in middleware/rate limiting (#5), and fix state validation message (#6).
-3. **Follow-up:** Production JWT secret rule (#7), catalog auth/docs (#8), deduplicate DTO mapping (#9), and narrow exception handling (#10); then README and dev UUID clarity (#11–12).
+### 2.1 [High] Dev-only “execute job now” endpoint not gated
+
+**Location:** `app/api/sync_jobs.py` — `POST /sync-jobs/{job_id}/execute`
+
+**Issue:** The endpoint bypasses the queue and runs sync synchronously. The docstring says it is for "development and demo purposes only" but there is no guard on `APP_ENV` or a feature flag. In production, callers can trigger heavy work on API pods and bypass SQS backpressure and job runner isolation.
+
+**Recommendation:**
+
+- Guard the route: e.g. if `not settings.is_development` (or a dedicated feature flag), return 404 or 403.
+- Alternatively, move the endpoint under the admin router and protect it with `require_admin_api_key`, and ensure host UIs do not expose it in production.
 
 ---
 
-## Verification (Re-Review)
+### 2.2 [High] `request.state.client_id` never set — rate limiting and context are per-IP
 
-| #  | Status   | Notes |
-|----|----------|--------|
-| 1  | **Fixed** | Admin router uses `dependencies=[Depends(require_admin_api_key)]`; `app/auth/admin.py` validates `X-Admin-API-Key`. Production requires `ADMIN_API_KEY`. |
-| 2  | **Fixed** | `OAuthStateStore` in `app/services/oauth_state_store.py` creates state on connect and `validate_and_consume(state, client_id)` on callback. `OAuthCallbackRequest.state` is required. Integration ID and redirect_uri validated from stored entry. |
-| 3  | **Fixed** | `sync_orchestrator` raises generic `SyncError("Failed to access integration credentials. Please reconnect the integration.")`; real error only logged via `sanitize_error_for_log(e)`. |
-| 4  | **Open**  | README still says "All endpoints require X-Client-ID"; code does not read X-Client-ID (dev uses fixed UUID, prod uses JWT). Dev client UUID still hardcoded. |
-| 5  | **Open**  | Nothing sets `request.state.client_id`; middleware still only reads it. Rate limiting remains per-IP when auth is used. |
-| 6  | **Fixed** | State is now server-generated only; no user-supplied state format validation, so 128/256 message removed. |
-| 7  | **Fixed** | Production validation requires `AUTH_ENABLED=true` and non-default `JWT_SECRET_KEY`; also requires `ADMIN_API_KEY`. |
-| 8  | **Open**  | Catalog endpoints still unauthenticated; not explicitly documented as intentional. |
-| 9  | **Open**  | `_to_user_integration_response` and `_to_available_integration_response` still duplicated in `admin.py` and `integrations.py`. |
-| 10 | **Partial** | Credential-decrypt path fixed; other broad `except Exception` may remain. |
-| 11 | **Open**  | README path vs body integration_id semantics not clarified. |
-| 12 | **Open**  | Dev client UUID still hardcoded in `app/auth/dependencies.py`. |
+**Location:** `app/core/middleware.py` — `RequestContextMiddleware`, `ClientContextMiddleware`, `RateLimitMiddleware`; `app/auth/dependencies.py`
+
+**Issue:** Middleware reads `request.state.client_id` for context and rate limiting. Auth runs in route dependencies (`get_current_client` / `get_client_id`), which execute after middleware; nothing ever sets `request.state.client_id`. So `client_id_ctx` is never set from auth, and rate limiting falls back to IP for every request. All traffic from the same IP is treated as one client.
+
+**Recommendation:**
+
+- Either set `request.state.client_id` in a middleware that runs after authentication (e.g. a middleware that performs the same auth resolution and sets `request.state.client_id` so later middleware and logging see it), or
+- Document that in-process rate limiting is per-IP when JWT auth is used, and rely on API gateway or a post-auth mechanism for per-tenant rate limiting.
+
+---
+
+### 2.3 [Medium] Partial sync failures reported as SUCCEEDED
+
+**Location:** `app/services/sync_orchestrator.py` — `_finalize_job_status`
+
+**Issue:** When some but not all entity syncs fail, the job is marked `SyncJobStatus.SUCCEEDED` and errors are stored under `entities_processed["_errors"]`. Clients or UIs that only check `status` will not see that partial failures occurred.
+
+**Recommendation:**
+
+- Introduce a distinct status (e.g. `PARTIALLY_SUCCEEDED`) or an explicit flag (e.g. `has_entity_errors: true`) in the job response model.
+- Update API docs and UI to present "succeeded with errors" clearly and distinguish it from full success.
+
+---
+
+### 2.4 [Medium] Exception details in API error responses
+
+**Location:** Multiple API handlers — e.g. `app/api/sync_jobs.py`, `app/api/integrations.py`, `app/auth/dependencies.py`
+
+**Issue:** Many handlers use `detail=str(e)` when mapping domain or validation exceptions to HTTP responses. Internal exception messages (e.g. from adapters, DB, or business logic) can leak into the response and expose implementation details.
+
+**Recommendation:**
+
+- Prefer generic user-facing messages for unexpected or internal errors (e.g. "Operation failed. Please try again or contact support.") and log the real exception (sanitized) server-side only.
+- Reserve `detail=str(e)` only for intentional validation messages that are safe to show (e.g. "Invalid X-Client-ID header format").
+
+---
+
+### 2.5 [Low] No startup warning for insecure posture
+
+**Location:** `app/main.py` — lifespan startup
+
+**Issue:** There is no explicit log or check that warns when running with auth disabled or with local encryption outside development.
+
+**Recommendation:**
+
+- After `setup_logging` and loading settings, log a warning when `app_env != "production"` and when `auth_enabled` is false. Optionally log which encryption backend is active so operators can verify production posture.
+
+---
+
+## 3. Code quality & readability
+
+### 3.1 [Medium] Very large modules
+
+**Location:** `app/services/sync_orchestrator.py`, `app/integrations/xero/strategy.py` (and similarly `app/integrations/quickbooks/strategy.py`)
+
+**Issue:** The orchestrator and Xero strategy are large, multi-responsibility modules (orchestration, strategy registry, token handling, entity loops, error handling, history). This makes onboarding and safe changes harder.
+
+**Recommendation:**
+
+- Incrementally extract cohesive pieces (e.g. token refresh helper, history writer, per-entity sync helpers) into submodules or shared utilities. Add unit tests for extracted logic to preserve behavior.
+
+---
+
+### 3.2 [Medium] Duplicate DTO mapping
+
+**Location:** `app/api/admin.py`, `app/api/integrations.py`
+
+**Issue:** `_to_user_integration_response` and `_to_available_integration_response` (or equivalent) are duplicated or near-duplicated between the two routers. Changes to response shape must be done in multiple places.
+
+**Recommendation:**
+
+- Move shared mappers to a single module (e.g. `app/api/dto.py` or `app/api/mappers.py`) and reuse in both routers to avoid drift and duplication.
+
+---
+
+### 3.3 [Medium] Broad `except Exception` and error propagation
+
+**Location:** Multiple — e.g. `app/services/sync_orchestrator.py`, `app/services/integration_service.py`, `app/services/sync_job_runner.py`, integration clients
+
+**Issue:** Several places use `except Exception as e` and then raise a domain exception with `str(e)` or include it in logs/responses. This can turn programming errors into generic "sync failed" or "integration error" and, when `str(e)` is returned to the client, leak internal details.
+
+**Recommendation:**
+
+- Catch specific exception types where possible. For a generic fallback, use a generic user-facing message in the API response and log the real exception (via `sanitize_error_for_log` where appropriate) server-side only. Credential decryption path already follows this pattern; extend it to other critical paths.
+
+---
+
+### 3.4 [Low] InternalDataRepository SQL patterns
+
+**Location:** `app/integrations/shared/internal_repo.py`
+
+**Issue:** The demo repo uses raw SQL with `text()` and parameter binding correctly; only static fragments are concatenated. The pattern is safe but repetitive and could invite copy-paste mistakes if more queries are added.
+
+**Recommendation:**
+
+- Keep this module as the documented “demo” implementation and avoid extending it for real business logic. If it grows, consider shared helpers for common WHERE/params patterns. Document that production deployments should replace it with an internal API client or ORM-based access.
+
+---
+
+## 4. Tests
+
+### 4.1 [Medium] API-level auth and admin tests
+
+**Location:** `tests/unit/test_api.py`, `tests/unit/test_auth.py`, `tests/unit/test_admin_auth.py`
+
+**Issue:** Auth and admin behavior are tested at the dependency level. There are no tests that hit actual HTTP endpoints with a real JWT or with/without `X-Admin-API-Key` to confirm 401/403 and routing behavior end-to-end.
+
+**Recommendation:**
+
+- Add a small set of API-level tests (e.g. using `TestClient`) that call a representative protected route with valid/invalid/missing JWT and assert status and body. Similarly, test admin routes with and without the admin key and with wrong key to confirm 401/503 behavior.
+
+---
+
+### 4.2 [Medium] Health readiness failure paths
+
+**Location:** `tests/unit/test_health.py`
+
+**Issue:** Health/readiness are likely tested in the “all healthy” case. Failure scenarios (e.g. DB or queue unavailable) may not be covered, so regression in error handling or response shape could go unnoticed.
+
+**Recommendation:**
+
+- Add tests that simulate dependency failures (e.g. mock `get_engine` or `get_message_queue` to raise) and assert that `/health/ready` returns the expected status structure and does not expose raw exceptions in the body if you change that behavior.
+
+---
+
+### 4.3 [Low] Optional cloud integration tests
+
+**Location:** `tests/`
+
+**Issue:** KMS, Key Vault, and SQS are tested via mocks and interfaces. There are no opt-in tests against real AWS/Azure that validate encrypt/decrypt or send/receive semantics.
+
+**Recommendation:**
+
+- Consider a small, skipped-by-default suite (e.g. pytest marker `@pytest.mark.cloud`) that runs in CI only when credentials are present, to catch SDK or permission drift.
+
+---
+
+## 5. Summary table
+
+| #   | Severity | Area     | Summary |
+|-----|----------|----------|---------|
+| 1.1 | High     | Security | Production safety depends on correct APP_ENV |
+| 1.2 | High     | Security | Local encryption allowed in production |
+| 1.3 | High     | Security | Sensitive data in external API error logs |
+| 1.4 | Medium   | Security | Admin API dev bypass needs operational discipline |
+| 1.5 | Medium   | Security | Readiness endpoint exposes internal error details |
+| 1.6 | Medium   | Security | Catalog endpoints unauthenticated (document or protect) |
+| 1.7 | Low      | Security | Dev client UUID as magic value |
+| 2.1 | High     | Prod     | Dev-only execute job endpoint not gated |
+| 2.2 | High     | Prod     | request.state.client_id never set; rate limit per-IP only |
+| 2.3 | Medium   | Prod     | Partial failures reported as SUCCEEDED |
+| 2.4 | Medium   | Prod     | Exception details in API error responses |
+| 2.5 | Low      | Prod     | No startup warning for insecure posture |
+| 3.1 | Medium   | Quality  | Very large orchestrator and strategy modules |
+| 3.2 | Medium   | Quality  | Duplicate DTO mapping in admin and integrations API |
+| 3.3 | Medium   | Quality  | Broad except Exception and error propagation |
+| 3.4 | Low      | Quality  | InternalDataRepository SQL patterns (document/contain) |
+| 4.1 | Medium   | Tests    | Missing API-level auth and admin tests |
+| 4.2 | Medium   | Tests    | Health readiness failure paths not tested |
+| 4.3 | Low      | Tests    | No optional cloud integration tests |
+
+---
+
+## 6. Recommended order of work
+
+1. **Immediate (security):**  
+   - Enforce production encryption backend and fail fast when local encryption would be used in production (1.2).  
+   - Redact or centralize logging of external API error bodies, especially for token endpoints (1.3).  
+   - Gate `POST /sync-jobs/{id}/execute` by environment or admin (2.1).
+
+2. **Short-term (security & prod):**  
+   - Validate and restrict `APP_ENV`; add startup warnings for non-production and auth-off (1.1, 2.5).  
+   - Fix or document `request.state.client_id` and rate limiting behavior (2.2).  
+   - Reduce readiness response detail and document/restrict catalog auth (1.5, 1.6).  
+   - Introduce PARTIALLY_SUCCEEDED or equivalent and tighten API error messages (2.3, 2.4).
+
+3. **Follow-up (quality & tests):**  
+   - Deduplicate DTO mappers (3.2).  
+   - Narrow exception handling and avoid leaking internal messages to clients (3.3).  
+   - Add API-level auth and admin tests, and health failure-path tests (4.1, 4.2).  
+   - Optionally extract large modules and add optional cloud tests (3.1, 4.3); dev UUID and internal repo docs (1.7, 3.4).

@@ -2,6 +2,9 @@ FROM --platform=linux/amd64 python:3.11-slim
 
 WORKDIR /app
 
+# Cloud provider extras: aws, azure, gcp, or cloud (all providers)
+ARG CLOUD_EXTRAS=aws
+
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     gcc \
@@ -18,7 +21,7 @@ COPY scripts/start.sh /app/start.sh
 
 # Install dependencies with cloud extras
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -e ".[aws]"
+    pip install --no-cache-dir -e ".[${CLOUD_EXTRAS}]"
 
 # Create non-root user
 RUN useradd -m -u 1000 appuser && \
