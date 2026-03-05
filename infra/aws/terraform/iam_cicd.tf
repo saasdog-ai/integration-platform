@@ -268,6 +268,7 @@ resource "aws_iam_role_policy" "cicd_deploy" {
           "logs:ListTagsForResource",
           # Secrets Manager
           "secretsmanager:CreateSecret",
+          "secretsmanager:UpdateSecret",
           "secretsmanager:DeleteSecret",
           "secretsmanager:GetSecretValue",
           "secretsmanager:PutSecretValue",
