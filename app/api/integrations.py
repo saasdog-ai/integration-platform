@@ -108,6 +108,7 @@ async def list_available_integrations(
     "/available/{integration_id}",
     response_model=AvailableIntegrationResponse,
     summary="Get available integration details",
+    responses={404: {"description": "Integration not found"}},
 )
 async def get_available_integration(
     integration_id: UUID,
@@ -144,6 +145,7 @@ async def list_user_integrations(
     "/{integration_id}",
     response_model=UserIntegrationResponse,
     summary="Get connected integration",
+    responses={404: {"description": "Integration not found or not owned by client"}},
 )
 async def get_user_integration(
     integration_id: UUID,
@@ -165,6 +167,11 @@ async def get_user_integration(
     "/{integration_id}/connect",
     response_model=ConnectIntegrationResponse,
     summary="Start OAuth connection",
+    responses={
+        400: {"description": "Integration does not support OAuth"},
+        404: {"description": "Integration not found"},
+        409: {"description": "Integration already connected"},
+    },
 )
 async def connect_integration(
     integration_id: UUID,
@@ -172,7 +179,11 @@ async def connect_integration(
     client_id: UUID = Depends(get_client_id),
     service: IntegrationService = Depends(get_integration_service),
 ) -> ConnectIntegrationResponse:
-    """Start OAuth flow to connect an integration."""
+    """Start OAuth flow to connect an integration. Returns the authorization URL to redirect the user to."""
+    logger.info(
+        "OAuth connect initiated",
+        extra={"integration_id": str(integration_id)},
+    )
     try:
         auth_url = await service.get_oauth_authorization_url(
             client_id=client_id,
@@ -202,6 +213,11 @@ async def connect_integration(
     "/{integration_id}/callback",
     response_model=UserIntegrationResponse,
     summary="Complete OAuth connection",
+    responses={
+        400: {"description": "Invalid or expired OAuth state"},
+        404: {"description": "Integration not found"},
+        502: {"description": "Token exchange failed with external provider"},
+    },
 )
 async def oauth_callback(
     integration_id: UUID,
@@ -209,7 +225,7 @@ async def oauth_callback(
     client_id: UUID = Depends(get_client_id),
     service: IntegrationService = Depends(get_integration_service),
 ) -> UserIntegrationResponse:
-    """Complete OAuth flow with authorization code."""
+    """Complete OAuth flow by exchanging the authorization code for tokens."""
     try:
         user_integration = await service.complete_oauth_callback(
             client_id=client_id,
@@ -218,6 +234,14 @@ async def oauth_callback(
             redirect_uri=request.redirect_uri,
             state=request.state,
             realm_id=request.realm_id,
+        )
+        logger.info(
+            "OAuth callback succeeded",
+            extra={
+                "integration_id": str(integration_id),
+                "external_account_id": user_integration.external_account_id,
+                "status": user_integration.status.value,
+            },
         )
         return _to_user_integration_response(user_integration)
     except NotFoundError:
@@ -242,15 +266,26 @@ async def oauth_callback(
     "/{integration_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Disconnect integration",
+    responses={
+        404: {"description": "Integration not found or not owned by client"},
+    },
 )
 async def disconnect_integration(
     integration_id: UUID,
     client_id: UUID = Depends(get_client_id),
     service: IntegrationService = Depends(get_integration_service),
 ) -> None:
-    """Disconnect a connected integration."""
+    """Disconnect a connected integration. Revokes tokens and marks as disconnected."""
+    logger.info(
+        "Integration disconnect requested",
+        extra={"integration_id": str(integration_id)},
+    )
     try:
         await service.disconnect_integration(client_id, integration_id)
+        logger.info(
+            "Integration disconnected",
+            extra={"integration_id": str(integration_id)},
+        )
     except NotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -262,6 +297,7 @@ async def disconnect_integration(
     "/{integration_id}/sync-status",
     response_model=EntitySyncStatusListResponse,
     summary="List entity sync statuses",
+    responses={404: {"description": "Integration not found or not owned by client"}},
 )
 async def list_entity_sync_statuses(
     integration_id: UUID,
@@ -302,6 +338,9 @@ async def list_entity_sync_statuses(
     "/{integration_id}/sync-status/{entity_type}/reset",
     response_model=EntitySyncStatusResponse,
     summary="Reset entity last sync time",
+    responses={
+        404: {"description": "Integration or entity sync status not found"},
+    },
 )
 async def reset_entity_last_sync_time(
     integration_id: UUID,
@@ -311,7 +350,16 @@ async def reset_entity_last_sync_time(
     service: IntegrationService = Depends(get_integration_service),
     state_repo: IntegrationStateRepositoryInterface = Depends(get_state_repository),
 ) -> EntitySyncStatusResponse:
-    """Reset last sync times for an entity type to allow full re-sync."""
+    """Reset last sync times for an entity type to allow full re-sync on the next run."""
+    logger.info(
+        "Sync status reset requested",
+        extra={
+            "integration_id": str(integration_id),
+            "entity_type": entity_type,
+            "reset_inbound": request.reset_inbound_sync_time,
+            "reset_last": request.reset_last_sync_time,
+        },
+    )
     # Verify the integration belongs to this client
     try:
         await service.get_user_integration(client_id, integration_id)
@@ -356,6 +404,10 @@ async def reset_entity_last_sync_time(
     "/{integration_id}/notify",
     response_model=NotifyChangeResponse,
     summary="Notify of record changes (push)",
+    responses={
+        400: {"description": "Invalid entity type or sync configuration"},
+        404: {"description": "Integration not found"},
+    },
 )
 async def notify_change(
     integration_id: UUID,
@@ -369,6 +421,15 @@ async def notify_change(
     Bumps version vectors for the specified records and optionally
     triggers a sync job based on the entity's sync_trigger setting.
     """
+    logger.info(
+        "Change notification received",
+        extra={
+            "integration_id": str(integration_id),
+            "entity_type": request.entity_type,
+            "event": request.event,
+            "record_count": len(request.record_ids),
+        },
+    )
     event = ChangeEvent(
         client_id=client_id,
         integration_id=integration_id,
@@ -379,6 +440,15 @@ async def notify_change(
     )
     try:
         records_bumped, records_created, sync_job = await orchestrator.handle_change_event(event)
+        logger.info(
+            "Change notification processed",
+            extra={
+                "integration_id": str(integration_id),
+                "records_bumped": records_bumped,
+                "records_created": records_created,
+                "sync_triggered": sync_job is not None,
+            },
+        )
         return NotifyChangeResponse(
             records_bumped=records_bumped,
             records_created=records_created,
@@ -447,6 +517,10 @@ async def _resolve_state_ids(
     "/{integration_id}/records/force-sync",
     response_model=OverrideResultResponse,
     summary="Force-sync failing records",
+    responses={
+        404: {"description": "Integration not found or not owned by client"},
+        422: {"description": "Invalid request body (must provide exactly one selector)"},
+    },
 )
 async def force_sync_records(
     integration_id: UUID,
@@ -458,6 +532,8 @@ async def force_sync_records(
     """
     Mark failing records as synced: clear errors, equalize version vectors.
 
+    Only records in **failed** or **conflict** status are eligible.
+    Records in other states are skipped with a reason in `skipped_details`.
     If a user later modifies a force-synced record, the normal sync loop
     will detect the version change and re-attempt sync.
     """
@@ -471,6 +547,19 @@ async def force_sync_records(
         ) from None
 
     state_ids = await _resolve_state_ids(request, integration_id, client.client_id, state_repo)
+    logger.info(
+        "Force-sync requested",
+        extra={
+            "integration_id": str(integration_id),
+            "record_count": len(state_ids),
+            "entity_type": request.entity_type,
+            "selector": "state_ids"
+            if request.state_ids
+            else "internal_record_ids"
+            if request.internal_record_ids
+            else "external_record_ids",
+        },
+    )
     if not state_ids:
         return OverrideResultResponse(records_updated=0, records_skipped=0)
 
@@ -495,6 +584,14 @@ async def force_sync_records(
         )
     )
 
+    logger.info(
+        "Force-sync completed",
+        extra={
+            "integration_id": str(integration_id),
+            "records_updated": updated,
+            "records_skipped": len(skipped),
+        },
+    )
     return OverrideResultResponse(
         records_updated=updated,
         records_skipped=len(skipped),
@@ -506,6 +603,10 @@ async def force_sync_records(
     "/{integration_id}/records/do-not-sync",
     response_model=OverrideResultResponse,
     summary="Toggle do-not-sync flag on records",
+    responses={
+        404: {"description": "Integration not found or not owned by client"},
+        422: {"description": "Invalid request body (must provide exactly one selector)"},
+    },
 )
 async def set_do_not_sync(
     integration_id: UUID,
@@ -517,8 +618,10 @@ async def set_do_not_sync(
     """
     Toggle the do-not-sync flag on records to exclude or re-include them in sync.
 
-    When toggled ON, records are skipped in both inbound and outbound sync.
-    When toggled OFF, records with version mismatches are set to PENDING.
+    When toggled **ON** (`do_not_sync=true`), records are skipped in both
+    inbound and outbound sync, and existing errors are cleared.
+    When toggled **OFF** (`do_not_sync=false`), records with version
+    mismatches are set to PENDING so the next sync picks them up.
     """
     # Verify the integration belongs to this client
     try:
@@ -530,6 +633,15 @@ async def set_do_not_sync(
         ) from None
 
     state_ids = await _resolve_state_ids(request, integration_id, client.client_id, state_repo)
+    logger.info(
+        "Do-not-sync toggle requested",
+        extra={
+            "integration_id": str(integration_id),
+            "do_not_sync": request.do_not_sync,
+            "record_count": len(state_ids),
+            "entity_type": request.entity_type,
+        },
+    )
     if not state_ids:
         return OverrideResultResponse(records_updated=0, records_skipped=0)
 
@@ -556,6 +668,15 @@ async def set_do_not_sync(
         )
     )
 
+    logger.info(
+        "Do-not-sync toggle completed",
+        extra={
+            "integration_id": str(integration_id),
+            "do_not_sync": request.do_not_sync,
+            "records_updated": updated,
+            "records_skipped": len(skipped),
+        },
+    )
     return OverrideResultResponse(
         records_updated=updated,
         records_skipped=len(skipped),
@@ -567,19 +688,29 @@ async def set_do_not_sync(
     "/{integration_id}/records",
     response_model=SyncRecordsResponse,
     summary="Browse integration records",
+    responses={
+        404: {"description": "Integration not found or not owned by client"},
+    },
 )
 async def list_integration_records(
     integration_id: UUID,
     client_id: UUID = Depends(get_client_id),
     service: IntegrationService = Depends(get_integration_service),
     state_repo: IntegrationStateRepositoryInterface = Depends(get_state_repository),
-    entity_type: str | None = Query(None),
-    sync_status: str | None = Query(None),
-    do_not_sync: bool | None = Query(None),
+    entity_type: str | None = Query(None, description="Filter by entity type (e.g. vendor, bill)"),
+    sync_status: str | None = Query(
+        None, description="Filter by status: synced, failed, pending, conflict"
+    ),
+    do_not_sync: bool | None = Query(None, description="Filter by do-not-sync flag"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
 ) -> SyncRecordsResponse:
-    """Browse all records for an integration with optional filters."""
+    """
+    Browse all integration state records with optional filters and pagination.
+
+    Returns records from the `integration_state` table, including sync status,
+    version vectors, error details, and override flags (do_not_sync, force_synced_at).
+    """
     # Verify the integration belongs to this client
     try:
         await service.get_user_integration(client_id, integration_id)
@@ -602,6 +733,17 @@ async def list_integration_records(
     )
 
     total_pages = (total + page_size - 1) // page_size if total > 0 else 1
+    logger.info(
+        "Records browse",
+        extra={
+            "integration_id": str(integration_id),
+            "entity_type": entity_type,
+            "sync_status": sync_status,
+            "do_not_sync": do_not_sync,
+            "page": page,
+            "total": total,
+        },
+    )
 
     return SyncRecordsResponse(
         records=[

@@ -139,35 +139,59 @@ Each strategy's `__init__` accepts an optional `internal_repo` parameter for tes
 - `GET /health` — health check
 
 ### Integrations (`/integrations`)
-- `GET /integrations/available` — list catalog
-- `GET /integrations/available/{id}` — get integration
+- `GET /integrations/available` — list catalog (active only by default)
+- `GET /integrations/available/{id}` — get integration details
 - `GET /integrations` — list user connections
 - `GET /integrations/{id}` — get user connection
-- `POST /integrations/{id}/connect` — start OAuth
-- `POST /integrations/{id}/callback` — complete OAuth
-- `DELETE /integrations/{id}` — disconnect
+- `POST /integrations/{id}/connect` — start OAuth (returns authorization URL)
+- `POST /integrations/{id}/callback` — complete OAuth (exchange code for tokens)
+- `DELETE /integrations/{id}` — disconnect (revoke tokens, mark disconnected)
 - `GET /integrations/{id}/sync-status` — entity sync statuses
-- `POST /integrations/{id}/sync-status/{entity}/reset` — reset cursor
-- `GET /integrations/{id}/records` — browse records (paginated, filterable by entity_type, sync_status, do_not_sync)
-- `POST /integrations/{id}/records/force-sync` — bulk force-sync failing records (clear errors, equalize version vectors)
-- `POST /integrations/{id}/records/do-not-sync` — bulk toggle do-not-sync flag on records
+- `POST /integrations/{id}/sync-status/{entity}/reset` — reset cursor for full re-sync
+- `POST /integrations/{id}/notify` — push change notification (bump version vectors)
+
+### Records & Manual Overrides (`/integrations/{id}/records`)
+- `GET /integrations/{id}/records` — browse integration state records (paginated)
+  - Filters: `entity_type`, `sync_status` (synced/failed/pending/conflict), `do_not_sync`
+  - Returns: record IDs, version vectors, error details, override flags
+- `POST /integrations/{id}/records/force-sync` — force-sync failing records
+  - Clears errors, equalizes version vectors (iv=ev=lsv=max), marks SYNCED
+  - Only eligible for records in `failed` or `conflict` status; others are skipped
+  - Writes an audit log entry; records `force_synced_at` timestamp
+  - If a record is later modified, normal sync loop detects the change and re-syncs
+- `POST /integrations/{id}/records/do-not-sync` — toggle do-not-sync flag
+  - `do_not_sync=true`: exclude from all sync, clear errors
+  - `do_not_sync=false`: re-include; records with version mismatches set to PENDING
+  - Writes an audit log entry
+
+**Record selector** (used by both override endpoints): provide exactly one of:
+  1. `state_ids` — direct integration_state UUIDs
+  2. `internal_record_ids` + `entity_type` — look up by internal IDs
+  3. `external_record_ids` + `entity_type` — look up by external provider IDs
 
 ### Settings (`/integrations/{id}/settings`)
-- `GET` / `PUT` — user settings
-- `GET` / `PUT` with `/defaults` — system defaults
+- `GET` / `PUT` — user settings (sync rules, frequency, auto-sync)
+- `GET` / `PUT` with `/defaults` — system defaults (admin API key required)
 
 ### Sync Jobs (`/sync-jobs`)
-- `POST /sync-jobs` — trigger sync
-- `GET /sync-jobs` — list (paginated)
+- `POST /sync-jobs` — trigger sync (returns job with PENDING status)
+- `GET /sync-jobs` — list (paginated, filterable by integration_id, status, since)
 - `GET /sync-jobs/{id}` — details
-- `POST /sync-jobs/{id}/cancel` — cancel
-- `POST /sync-jobs/{id}/execute` — execute immediately (dev)
-- `GET /sync-jobs/{id}/records` — record-level details (paginated)
+- `POST /sync-jobs/{id}/cancel` — cancel pending/running job
+- `POST /sync-jobs/{id}/execute` — execute immediately (dev mode only, returns 403 in prod)
+- `GET /sync-jobs/{id}/records` — record-level sync details (paginated, filterable)
 
 ### Admin (`/admin`)
-- `GET /admin/integrations` — all user integrations (cross-client)
-- `GET /admin/clients/{cid}/integrations/{iid}/sync-status`
-- `POST /admin/clients/{cid}/integrations/{iid}/sync-status/{entity}/reset`
+
+All admin endpoints require `X-Admin-API-Key` header.
+
+- `GET /admin/integrations` — all user integrations across all clients (limited to 1000)
+- `GET /admin/clients/{cid}/integrations/{iid}/sync-status` — entity sync statuses
+- `POST /admin/clients/{cid}/integrations/{iid}/sync-status/{entity}/reset` — reset cursor
+- `POST /admin/integrations/available` — create integration catalog entry
+- `GET /admin/integrations/available` — list all (including inactive)
+- `GET /admin/integrations/available/{id}` — get by ID
+- `PUT /admin/integrations/available/{id}` — update (set `is_active=false` to soft-delete)
 
 **Authentication:**
 - Regular endpoints require `X-Client-ID` header (dev mode) or JWT (production)

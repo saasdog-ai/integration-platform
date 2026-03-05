@@ -66,6 +66,11 @@ def _to_sync_job_response(job: SyncJob) -> SyncJobResponse:
     response_model=SyncJobResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Trigger a sync job",
+    responses={
+        400: {"description": "Sync disabled or invalid configuration"},
+        404: {"description": "Integration not found"},
+        409: {"description": "A sync job is already running for this integration"},
+    },
 )
 async def trigger_sync(
     request: TriggerSyncRequest,
@@ -73,10 +78,18 @@ async def trigger_sync(
     orchestrator: SyncOrchestrator = Depends(get_sync_orchestrator),
 ) -> SyncJobResponse:
     """
-    Trigger a new sync job.
+    Trigger a new sync job. The job is queued for async processing by the job runner.
 
-    The job is queued for async processing by the job runner.
+    Returns the created job with status PENDING. Use `GET /sync-jobs/{id}` to poll for completion.
     """
+    logger.info(
+        "Sync job trigger requested",
+        extra={
+            "integration_id": str(request.integration_id),
+            "job_type": request.job_type.value,
+            "entity_types": request.entity_types,
+        },
+    )
     try:
         job = await orchestrator.trigger_sync(
             client_id=client_id,
@@ -140,6 +153,7 @@ async def list_sync_jobs(
     "/{job_id}",
     response_model=SyncJobResponse,
     summary="Get sync job details",
+    responses={404: {"description": "Sync job not found or not owned by client"}},
 )
 async def get_sync_job(
     job_id: UUID,
@@ -161,6 +175,10 @@ async def get_sync_job(
     "/{job_id}/cancel",
     response_model=SyncJobResponse,
     summary="Cancel a sync job",
+    responses={
+        400: {"description": "Job is not in a cancellable state"},
+        404: {"description": "Sync job not found or not owned by client"},
+    },
 )
 async def cancel_sync_job(
     job_id: UUID,
@@ -168,8 +186,13 @@ async def cancel_sync_job(
     orchestrator: SyncOrchestrator = Depends(get_sync_orchestrator),
 ) -> SyncJobResponse:
     """Cancel a running or pending sync job."""
+    logger.info("Sync job cancel requested", extra={"job_id": str(job_id)})
     try:
         job = await orchestrator.cancel_sync_job(client_id, job_id)
+        logger.info(
+            "Sync job cancelled",
+            extra={"job_id": str(job_id), "status": job.status.value},
+        )
         return _to_sync_job_response(job)
     except NotFoundError:
         raise HTTPException(
@@ -186,7 +209,12 @@ async def cancel_sync_job(
 @router.post(
     "/{job_id}/execute",
     response_model=SyncJobResponse,
-    summary="Execute a sync job immediately (dev/demo only)",
+    summary="Execute a sync job immediately (dev only)",
+    responses={
+        400: {"description": "Job is not in PENDING state"},
+        403: {"description": "Only available in development mode"},
+        404: {"description": "Sync job not found or not owned by client"},
+    },
 )
 async def execute_sync_job(
     job_id: UUID,
@@ -194,10 +222,9 @@ async def execute_sync_job(
     orchestrator: SyncOrchestrator = Depends(get_sync_orchestrator),
 ) -> SyncJobResponse:
     """
-    Execute a pending sync job immediately.
+    Execute a pending sync job immediately (bypasses the queue).
 
-    This bypasses the queue and executes the job synchronously.
-    Intended for development and demo purposes only.
+    **Development mode only.** Returns 403 in staging/production.
     """
     from app.core.config import get_settings
 
@@ -208,6 +235,7 @@ async def execute_sync_job(
             detail="Direct job execution is only available in development mode",
         )
 
+    logger.info("Dev sync job execute requested", extra={"job_id": str(job_id)})
     try:
         # Get the job
         job = await orchestrator.get_job(client_id, job_id)
@@ -218,6 +246,10 @@ async def execute_sync_job(
 
         # Execute immediately
         result = await orchestrator.execute_sync_job(job)
+        logger.info(
+            "Dev sync job executed",
+            extra={"job_id": str(job_id), "status": result.status.value},
+        )
         return _to_sync_job_response(result)
 
     except NotFoundError:
@@ -236,6 +268,7 @@ async def execute_sync_job(
     "/{job_id}/records",
     response_model=SyncRecordsResponse,
     summary="Get record-level sync details for a job",
+    responses={404: {"description": "Sync job not found or not owned by client"}},
 )
 async def get_job_records(
     job_id: UUID,

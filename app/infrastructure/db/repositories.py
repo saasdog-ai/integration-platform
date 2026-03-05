@@ -9,6 +9,7 @@ from sqlalchemy import func as sa_func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.logging import get_logger
 from app.domain.entities import (
     AuditLogEntry,
     AvailableIntegration,
@@ -48,6 +49,8 @@ from app.infrastructure.db.models import (
     UserIntegrationModel,
     UserIntegrationSettingsModel,
 )
+
+logger = get_logger(__name__)
 
 
 def _model_to_available_integration(
@@ -1210,6 +1213,14 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
         state_ids: list[UUID],
     ) -> tuple[int, list[dict]]:
         """Bulk force-sync: clear errors, equalize vectors, mark SYNCED."""
+        logger.info(
+            "force_sync_records",
+            extra={
+                "client_id": str(client_id),
+                "integration_id": str(integration_id),
+                "state_id_count": len(state_ids),
+            },
+        )
         async with get_session_context() as session:
             # First, find which records are eligible (failed or conflict)
             result = await session.execute(
@@ -1287,6 +1298,15 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
         do_not_sync: bool,
     ) -> tuple[int, list[dict]]:
         """Bulk set do_not_sync flag."""
+        logger.info(
+            "set_do_not_sync",
+            extra={
+                "client_id": str(client_id),
+                "integration_id": str(integration_id),
+                "state_id_count": len(state_ids),
+                "do_not_sync": do_not_sync,
+            },
+        )
         async with get_session_context() as session:
             # Verify all records exist and belong to this client+integration
             result = await session.execute(
@@ -1397,6 +1417,15 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
 
     async def write_audit_entry(self, entry: AuditLogEntry) -> None:
         """Write a single audit log entry."""
+        logger.info(
+            "Audit log entry",
+            extra={
+                "action": entry.action,
+                "integration_id": str(entry.integration_id),
+                "entity_type": entry.entity_type,
+                "target_count": len(entry.target_record_ids) if entry.target_record_ids else 0,
+            },
+        )
         async with get_session_context() as session:
             model = AuditLogModel(
                 id=entry.id,

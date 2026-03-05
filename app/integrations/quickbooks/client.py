@@ -162,6 +162,10 @@ class QuickBooksAdapter(IntegrationAdapterInterface):
         token_data = response.json()
 
         expires_in = token_data.get("expires_in", 3600)
+        logger.info(
+            "QBO token exchange succeeded",
+            extra={"expires_in": expires_in},
+        )
         return OAuthTokens(
             access_token=token_data["access_token"],
             refresh_token=token_data.get("refresh_token"),
@@ -203,6 +207,10 @@ class QuickBooksAdapter(IntegrationAdapterInterface):
         token_data = response.json()
 
         expires_in = token_data.get("expires_in", 3600)
+        logger.info(
+            "QBO token refresh succeeded",
+            extra={"expires_in": expires_in},
+        )
         return OAuthTokens(
             access_token=token_data["access_token"],
             refresh_token=token_data.get("refresh_token", refresh_token),

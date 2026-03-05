@@ -75,6 +75,7 @@ def _from_settings_request(request: UserSettingsRequest) -> UserIntegrationSetti
     "",
     response_model=UserSettingsResponse,
     summary="Get integration settings",
+    responses={404: {"description": "Integration not found or not owned by client"}},
 )
 async def get_settings(
     integration_id: UUID,
@@ -96,6 +97,10 @@ async def get_settings(
     "",
     response_model=UserSettingsResponse,
     summary="Update integration settings",
+    responses={
+        400: {"description": "Invalid sync rules configuration"},
+        404: {"description": "Integration not found or not owned by client"},
+    },
 )
 async def update_settings(
     integration_id: UUID,
@@ -103,10 +108,22 @@ async def update_settings(
     client_id: UUID = Depends(get_client_id),
     service: SettingsService = Depends(get_settings_service),
 ) -> UserSettingsResponse:
-    """Update user's integration settings."""
+    """Update user's integration settings (sync rules, frequency, auto-sync)."""
+    logger.info(
+        "Settings update requested",
+        extra={
+            "integration_id": str(integration_id),
+            "rule_count": len(request.sync_rules),
+            "auto_sync_enabled": request.auto_sync_enabled,
+        },
+    )
     try:
         settings = _from_settings_request(request)
         updated = await service.update_user_settings(client_id, integration_id, settings)
+        logger.info(
+            "Settings updated",
+            extra={"integration_id": str(integration_id)},
+        )
         return _to_settings_response(updated)
     except NotFoundError:
         raise HTTPException(
@@ -125,12 +142,13 @@ async def update_settings(
     response_model=UserSettingsResponse,
     summary="Get default integration settings",
     dependencies=[Depends(require_admin_api_key)],
+    responses={404: {"description": "Integration not found"}},
 )
 async def get_default_settings(
     integration_id: UUID,
     service: SettingsService = Depends(get_settings_service),
 ) -> UserSettingsResponse:
-    """Get system default settings for an integration."""
+    """Get system default settings for an integration. Requires admin API key."""
     try:
         settings = await service.get_system_settings(integration_id)
         if settings:
@@ -154,16 +172,31 @@ async def get_default_settings(
     response_model=UserSettingsResponse,
     summary="Update default integration settings",
     dependencies=[Depends(require_admin_api_key)],
+    responses={
+        400: {"description": "Invalid sync rules configuration"},
+        404: {"description": "Integration not found"},
+    },
 )
 async def update_default_settings(
     integration_id: UUID,
     request: UserSettingsRequest,
     service: SettingsService = Depends(get_settings_service),
 ) -> UserSettingsResponse:
-    """Update system default settings for an integration."""
+    """Update system default settings for an integration. Requires admin API key."""
+    logger.info(
+        "Admin default settings update requested",
+        extra={
+            "integration_id": str(integration_id),
+            "rule_count": len(request.sync_rules),
+        },
+    )
     try:
         settings = _from_settings_request(request)
         updated = await service.update_system_settings(integration_id, settings)
+        logger.info(
+            "Admin default settings updated",
+            extra={"integration_id": str(integration_id)},
+        )
         return _to_settings_response(updated)
     except NotFoundError:
         raise HTTPException(

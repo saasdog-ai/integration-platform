@@ -59,8 +59,12 @@ _to_user_integration_response = to_user_integration_response
 async def admin_list_all_integrations(
     repo: IntegrationRepositoryInterface = Depends(get_integration_repository),
 ) -> UserIntegrationsResponse:
-    """Get all user integrations across all clients (admin use only)."""
+    """Get all user integrations across all clients (admin use only). Limited to 1000 results."""
     integrations = await repo.get_all_user_integrations()
+    logger.info(
+        "Admin listed all integrations",
+        extra={"count": len(integrations)},
+    )
     return UserIntegrationsResponse(
         integrations=[_to_user_integration_response(i) for i in integrations]
     )
@@ -99,6 +103,9 @@ async def admin_list_entity_sync_statuses(
     "/clients/{client_id}/integrations/{integration_id}/sync-status/{entity_type}/reset",
     response_model=EntitySyncStatusResponse,
     summary="Reset last sync time for a client integration entity",
+    responses={
+        404: {"description": "No sync status found for the given entity type"},
+    },
 )
 async def admin_reset_last_sync_time(
     client_id: UUID,
@@ -108,6 +115,16 @@ async def admin_reset_last_sync_time(
     state_repo: IntegrationStateRepositoryInterface = Depends(get_state_repository),
 ) -> EntitySyncStatusResponse:
     """Reset last sync times for an entity type to allow full re-sync (admin use only)."""
+    logger.info(
+        "Admin sync status reset requested",
+        extra={
+            "client_id": str(client_id),
+            "integration_id": str(integration_id),
+            "entity_type": entity_type,
+            "reset_inbound": request.reset_inbound_sync_time,
+            "reset_last": request.reset_last_sync_time,
+        },
+    )
     result = await state_repo.reset_entity_sync_status(
         client_id=client_id,
         integration_id=integration_id,
@@ -129,6 +146,14 @@ async def admin_reset_last_sync_time(
         parts.append("last sync time")
     message = f"Successfully reset {' and '.join(parts)} for {entity_type}"
 
+    logger.info(
+        "Admin sync status reset completed",
+        extra={
+            "client_id": str(client_id),
+            "integration_id": str(integration_id),
+            "entity_type": entity_type,
+        },
+    )
     return EntitySyncStatusResponse(
         entity_type=result.entity_type,
         last_successful_sync_at=result.last_successful_sync_at,
@@ -152,12 +177,19 @@ _to_available_integration_response = to_available_integration_response
     response_model=AvailableIntegrationResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create an available integration",
+    responses={
+        409: {"description": "Integration with this name already exists"},
+    },
 )
 async def admin_create_available_integration(
     request: CreateAvailableIntegrationRequest,
     repo: IntegrationRepositoryInterface = Depends(get_integration_repository),
 ) -> AvailableIntegrationResponse:
     """Create a new integration in the catalog (admin use only)."""
+    logger.info(
+        "Admin creating available integration",
+        extra={"name": request.name, "type": request.type},
+    )
     now = datetime.now(UTC)
     connection_config = (
         ConnectionConfig(**request.connection_config) if request.connection_config else None
@@ -183,7 +215,10 @@ async def admin_create_available_integration(
             detail=str(e),
         ) from None
 
-    logger.info("Admin created available integration", integration_name=created.name)
+    logger.info(
+        "Admin created available integration",
+        extra={"integration_id": str(created.id), "name": created.name},
+    )
     return _to_available_integration_response(created)
 
 
@@ -207,6 +242,7 @@ async def admin_list_available_integrations(
     "/integrations/available/{integration_id}",
     response_model=AvailableIntegrationResponse,
     summary="Get an available integration (admin)",
+    responses={404: {"description": "Integration not found"}},
 )
 async def admin_get_available_integration(
     integration_id: UUID,
@@ -226,6 +262,10 @@ async def admin_get_available_integration(
     "/integrations/available/{integration_id}",
     response_model=AvailableIntegrationResponse,
     summary="Update an available integration (admin)",
+    responses={
+        404: {"description": "Integration not found"},
+        409: {"description": "Integration name conflict"},
+    },
 )
 async def admin_update_available_integration(
     integration_id: UUID,
@@ -273,5 +313,8 @@ async def admin_update_available_integration(
             detail=str(e),
         ) from None
 
-    logger.info("Admin updated available integration", integration_id=str(integration_id))
+    logger.info(
+        "Admin updated available integration",
+        extra={"integration_id": str(integration_id), "is_active": result.is_active},
+    )
     return _to_available_integration_response(result)

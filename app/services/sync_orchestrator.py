@@ -682,6 +682,14 @@ class SyncOrchestrator:
             The updated sync job.
         """
         # Update job status to running
+        logger.info(
+            "Sync job executing",
+            extra={
+                "job_id": str(job.id),
+                "integration_id": str(job.integration_id),
+                "job_type": job.job_type.value,
+            },
+        )
         job = await self._job_repo.update_job_status(job.id, SyncJobStatus.RUNNING)
 
         try:
@@ -712,6 +720,14 @@ class SyncOrchestrator:
                 error_message=str(e),
             )
 
+        logger.info(
+            "Sync job completed",
+            extra={
+                "job_id": str(job.id),
+                "status": job.status.value,
+                "entities_processed": list((job.entities_processed or {}).keys()),
+            },
+        )
         return job
 
     async def _resolve_sync_cursors(

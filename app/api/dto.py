@@ -234,14 +234,16 @@ class SyncRecordResponse(BaseResponse):
     internal_record_id: str | None
     external_record_id: str | None
     sync_direction: SyncDirection | None
-    sync_status: str  # synced, failed, pending, conflict
-    is_success: bool  # Computed from sync_status
+    sync_status: str = Field(description="One of: synced, failed, pending, conflict")
+    is_success: bool = Field(description="True when sync_status is 'synced'")
     updated_at: datetime
     error_code: str | None = None
     error_message: str | None = None
     error_details: dict[str, Any] | None = None
-    do_not_sync: bool = False
-    force_synced_at: datetime | None = None
+    do_not_sync: bool = Field(False, description="True if record is excluded from sync")
+    force_synced_at: datetime | None = Field(
+        None, description="Timestamp of last force-sync override"
+    )
 
 
 class SyncRecordsResponse(BaseResponse):
@@ -387,12 +389,27 @@ class UpdateAvailableIntegrationRequest(BaseModel):
 
 
 class RecordSelector(BaseModel):
-    """Flexible record selector — exactly one of the three ID lists must be provided."""
+    """Flexible record selector — exactly one of the three ID lists must be provided.
 
-    state_ids: list[UUID] | None = None
-    entity_type: str | None = None
-    internal_record_ids: list[str] | None = None
-    external_record_ids: list[str] | None = None
+    Three ways to identify records:
+    1. **state_ids**: Direct integration_state UUIDs (most efficient).
+    2. **internal_record_ids** + **entity_type**: Look up by internal system IDs.
+    3. **external_record_ids** + **entity_type**: Look up by external provider IDs.
+    """
+
+    state_ids: list[UUID] | None = Field(
+        None, description="Integration state record UUIDs (direct lookup)"
+    )
+    entity_type: str | None = Field(
+        None,
+        description="Entity type (required with internal_record_ids or external_record_ids)",
+    )
+    internal_record_ids: list[str] | None = Field(
+        None, description="Internal system record IDs (requires entity_type)"
+    )
+    external_record_ids: list[str] | None = Field(
+        None, description="External provider record IDs (requires entity_type)"
+    )
 
     @model_validator(mode="after")
     def validate_exactly_one_selector(self) -> "RecordSelector":
@@ -410,20 +427,33 @@ class RecordSelector(BaseModel):
 
 
 class ForceSyncRequest(RecordSelector):
-    """Request to force-sync records (clear errors, equalize version vectors)."""
+    """Force-sync selected records: clear errors, equalize version vectors, mark as synced.
+
+    Use this when records are stuck in a failed or conflict state and you want to
+    acknowledge the current data as correct. If the record is later modified, the
+    normal sync loop will detect the version change and re-attempt sync.
+    """
 
     pass
 
 
 class DoNotSyncRequest(RecordSelector):
-    """Request to toggle do-not-sync flag on records."""
+    """Toggle the do-not-sync flag on selected records.
 
-    do_not_sync: bool
+    When **enabled** (do_not_sync=true): records are excluded from all sync operations
+    and errors are cleared. When **disabled** (do_not_sync=false): records with version
+    mismatches are set back to PENDING so the next sync picks them up.
+    """
+
+    do_not_sync: bool = Field(description="True to exclude records from sync, false to re-include")
 
 
 class OverrideResultResponse(BaseResponse):
-    """Response for bulk override operations."""
+    """Result of a bulk override operation (force-sync or do-not-sync)."""
 
-    records_updated: int
-    records_skipped: int
-    skipped_details: list[dict[str, str]] = Field(default_factory=list)
+    records_updated: int = Field(description="Number of records successfully updated")
+    records_skipped: int = Field(description="Number of records skipped (ineligible or not found)")
+    skipped_details: list[dict[str, str]] = Field(
+        default_factory=list,
+        description="Details for each skipped record: state_id and reason",
+    )
