@@ -259,10 +259,9 @@ class AzureQueue(MessageQueueInterface):
             # DLQ convention: main queue name + "-dlq"
             dlq_name = f"{self._queue_name}-dlq"
 
-            from azure.storage.queue import QueueClient
-
-            # Create DLQ client using the same credential approach
             import os
+
+            from azure.storage.queue import QueueClient
 
             connection_string = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
             if connection_string:
@@ -328,9 +327,9 @@ class AzureQueue(MessageQueueInterface):
 
             dlq_name = f"{self._queue_name}-dlq"
 
-            from azure.storage.queue import QueueClient
-
             import os
+
+            from azure.storage.queue import QueueClient
 
             connection_string = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
             if connection_string:

@@ -49,7 +49,7 @@ class GCPPubSubQueue(MessageQueueInterface):
             return
 
         try:
-            from google.api_core.exceptions import AlreadyExists, NotFound
+            from google.api_core.exceptions import NotFound
             from google.cloud import pubsub_v1
         except ImportError:
             raise QueueError(
