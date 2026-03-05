@@ -76,7 +76,7 @@ resource "aws_ecs_task_definition" "app" {
       ]
 
       environment = [
-        { name = "APP_ENV", value = var.environment },
+        { name = "APP_ENV", value = var.environment == "prod" ? "production" : var.environment == "dev" ? "development" : var.environment },
         { name = "API_PORT", value = tostring(var.container_port) },
         { name = "CLOUD_PROVIDER", value = "aws" },
         { name = "AWS_REGION", value = var.aws_region },
