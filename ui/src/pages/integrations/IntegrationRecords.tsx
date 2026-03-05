@@ -380,11 +380,9 @@ function ConfirmDialog({
   )
 }
 
-// ─── Main Component ──────────────────────────────────────────────
+// ─── Embeddable tab content ──────────────────────────────────────
 
-export function IntegrationRecords() {
-  const { integrationId } = useParams<{ integrationId: string }>()
-  const navigate = useNavigate()
+export function IntegrationRecordsTab({ integrationId }: { integrationId: string }) {
   const api = useApiClient()
   const toast = useToast()
   const queryClient = useQueryClient()
@@ -397,10 +395,10 @@ export function IntegrationRecords() {
     null | 'force-sync' | 'do-not-sync-on' | 'do-not-sync-off'
   >(null)
 
-  // Fetch integration info
-  const { data: userIntegration } = useQuery({
-    queryKey: ['user-integration', integrationId],
-    queryFn: () => api.getUserIntegration(integrationId!),
+  // Fetch available integration (for entity types)
+  const { data: availableIntegration } = useQuery({
+    queryKey: ['available-integration', integrationId],
+    queryFn: () => api.getAvailableIntegration(integrationId),
     enabled: !!integrationId,
   })
 
@@ -408,7 +406,7 @@ export function IntegrationRecords() {
   const { data: recordsData, isLoading } = useQuery({
     queryKey: ['integration-records', integrationId, page, filters],
     queryFn: () =>
-      api.getIntegrationRecords(integrationId!, {
+      api.getIntegrationRecords(integrationId, {
         page,
         page_size: DEFAULT_PAGE_SIZE,
         ...filters,
@@ -416,22 +414,15 @@ export function IntegrationRecords() {
     enabled: !!integrationId,
   })
 
-  // Fetch settings for entity types
-  const { data: settings } = useQuery({
-    queryKey: ['integration-settings', integrationId],
-    queryFn: () => api.getIntegrationSettings(integrationId!),
-    enabled: !!integrationId,
-  })
-
   const entityTypes = useMemo(
-    () => settings?.sync_rules?.map((r) => r.entity_type) || [],
-    [settings]
+    () => availableIntegration?.supported_entities || [],
+    [availableIntegration]
   )
 
   // Force sync mutation
   const forceSyncMutation = useMutation({
     mutationFn: () =>
-      api.forceSyncRecords(integrationId!, { state_ids: [...selectedIds] }),
+      api.forceSyncRecords(integrationId, { state_ids: [...selectedIds] }),
     onSuccess: (result) => {
       toast.success(
         'Force sync complete',
@@ -450,7 +441,7 @@ export function IntegrationRecords() {
   // Do not sync mutation
   const doNotSyncMutation = useMutation({
     mutationFn: (doNotSync: boolean) =>
-      api.setDoNotSync(integrationId!, { state_ids: [...selectedIds], do_not_sync: doNotSync }),
+      api.setDoNotSync(integrationId, { state_ids: [...selectedIds], do_not_sync: doNotSync }),
     onSuccess: (result) => {
       toast.success(
         'Records updated',
@@ -537,19 +528,6 @@ export function IntegrationRecords() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center gap-4">
-        <Button variant="ghost" onClick={() => navigate('..')}>
-          ← Back
-        </Button>
-        <div>
-          <h1 className="text-2xl font-bold">Integration Records</h1>
-          {userIntegration?.integration?.name && (
-            <p className="text-muted-foreground">{userIntegration.integration.name}</p>
-          )}
-        </div>
-      </div>
-
       {/* Filters + Action Bar */}
       <Card>
         <CardHeader>
@@ -617,6 +595,27 @@ export function IntegrationRecords() {
           isPending={isPending}
         />
       )}
+    </div>
+  )
+}
+
+// ─── Standalone page wrapper ─────────────────────────────────────
+
+export function IntegrationRecords() {
+  const { integrationId } = useParams<{ integrationId: string }>()
+  const navigate = useNavigate()
+
+  if (!integrationId) return null
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center gap-4">
+        <Button variant="ghost" onClick={() => navigate('..')}>
+          ← Back
+        </Button>
+        <h1 className="text-2xl font-bold">Integration Records</h1>
+      </div>
+      <IntegrationRecordsTab integrationId={integrationId} />
     </div>
   )
 }

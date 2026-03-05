@@ -73,7 +73,7 @@ class IntegrationRepositoryInterface(ABC):
         pass
 
     @abstractmethod
-    async def get_all_user_integrations(self) -> list[UserIntegration]:
+    async def get_all_user_integrations(self, limit: int = 1000) -> list[UserIntegration]:
         """Get all user integrations across all clients (admin use only)."""
         pass
 

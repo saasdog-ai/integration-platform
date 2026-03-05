@@ -4,6 +4,9 @@ from fastapi import HTTPException, Security, status
 from fastapi.security import APIKeyHeader
 
 from app.core.config import get_settings
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 api_key_header = APIKeyHeader(name="X-Admin-API-Key", auto_error=False)
 
@@ -16,6 +19,7 @@ async def require_admin_api_key(
 
     # In development with no key configured, allow access
     if settings.is_development and not settings.admin_api_key:
+        logger.warning("Admin API access allowed without key in development mode")
         return
 
     if not settings.admin_api_key:

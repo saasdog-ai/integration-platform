@@ -199,6 +199,15 @@ async def execute_sync_job(
     This bypasses the queue and executes the job synchronously.
     Intended for development and demo purposes only.
     """
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    if not settings.is_development:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Direct job execution is only available in development mode",
+        )
+
     try:
         # Get the job
         job = await orchestrator.get_job(client_id, job_id)

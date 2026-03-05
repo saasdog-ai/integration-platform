@@ -378,13 +378,16 @@ class IntegrationRepository(IntegrationRepositoryInterface):
             models = result.scalars().all()
             return [_model_to_user_integration(m) for m in models]
 
-    async def get_all_user_integrations(self) -> list[UserIntegration]:
+    async def get_all_user_integrations(self, limit: int = 1000) -> list[UserIntegration]:
         async with get_session_context() as session:
             result = await session.execute(
-                select(UserIntegrationModel).options(
+                select(UserIntegrationModel)
+                .options(
                     selectinload(UserIntegrationModel.integration),
                     selectinload(UserIntegrationModel.settings),
                 )
+                .order_by(UserIntegrationModel.created_at.desc())
+                .limit(limit)
             )
             models = result.scalars().all()
             return [_model_to_user_integration(m) for m in models]
@@ -1406,6 +1409,7 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
                 performed_by=entry.performed_by,
             )
             session.add(model)
+            await session.flush()
 
     async def bump_version_vectors(
         self,

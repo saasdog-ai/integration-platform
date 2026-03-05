@@ -182,11 +182,9 @@ function SyncRulesTable({ rules, onUpdateRule }: SyncRulesTableProps) {
   )
 }
 
-// ─── Main component ──────────────────────────────────────────────
+// ─── Embeddable tab content ──────────────────────────────────────
 
-export function IntegrationSettings() {
-  const { integrationId } = useParams<{ integrationId: string }>()
-  const navigate = useNavigate()
+export function IntegrationSettingsTab({ integrationId }: { integrationId: string }) {
   const api = useApiClient()
   const toast = useToast()
   const queryClient = useQueryClient()
@@ -194,13 +192,13 @@ export function IntegrationSettings() {
   // Remote data
   const { data: settings, isLoading: loadingSettings } = useQuery({
     queryKey: ['integration-settings', integrationId],
-    queryFn: () => api.getIntegrationSettings(integrationId!),
+    queryFn: () => api.getIntegrationSettings(integrationId),
     enabled: !!integrationId,
   })
 
   const { data: availableIntegration, isLoading: loadingAvailable } = useQuery({
     queryKey: ['available-integration', integrationId],
-    queryFn: () => api.getAvailableIntegration(integrationId!),
+    queryFn: () => api.getAvailableIntegration(integrationId),
     enabled: !!integrationId,
   })
 
@@ -227,7 +225,7 @@ export function IntegrationSettings() {
   // Save mutation
   const saveMutation = useMutation({
     mutationFn: (updated: UserIntegrationSettings) =>
-      api.updateIntegrationSettings(integrationId!, updated),
+      api.updateIntegrationSettings(integrationId, updated),
     onSuccess: () => {
       toast.success('Settings saved')
       queryClient.invalidateQueries({ queryKey: ['integration-settings', integrationId] })
@@ -321,42 +319,31 @@ export function IntegrationSettings() {
     return (
       <div className="text-center py-12">
         <h2 className="text-xl font-semibold mb-2">Settings not found</h2>
-        <p className="text-muted-foreground mb-4">
+        <p className="text-muted-foreground">
           Could not load settings for this integration.
         </p>
-        <Button onClick={() => navigate('..')}>Back</Button>
       </div>
     )
   }
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" onClick={() => navigate('..')}>
-            ← Back
-          </Button>
-          <h1 className="text-2xl font-bold">
-            {availableIntegration?.name ?? 'Integration'} Settings
-          </h1>
-        </div>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            onClick={handleDiscard}
-            disabled={!isDirty || saveMutation.isPending}
-          >
-            Discard
-          </Button>
-          <Button
-            onClick={handleSave}
-            disabled={!isDirty || saveMutation.isPending}
-          >
-            {saveMutation.isPending ? <Spinner size="sm" className="mr-2" /> : null}
-            Save
-          </Button>
-        </div>
+      {/* Save / Discard bar */}
+      <div className="flex justify-end gap-2">
+        <Button
+          variant="outline"
+          onClick={handleDiscard}
+          disabled={!isDirty || saveMutation.isPending}
+        >
+          Discard
+        </Button>
+        <Button
+          onClick={handleSave}
+          disabled={!isDirty || saveMutation.isPending}
+        >
+          {saveMutation.isPending ? <Spinner size="sm" className="mr-2" /> : null}
+          Save
+        </Button>
       </div>
 
       {/* General Settings */}
@@ -400,6 +387,27 @@ export function IntegrationSettings() {
           <SyncRulesTable rules={displayRules} onUpdateRule={updateRule} />
         </CardContent>
       </Card>
+    </div>
+  )
+}
+
+// ─── Standalone page wrapper ─────────────────────────────────────
+
+export function IntegrationSettings() {
+  const { integrationId } = useParams<{ integrationId: string }>()
+  const navigate = useNavigate()
+
+  if (!integrationId) return null
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center gap-4">
+        <Button variant="ghost" onClick={() => navigate('..')}>
+          ← Back
+        </Button>
+        <h1 className="text-2xl font-bold">Integration Settings</h1>
+      </div>
+      <IntegrationSettingsTab integrationId={integrationId} />
     </div>
   )
 }

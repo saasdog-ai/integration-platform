@@ -52,7 +52,7 @@ async def readiness_check() -> HealthDetailResponse:
             await conn.execute("SELECT 1")
     except Exception as e:
         logger.error("Database health check failed", extra={"error": str(e)})
-        db_status = f"unhealthy: {e}"
+        db_status = "unhealthy"
 
     # Check queue (just verify it's configured)
     try:
@@ -62,7 +62,7 @@ async def readiness_check() -> HealthDetailResponse:
         # Queue is healthy if it's instantiated
     except Exception as e:
         logger.error("Queue health check failed", extra={"error": str(e)})
-        queue_status = f"unhealthy: {e}"
+        queue_status = "unhealthy"
 
     # Check encryption (just verify it's configured)
     try:
@@ -72,7 +72,7 @@ async def readiness_check() -> HealthDetailResponse:
         # Encryption is healthy if it's instantiated
     except Exception as e:
         logger.error("Encryption health check failed", extra={"error": str(e)})
-        encryption_status = f"unhealthy: {e}"
+        encryption_status = "unhealthy"
 
     overall_status = "healthy"
     if any(s.startswith("unhealthy") for s in [db_status, queue_status, encryption_status]):

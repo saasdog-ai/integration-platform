@@ -53,6 +53,15 @@ async def lifespan(app: FastAPI):
 
     settings = get_settings()
 
+    # Warn about non-production posture
+    if not settings.is_production:
+        logger.warning(
+            f"Running in {settings.app_env} mode — NOT production",
+            extra={"app_env": settings.app_env},
+        )
+    if not settings.auth_enabled:
+        logger.warning("Authentication is DISABLED — all endpoints are open")
+
     try:
         await init_db()
         logger.info("Database initialized")

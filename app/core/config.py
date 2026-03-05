@@ -20,6 +20,15 @@ class Settings(BaseSettings):
     # Application
     app_name: str = Field(default="integration-platform")
     app_env: str = Field(default="development")  # development, staging, production
+
+    @field_validator("app_env")
+    @classmethod
+    def validate_app_env(cls, v: str) -> str:
+        """Validate app_env is one of the allowed values."""
+        allowed = {"development", "staging", "production"}
+        if v not in allowed:
+            raise ValueError(f"APP_ENV must be one of {allowed}, got '{v}'")
+        return v
     log_level: str = Field(default="INFO")
 
     # Database

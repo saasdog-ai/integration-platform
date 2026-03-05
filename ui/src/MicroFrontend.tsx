@@ -30,8 +30,6 @@ import { IntegrationsProvider } from "@/providers/ConfigProvider"
 import {
   IntegrationList,
   IntegrationDetail,
-  IntegrationSettings,
-  IntegrationRecords,
   OAuthCallback,
   SyncJobs,
   JobDetail,
@@ -91,13 +89,7 @@ export function IntegrationsMicroFrontend({ queryClient, clientId }: MicroFronte
               <Route path="jobs" element={<SyncJobs />} />
               <Route path="jobs/:jobId" element={<JobDetail />} />
 
-              {/* Integration settings route */}
-              <Route path=":integrationId/settings" element={<IntegrationSettings />} />
-
-              {/* Integration records browser */}
-              <Route path=":integrationId/records" element={<IntegrationRecords />} />
-
-              {/* Integration detail route */}
+              {/* Integration detail route (tabbed: overview, records, settings) */}
               <Route path=":integrationId" element={<IntegrationDetail />} />
 
               {/* Catch-all - redirect to list */}

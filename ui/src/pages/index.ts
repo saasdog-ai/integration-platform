@@ -1,7 +1,5 @@
 export { IntegrationList } from './integrations/IntegrationList'
 export { IntegrationDetail } from './integrations/IntegrationDetail'
-export { IntegrationSettings } from './integrations/IntegrationSettings'
-export { IntegrationRecords } from './integrations/IntegrationRecords'
 export { OAuthCallback } from './integrations/OAuthCallback'
 export { SyncJobs } from './jobs/SyncJobs'
 export { JobDetail } from './jobs/JobDetail'

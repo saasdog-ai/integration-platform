@@ -10,7 +10,6 @@ from app.api.dto import (
     AvailableIntegrationsResponse,
     ConnectIntegrationRequest,
     ConnectIntegrationResponse,
-    ConnectionConfigResponse,
     DoNotSyncRequest,
     EntitySyncStatusItem,
     EntitySyncStatusListResponse,
@@ -27,6 +26,7 @@ from app.api.dto import (
     UserIntegrationsResponse,
     WebhookReceiveResponse,
 )
+from app.api.mappers import to_available_integration_response, to_user_integration_response
 from app.auth import AuthenticatedClient, get_client_id, get_current_client
 from app.core.exceptions import (
     ConflictError,
@@ -36,7 +36,7 @@ from app.core.exceptions import (
     ValidationError,
 )
 from app.core.logging import get_logger
-from app.domain.entities import AuditLogEntry, AvailableIntegration, ChangeEvent, UserIntegration
+from app.domain.entities import AuditLogEntry, ChangeEvent
 from app.domain.enums import ChangeSourceType, RecordSyncStatus
 from app.domain.interfaces import IntegrationStateRepositoryInterface
 from app.services.integration_service import IntegrationService
@@ -84,52 +84,8 @@ def get_state_repository() -> IntegrationStateRepositoryInterface:
     return get_container().integration_state_repository
 
 
-def _to_available_integration_response(
-    integration: AvailableIntegration,
-) -> AvailableIntegrationResponse:
-    """Convert domain entity to response DTO."""
-    connection_config = None
-    if integration.connection_config:
-        connection_config = ConnectionConfigResponse(
-            auth_type=integration.connection_config.auth_type,
-            authorization_url=integration.connection_config.authorization_url,
-            token_url=integration.connection_config.token_url,
-            scopes=integration.connection_config.scopes,
-            api_key_header_name=integration.connection_config.api_key_header_name,
-        )
-
-    return AvailableIntegrationResponse(
-        id=integration.id,
-        name=integration.name,
-        type=integration.type,
-        description=integration.description,
-        supported_entities=integration.supported_entities,
-        connection_config=connection_config,
-        is_active=integration.is_active,
-    )
-
-
-def _to_user_integration_response(
-    user_integration: UserIntegration,
-) -> UserIntegrationResponse:
-    """Convert domain entity to response DTO."""
-    return UserIntegrationResponse(
-        id=user_integration.id,
-        client_id=user_integration.client_id,
-        integration_id=user_integration.integration_id,
-        integration_name=(
-            user_integration.integration.name if user_integration.integration else None
-        ),
-        integration_type=(
-            user_integration.integration.type if user_integration.integration else None
-        ),
-        status=user_integration.status,
-        external_account_id=user_integration.external_account_id,
-        last_connected_at=user_integration.last_connected_at,
-        disconnected_at=user_integration.disconnected_at,
-        created_at=user_integration.created_at,
-        updated_at=user_integration.updated_at,
-    )
+_to_available_integration_response = to_available_integration_response
+_to_user_integration_response = to_user_integration_response
 
 
 @router.get(
@@ -275,9 +231,10 @@ async def oauth_callback(
             detail=str(e),
         ) from e
     except IntegrationError as e:
+        logger.error("OAuth callback failed", extra={"error": str(e)})
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=str(e),
+            detail="Failed to complete OAuth connection. Please try again.",
         ) from e
 
 

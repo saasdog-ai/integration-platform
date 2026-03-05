@@ -8,19 +8,18 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.api.dto import (
     AvailableIntegrationResponse,
     AvailableIntegrationsResponse,
-    ConnectionConfigResponse,
     CreateAvailableIntegrationRequest,
     EntitySyncStatusItem,
     EntitySyncStatusListResponse,
     EntitySyncStatusResponse,
     ResetLastSyncTimeRequest,
     UpdateAvailableIntegrationRequest,
-    UserIntegrationResponse,
     UserIntegrationsResponse,
 )
+from app.api.mappers import to_available_integration_response, to_user_integration_response
 from app.auth.admin import require_admin_api_key
 from app.core.logging import get_logger
-from app.domain.entities import AvailableIntegration, ConnectionConfig, UserIntegration
+from app.domain.entities import AvailableIntegration, ConnectionConfig
 from app.domain.interfaces import (
     IntegrationRepositoryInterface,
     IntegrationStateRepositoryInterface,
@@ -49,27 +48,7 @@ def get_state_repository() -> IntegrationStateRepositoryInterface:
     return get_container().integration_state_repository
 
 
-def _to_user_integration_response(
-    user_integration: UserIntegration,
-) -> UserIntegrationResponse:
-    """Convert domain entity to response DTO."""
-    return UserIntegrationResponse(
-        id=user_integration.id,
-        client_id=user_integration.client_id,
-        integration_id=user_integration.integration_id,
-        integration_name=(
-            user_integration.integration.name if user_integration.integration else None
-        ),
-        integration_type=(
-            user_integration.integration.type if user_integration.integration else None
-        ),
-        status=user_integration.status,
-        external_account_id=user_integration.external_account_id,
-        last_connected_at=user_integration.last_connected_at,
-        disconnected_at=user_integration.disconnected_at,
-        created_at=user_integration.created_at,
-        updated_at=user_integration.updated_at,
-    )
+_to_user_integration_response = to_user_integration_response
 
 
 @router.get(
@@ -165,29 +144,7 @@ async def admin_reset_last_sync_time(
 # =============================================================================
 
 
-def _to_available_integration_response(
-    integration: AvailableIntegration,
-) -> AvailableIntegrationResponse:
-    """Convert domain entity to response DTO."""
-    connection_config = None
-    if integration.connection_config:
-        connection_config = ConnectionConfigResponse(
-            auth_type=integration.connection_config.auth_type,
-            authorization_url=integration.connection_config.authorization_url,
-            token_url=integration.connection_config.token_url,
-            scopes=integration.connection_config.scopes,
-            api_key_header_name=integration.connection_config.api_key_header_name,
-        )
-
-    return AvailableIntegrationResponse(
-        id=integration.id,
-        name=integration.name,
-        type=integration.type,
-        description=integration.description,
-        supported_entities=integration.supported_entities,
-        connection_config=connection_config,
-        is_active=integration.is_active,
-    )
+_to_available_integration_response = to_available_integration_response
 
 
 @router.post(

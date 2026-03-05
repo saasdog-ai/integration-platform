@@ -150,16 +150,14 @@ class QuickBooksAdapter(IntegrationAdapterInterface):
             )
 
         if not response.is_success:
-            error_body = response.text
             logger.error(
                 "QBO token exchange failed",
                 extra={
                     "status_code": response.status_code,
-                    "response_body": error_body,
                     "redirect_uri": redirect_uri,
                 },
             )
-            raise Exception(f"QBO token exchange failed ({response.status_code}): {error_body}")
+            raise Exception(f"QBO token exchange failed ({response.status_code})")
 
         token_data = response.json()
 

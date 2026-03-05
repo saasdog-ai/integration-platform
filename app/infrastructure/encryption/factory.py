@@ -49,6 +49,12 @@ def get_encryption_service() -> EncryptionServiceInterface:
 
     else:
         # Default to local encryption for development
+        if settings.is_production:
+            raise RuntimeError(
+                "Production requires a cloud encryption backend "
+                "(set CLOUD_PROVIDER=aws with KMS_KEY_ID, or CLOUD_PROVIDER=azure with AZURE_KEYVAULT_URL)"
+            )
+
         from app.infrastructure.encryption.local_encryption import (
             LocalEncryptionService,
         )

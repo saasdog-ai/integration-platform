@@ -5,3 +5,4 @@ export { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 export { Spinner } from './spinner'
 export { Input } from './input'
 export { ToggleSwitch } from './toggle-switch'
+export { Tabs, TabsList, TabsTrigger, TabsContent } from './tabs'

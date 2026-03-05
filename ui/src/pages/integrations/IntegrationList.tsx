@@ -207,38 +207,38 @@ export function IntegrationList() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => navigate(`${integration.id}/records`)}
+                      onClick={() => navigate(`${integration.id}`)}
                     >
-                      Records
+                      Manage
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => setDisconnectTarget({
+                        integrationId: integration.id,
+                        name: integration.name,
+                        accountId: userIntegration?.external_account_id ?? undefined,
+                      })}
+                    >
+                      Disconnect
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <Button
+                      className="flex-1"
+                      onClick={() => handleConnect(integration)}
+                    >
+                      {userIntegration ? 'Reconnect' : 'Connect'}
                     </Button>
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => navigate(`${integration.id}`)}
                     >
-                      Settings
-                    </Button>
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      onClick={() => {
-                        setDisconnectTarget({
-                          integrationId: integration.id,
-                          name: integration.name,
-                          accountId: userIntegration?.external_account_id ?? undefined,
-                        })
-                      }}
-                    >
-                      Disconnect
+                      Manage
                     </Button>
                   </>
-                ) : (
-                  <Button
-                    className="w-full"
-                    onClick={() => handleConnect(integration)}
-                  >
-                    {userIntegration ? '🔄 Reconnect' : 'Connect'}
-                  </Button>
                 )}
               </CardFooter>
             </Card>

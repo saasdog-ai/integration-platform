@@ -18,6 +18,7 @@ class SyncJobStatus(StrEnum):
     PENDING = "pending"
     RUNNING = "running"
     SUCCEEDED = "succeeded"
+    PARTIALLY_SUCCEEDED = "partially_succeeded"
     FAILED = "failed"
     CANCELLED = "cancelled"
 

@@ -10,6 +10,7 @@ from app.api.dto import (
     UserSettingsResponse,
 )
 from app.auth import get_client_id
+from app.auth.admin import require_admin_api_key
 from app.core.exceptions import NotFoundError, ValidationError
 from app.core.logging import get_logger
 from app.domain.entities import SyncRule, UserIntegrationSettings
@@ -123,6 +124,7 @@ async def update_settings(
     "/defaults",
     response_model=UserSettingsResponse,
     summary="Get default integration settings",
+    dependencies=[Depends(require_admin_api_key)],
 )
 async def get_default_settings(
     integration_id: UUID,
@@ -151,6 +153,7 @@ async def get_default_settings(
     "/defaults",
     response_model=UserSettingsResponse,
     summary="Update default integration settings",
+    dependencies=[Depends(require_admin_api_key)],
 )
 async def update_default_settings(
     integration_id: UUID,

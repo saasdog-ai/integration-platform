@@ -7,8 +7,11 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/com
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Spinner } from '@/components/ui/spinner'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { IntegrationStatusBadge } from '@/components/StatusBadge'
 import { OnboardingDialog } from './OnboardingDialog'
+import { IntegrationSettingsTab } from './IntegrationSettings'
+import { IntegrationRecordsTab } from './IntegrationRecords'
 import { formatDate } from '@/lib/utils'
 
 export function IntegrationDetail() {
@@ -25,7 +28,7 @@ export function IntegrationDetail() {
     enabled: !!integrationId,
   })
 
-  // Fetch integration settings
+  // Fetch integration settings (for overview tab)
   const { data: settings, isLoading: loadingSettings } = useQuery({
     queryKey: ['integration-settings', integrationId],
     queryFn: () => api.getIntegrationSettings(integrationId!),
@@ -45,7 +48,7 @@ export function IntegrationDetail() {
     },
   })
 
-  // Reconnect dialog state
+  // Dialog states
   const [showReconnect, setShowReconnect] = useState(false)
 
   const handleReconnectComplete = () => {
@@ -101,82 +104,93 @@ export function IntegrationDetail() {
           </div>
         </div>
         <div className="flex gap-2">
-          {isConnected && (
-            <Button variant="outline" onClick={() => navigate('records')}>
-              View Records
-            </Button>
-          )}
           {isConnected ? (
             <Button
               onClick={() => syncMutation.mutate()}
               disabled={syncMutation.isPending}
             >
               {syncMutation.isPending ? <Spinner size="sm" className="mr-2" /> : null}
-              🔄 Sync Now
+              Sync Now
             </Button>
           ) : (
             <Button onClick={() => setShowReconnect(true)}>
-              🔄 Reconnect
+              Reconnect
             </Button>
           )}
         </div>
       </div>
 
-      {/* Sync Settings */}
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <div>
-            <CardTitle>Sync Settings</CardTitle>
-            <CardDescription>Configure which entities to sync and their direction</CardDescription>
-          </div>
-          <Button variant="outline" onClick={() => navigate('settings')}>
-            Edit Settings
-          </Button>
-        </CardHeader>
-        <CardContent>
-          {settings?.sync_rules && settings.sync_rules.length > 0 ? (
-            <div className="space-y-3">
-              {settings.sync_rules.map((rule) => (
-                <div
-                  key={rule.entity_type}
-                  className="flex items-center justify-between p-3 bg-muted rounded-lg"
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="font-medium capitalize">{rule.entity_type}</span>
-                    <Badge variant="outline">{rule.direction}</Badge>
-                  </div>
-                  <Badge variant={rule.enabled ? 'success' : 'secondary'}>
-                    {rule.enabled ? 'Enabled' : 'Disabled'}
-                  </Badge>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-muted-foreground">No sync rules configured.</p>
-          )}
-        </CardContent>
-      </Card>
+      {/* Tabs */}
+      <Tabs defaultTab="overview">
+        <TabsList>
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="records">Records</TabsTrigger>
+          <TabsTrigger value="settings">Settings</TabsTrigger>
+        </TabsList>
 
-      {/* Connection Info */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Connection Details</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">Connected at:</span>
-            <span>{userIntegration.last_connected_at ? formatDate(userIntegration.last_connected_at) : 'N/A'}</span>
+        <TabsContent value="overview">
+          <div className="space-y-6">
+            {/* Sync Settings Summary */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Sync Settings</CardTitle>
+                <CardDescription>Entity sync rules and directions</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {settings?.sync_rules && settings.sync_rules.length > 0 ? (
+                  <div className="space-y-3">
+                    {settings.sync_rules.map((rule) => (
+                      <div
+                        key={rule.entity_type}
+                        className="flex items-center justify-between p-3 bg-muted rounded-lg"
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="font-medium capitalize">{rule.entity_type}</span>
+                          <Badge variant="outline">{rule.direction}</Badge>
+                        </div>
+                        <Badge variant={rule.enabled ? 'success' : 'secondary'}>
+                          {rule.enabled ? 'Enabled' : 'Disabled'}
+                        </Badge>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-muted-foreground">No sync rules configured.</p>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Connection Info */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Connection Details</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Connected at:</span>
+                  <span>{userIntegration.last_connected_at ? formatDate(userIntegration.last_connected_at) : 'N/A'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Integration ID:</span>
+                  <span className="font-mono text-sm">{userIntegration.integration_id}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">External Account:</span>
+                  <span>{userIntegration.external_account_id || 'N/A'}</span>
+                </div>
+              </CardContent>
+            </Card>
           </div>
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">Integration ID:</span>
-            <span className="font-mono text-sm">{userIntegration.integration_id}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">External Account:</span>
-            <span>{userIntegration.external_account_id || 'N/A'}</span>
-          </div>
-        </CardContent>
-      </Card>
+        </TabsContent>
+
+        <TabsContent value="records">
+          <IntegrationRecordsTab integrationId={integrationId!} />
+        </TabsContent>
+
+        <TabsContent value="settings">
+          <IntegrationSettingsTab integrationId={integrationId!} />
+        </TabsContent>
+      </Tabs>
 
       {/* Reconnect Dialog */}
       {integration && (

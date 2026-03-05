@@ -379,6 +379,22 @@ class IntegrationService:
             )
             user_integration = await self._repo.create_user_integration(user_integration)
 
+        # Ensure user has settings — seed from system defaults on first connect
+        existing_settings = await self._repo.get_user_settings(client_id, integration_id)
+        if not existing_settings:
+            system_settings = await self._repo.get_system_settings(integration_id)
+            if system_settings:
+                await self._repo.upsert_user_settings(
+                    client_id, integration_id, system_settings
+                )
+                logger.info(
+                    "OAuth callback: seeded user settings from system defaults",
+                    extra={
+                        "client_id": str(client_id),
+                        "integration": integration.name,
+                    },
+                )
+
         logger.info(
             "Integration connected successfully",
             extra={

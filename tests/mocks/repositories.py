@@ -107,8 +107,8 @@ class MockIntegrationRepository(IntegrationRepositoryInterface):
     async def get_user_integrations(self, client_id: UUID) -> list[UserIntegration]:
         return [ui for (cid, _), ui in self._user_integrations.items() if cid == client_id]
 
-    async def get_all_user_integrations(self) -> list[UserIntegration]:
-        return list(self._user_integrations.values())
+    async def get_all_user_integrations(self, limit: int = 1000) -> list[UserIntegration]:
+        return list(self._user_integrations.values())[:limit]
 
     async def create_user_integration(self, integration: UserIntegration) -> UserIntegration:
         key = (integration.client_id, integration.integration_id)

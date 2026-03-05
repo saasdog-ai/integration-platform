@@ -643,10 +643,10 @@ class SyncOrchestrator:
                 entities_processed=entities_processed,
             )
         elif errors:
-            # Partial failure - still mark as succeeded but with errors
+            # Partial failure - mark as partially succeeded with errors
             job = await self._job_repo.update_job_status(
                 job.id,
-                SyncJobStatus.SUCCEEDED,
+                SyncJobStatus.PARTIALLY_SUCCEEDED,
                 entities_processed={
                     **entities_processed,
                     "_errors": errors,
