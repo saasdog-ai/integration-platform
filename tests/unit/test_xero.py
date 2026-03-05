@@ -748,9 +748,7 @@ class TestPrepareOutboundData:
             updated_at=now,
         )
 
-        result = await strategy._prepare_outbound_data(
-            job, "bill", state, _MockStateRepo()
-        )
+        result = await strategy._prepare_outbound_data(job, "bill", state, _MockStateRepo())
 
         assert result["LineItems"][0]["AccountCode"] == "429"
 
@@ -815,9 +813,7 @@ class TestPrepareOutboundData:
             updated_at=now,
         )
 
-        result = await strategy._prepare_outbound_data(
-            job, "bill", state, _MockStateRepo()
-        )
+        result = await strategy._prepare_outbound_data(job, "bill", state, _MockStateRepo())
 
         # Should use the internal account_code (610), not the metadata one (429)
         assert result["LineItems"][0]["AccountCode"] == "610"

@@ -1192,13 +1192,9 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
                 IntegrationStateModel.entity_type == entity_type,
             ]
             if internal_record_ids:
-                conditions.append(
-                    IntegrationStateModel.internal_record_id.in_(internal_record_ids)
-                )
+                conditions.append(IntegrationStateModel.internal_record_id.in_(internal_record_ids))
             elif external_record_ids:
-                conditions.append(
-                    IntegrationStateModel.external_record_id.in_(external_record_ids)
-                )
+                conditions.append(IntegrationStateModel.external_record_id.in_(external_record_ids))
             else:
                 return []
 
@@ -1233,19 +1229,23 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
                 if m.sync_status in ("failed", "conflict"):
                     eligible_ids.append(m.id)
                 else:
-                    skipped.append({
-                        "state_id": str(m.id),
-                        "reason": f"Record status is '{m.sync_status}', not failed or conflict",
-                    })
+                    skipped.append(
+                        {
+                            "state_id": str(m.id),
+                            "reason": f"Record status is '{m.sync_status}', not failed or conflict",
+                        }
+                    )
 
             # Check for IDs not found at all
             found_ids = {m.id for m in models}
             for sid in state_ids:
                 if sid not in found_ids:
-                    skipped.append({
-                        "state_id": str(sid),
-                        "reason": "Record not found",
-                    })
+                    skipped.append(
+                        {
+                            "state_id": str(sid),
+                            "reason": "Record not found",
+                        }
+                    )
 
             if not eligible_ids:
                 return 0, skipped
@@ -1304,10 +1304,12 @@ class IntegrationStateRepository(IntegrationStateRepositoryInterface):
             skipped: list[dict] = []
             for sid in state_ids:
                 if sid not in found_ids:
-                    skipped.append({
-                        "state_id": str(sid),
-                        "reason": "Record not found",
-                    })
+                    skipped.append(
+                        {
+                            "state_id": str(sid),
+                            "reason": "Record not found",
+                        }
+                    )
 
             eligible_ids = list(found_ids)
             if not eligible_ids:

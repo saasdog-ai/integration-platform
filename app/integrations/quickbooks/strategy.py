@@ -688,9 +688,7 @@ class QuickBooksSyncStrategy:
                     result["records_updated"] += 1
 
                 elif direction == SyncDirection.OUTBOUND:
-                    data = await self._prepare_outbound_data(
-                        job, entity_type, existing, state_repo
-                    )
+                    data = await self._prepare_outbound_data(job, entity_type, existing, state_repo)
 
                     if existing.external_record_id:
                         await adapter.update_record(entity_type, existing.external_record_id, data)
@@ -859,9 +857,7 @@ class QuickBooksSyncStrategy:
 
         try:
             getter_fn = self._get_internal_getter_fn(entity_type)
-            internal_records = await getter_fn(
-                job.client_id, record_ids=[state.internal_record_id]
-            )
+            internal_records = await getter_fn(job.client_id, record_ids=[state.internal_record_id])
             if not internal_records:
                 return fallback
 
@@ -870,7 +866,9 @@ class QuickBooksSyncStrategy:
             # Resolve FK references needed by the outbound mapper
             if entity_type == "bill" and internal_data.get("vendor_id"):
                 vendor_state = await state_repo.get_record(
-                    job.client_id, job.integration_id, "vendor",
+                    job.client_id,
+                    job.integration_id,
+                    "vendor",
                     internal_record_id=internal_data["vendor_id"],
                 )
                 if vendor_state and vendor_state.external_record_id:
@@ -878,7 +876,9 @@ class QuickBooksSyncStrategy:
 
             if entity_type == "invoice" and internal_data.get("contact_id"):
                 contact_state = await state_repo.get_record(
-                    job.client_id, job.integration_id, "vendor",
+                    job.client_id,
+                    job.integration_id,
+                    "vendor",
                     internal_record_id=internal_data["contact_id"],
                 )
                 if contact_state and contact_state.external_record_id:

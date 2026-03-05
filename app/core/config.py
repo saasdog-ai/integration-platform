@@ -29,6 +29,7 @@ class Settings(BaseSettings):
         if v not in allowed:
             raise ValueError(f"APP_ENV must be one of {allowed}, got '{v}'")
         return v
+
     log_level: str = Field(default="INFO")
 
     # Database

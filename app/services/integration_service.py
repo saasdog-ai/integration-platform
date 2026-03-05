@@ -384,9 +384,7 @@ class IntegrationService:
         if not existing_settings:
             system_settings = await self._repo.get_system_settings(integration_id)
             if system_settings:
-                await self._repo.upsert_user_settings(
-                    client_id, integration_id, system_settings
-                )
+                await self._repo.upsert_user_settings(client_id, integration_id, system_settings)
                 logger.info(
                     "OAuth callback: seeded user settings from system defaults",
                     extra={

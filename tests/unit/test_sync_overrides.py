@@ -147,8 +147,11 @@ class TestForceSync:
     ):
         """Force-sync should clear errors and equalize version vectors."""
         record = _make_state_record(
-            client_id, integration_id,
-            internal_version_id=3, external_version_id=5, last_sync_version_id=2,
+            client_id,
+            integration_id,
+            internal_version_id=3,
+            external_version_id=5,
+            last_sync_version_id=2,
         )
         state_repo._records[(client_id, record.id)] = record
 
@@ -173,12 +176,11 @@ class TestForceSync:
         assert updated.last_sync_version_id == 5
         assert updated.force_synced_at is not None
 
-    def test_force_sync_skips_already_synced(
-        self, client, state_repo, client_id, integration_id
-    ):
+    def test_force_sync_skips_already_synced(self, client, state_repo, client_id, integration_id):
         """Force-sync should skip records that are already synced."""
         record = _make_state_record(
-            client_id, integration_id,
+            client_id,
+            integration_id,
             sync_status=RecordSyncStatus.SYNCED,
             error_message=None,
         )
@@ -200,7 +202,8 @@ class TestForceSync:
     ):
         """Force-sync should work on conflict records too."""
         record = _make_state_record(
-            client_id, integration_id,
+            client_id,
+            integration_id,
             sync_status=RecordSyncStatus.CONFLICT,
             error_message=None,
         )
@@ -214,9 +217,7 @@ class TestForceSync:
         assert response.status_code == 200
         assert response.json()["records_updated"] == 1
 
-    def test_force_sync_skips_not_found(
-        self, client, state_repo, client_id, integration_id
-    ):
+    def test_force_sync_skips_not_found(self, client, state_repo, client_id, integration_id):
         """Force-sync should skip records that don't exist."""
         fake_id = uuid4()
         response = client.post(
@@ -232,10 +233,7 @@ class TestForceSync:
 
     def test_force_sync_bulk(self, client, state_repo, client_id, integration_id):
         """Force-sync should handle multiple records in one request."""
-        records = [
-            _make_state_record(client_id, integration_id)
-            for _ in range(3)
-        ]
+        records = [_make_state_record(client_id, integration_id) for _ in range(3)]
         for r in records:
             state_repo._records[(client_id, r.id)] = r
 
@@ -247,9 +245,7 @@ class TestForceSync:
         assert response.status_code == 200
         assert response.json()["records_updated"] == 3
 
-    def test_force_sync_writes_audit_log(
-        self, client, state_repo, client_id, integration_id
-    ):
+    def test_force_sync_writes_audit_log(self, client, state_repo, client_id, integration_id):
         """Force-sync should write an audit log entry."""
         record = _make_state_record(client_id, integration_id)
         state_repo._records[(client_id, record.id)] = record
@@ -265,12 +261,11 @@ class TestForceSync:
         assert entry.performed_by == "test-user-123"
         assert entry.integration_id == integration_id
 
-    def test_force_sync_by_internal_record_ids(
-        self, client, state_repo, client_id, integration_id
-    ):
+    def test_force_sync_by_internal_record_ids(self, client, state_repo, client_id, integration_id):
         """Force-sync should resolve internal_record_ids to state IDs."""
         record = _make_state_record(
-            client_id, integration_id,
+            client_id,
+            integration_id,
             internal_record_id="BILL-001",
         )
         state_repo._records[(client_id, record.id)] = record
@@ -286,12 +281,11 @@ class TestForceSync:
         assert response.status_code == 200
         assert response.json()["records_updated"] == 1
 
-    def test_force_sync_by_external_record_ids(
-        self, client, state_repo, client_id, integration_id
-    ):
+    def test_force_sync_by_external_record_ids(self, client, state_repo, client_id, integration_id):
         """Force-sync should resolve external_record_ids to state IDs."""
         record = _make_state_record(
-            client_id, integration_id,
+            client_id,
+            integration_id,
             external_record_id="xero-guid-abc",
         )
         state_repo._records[(client_id, record.id)] = record
@@ -341,7 +335,8 @@ class TestDoNotSync:
     ):
         """Toggling do-not-sync OFF should set status to PENDING if versions mismatch."""
         record = _make_state_record(
-            client_id, integration_id,
+            client_id,
+            integration_id,
             sync_status=RecordSyncStatus.SYNCED,
             internal_version_id=5,
             external_version_id=3,
@@ -366,7 +361,8 @@ class TestDoNotSync:
     ):
         """Toggling OFF should keep SYNCED status if versions match."""
         record = _make_state_record(
-            client_id, integration_id,
+            client_id,
+            integration_id,
             sync_status=RecordSyncStatus.SYNCED,
             internal_version_id=5,
             external_version_id=5,
@@ -385,9 +381,7 @@ class TestDoNotSync:
         updated = state_repo._records[(client_id, record.id)]
         assert updated.sync_status == RecordSyncStatus.SYNCED
 
-    def test_do_not_sync_writes_audit_log(
-        self, client, state_repo, client_id, integration_id
-    ):
+    def test_do_not_sync_writes_audit_log(self, client, state_repo, client_id, integration_id):
         """Do-not-sync toggle should write an audit log entry."""
         record = _make_state_record(client_id, integration_id)
         state_repo._records[(client_id, record.id)] = record
@@ -402,12 +396,11 @@ class TestDoNotSync:
         assert entry.action == "do_not_sync_enabled"
         assert entry.performed_by == "test-user-123"
 
-    def test_do_not_sync_disabled_audit_log(
-        self, client, state_repo, client_id, integration_id
-    ):
+    def test_do_not_sync_disabled_audit_log(self, client, state_repo, client_id, integration_id):
         """Toggling OFF should write 'do_not_sync_disabled' action."""
         record = _make_state_record(
-            client_id, integration_id,
+            client_id,
+            integration_id,
             sync_status=RecordSyncStatus.SYNCED,
             internal_version_id=5,
             external_version_id=5,
@@ -426,10 +419,7 @@ class TestDoNotSync:
 
     def test_do_not_sync_bulk(self, client, state_repo, client_id, integration_id):
         """Do-not-sync should handle multiple records."""
-        records = [
-            _make_state_record(client_id, integration_id)
-            for _ in range(3)
-        ]
+        records = [_make_state_record(client_id, integration_id) for _ in range(3)]
         for r in records:
             state_repo._records[(client_id, r.id)] = r
 
@@ -502,7 +492,9 @@ class TestBrowseRecords:
         """Should return all records for an integration."""
         records = [
             _make_state_record(client_id, integration_id, sync_status=RecordSyncStatus.FAILED),
-            _make_state_record(client_id, integration_id, sync_status=RecordSyncStatus.SYNCED, error_message=None),
+            _make_state_record(
+                client_id, integration_id, sync_status=RecordSyncStatus.SYNCED, error_message=None
+            ),
         ]
         for r in records:
             state_repo._records[(client_id, r.id)] = r
@@ -517,40 +509,34 @@ class TestBrowseRecords:
     def test_browse_filter_by_status(self, client, state_repo, client_id, integration_id):
         """Should filter records by sync_status."""
         r1 = _make_state_record(client_id, integration_id, sync_status=RecordSyncStatus.FAILED)
-        r2 = _make_state_record(client_id, integration_id, sync_status=RecordSyncStatus.SYNCED, error_message=None)
+        r2 = _make_state_record(
+            client_id, integration_id, sync_status=RecordSyncStatus.SYNCED, error_message=None
+        )
         state_repo._records[(client_id, r1.id)] = r1
         state_repo._records[(client_id, r2.id)] = r2
 
-        response = client.get(
-            f"/integrations/{integration_id}/records?sync_status=failed"
-        )
+        response = client.get(f"/integrations/{integration_id}/records?sync_status=failed")
 
         assert response.status_code == 200
         data = response.json()
         assert data["total"] == 1
         assert data["records"][0]["sync_status"] == "failed"
 
-    def test_browse_filter_by_do_not_sync(
-        self, client, state_repo, client_id, integration_id
-    ):
+    def test_browse_filter_by_do_not_sync(self, client, state_repo, client_id, integration_id):
         """Should filter records by do_not_sync flag."""
         r1 = _make_state_record(client_id, integration_id, do_not_sync=True)
         r2 = _make_state_record(client_id, integration_id, do_not_sync=False)
         state_repo._records[(client_id, r1.id)] = r1
         state_repo._records[(client_id, r2.id)] = r2
 
-        response = client.get(
-            f"/integrations/{integration_id}/records?do_not_sync=true"
-        )
+        response = client.get(f"/integrations/{integration_id}/records?do_not_sync=true")
 
         assert response.status_code == 200
         data = response.json()
         assert data["total"] == 1
         assert data["records"][0]["do_not_sync"] is True
 
-    def test_browse_includes_new_fields(
-        self, client, state_repo, client_id, integration_id
-    ):
+    def test_browse_includes_new_fields(self, client, state_repo, client_id, integration_id):
         """Response should include do_not_sync and force_synced_at fields."""
         record = _make_state_record(client_id, integration_id)
         state_repo._records[(client_id, record.id)] = record
@@ -568,9 +554,7 @@ class TestBrowseRecords:
             r = _make_state_record(client_id, integration_id)
             state_repo._records[(client_id, r.id)] = r
 
-        response = client.get(
-            f"/integrations/{integration_id}/records?page=1&page_size=2"
-        )
+        response = client.get(f"/integrations/{integration_id}/records?page=1&page_size=2")
 
         data = response.json()
         assert data["total"] == 5
@@ -597,16 +581,18 @@ class TestSyncEngineGuards:
         r1.internal_version_id = 2
         r1.last_sync_version_id = 1
         r2 = _make_state_record(
-            cid, iid, sync_status=RecordSyncStatus.PENDING, do_not_sync=True, error_message=None,
+            cid,
+            iid,
+            sync_status=RecordSyncStatus.PENDING,
+            do_not_sync=True,
+            error_message=None,
         )
         r2.internal_version_id = 2
         r2.last_sync_version_id = 1
         repo._records[(cid, r1.id)] = r1
         repo._records[(cid, r2.id)] = r2
 
-        results = await repo.get_records_by_status(
-            cid, iid, "bill", RecordSyncStatus.PENDING
-        )
+        results = await repo.get_records_by_status(cid, iid, "bill", RecordSyncStatus.PENDING)
 
         assert len(results) == 1
         assert results[0].id == r1.id
@@ -620,7 +606,11 @@ class TestSyncEngineGuards:
 
         r1 = _make_state_record(cid, iid, sync_status=RecordSyncStatus.PENDING, error_message=None)
         r2 = _make_state_record(
-            cid, iid, sync_status=RecordSyncStatus.PENDING, do_not_sync=True, error_message=None,
+            cid,
+            iid,
+            sync_status=RecordSyncStatus.PENDING,
+            do_not_sync=True,
+            error_message=None,
         )
         repo._records[(cid, r1.id)] = r1
         repo._records[(cid, r2.id)] = r2

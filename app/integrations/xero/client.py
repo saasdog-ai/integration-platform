@@ -123,9 +123,7 @@ class XeroAdapter(IntegrationAdapterInterface):
                     "validation_errors": validation_msgs,
                 },
             )
-            raise Exception(
-                f"Xero API error ({response.status_code}): {detail}"
-            )
+            raise Exception(f"Xero API error ({response.status_code}): {detail}")
 
         return response.json()
 

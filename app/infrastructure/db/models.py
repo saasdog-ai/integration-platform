@@ -395,9 +395,7 @@ class IntegrationStateModel(Base):
     error_details: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     metadata_: Mapped[dict[str, Any] | None] = mapped_column("metadata", JSONB, nullable=True)
     do_not_sync: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    force_synced_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    force_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

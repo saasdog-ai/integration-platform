@@ -498,4 +498,3 @@ class InternalDataRepository:
             elif isinstance(val, datetime):
                 result[key] = val.isoformat()
         return result
-

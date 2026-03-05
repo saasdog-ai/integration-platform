@@ -54,9 +54,7 @@ async def get_current_client(
             # Fallback for curl/Postman testing without headers
             # Matches Alice Johnson in saas-host-app mock users
             client_id = UUID("aaa00000-0000-0000-0000-000000000001")
-        logger.debug(
-            "Auth disabled, using client_id", extra={"client_id": str(client_id)}
-        )
+        logger.debug("Auth disabled, using client_id", extra={"client_id": str(client_id)})
         return AuthenticatedClient(client_id=client_id)
 
     # Production mode: require valid token

@@ -619,10 +619,12 @@ class MockIntegrationStateRepository(IntegrationStateRepositoryInterface):
                 skipped.append({"state_id": str(sid), "reason": "Record not found"})
                 continue
             if record.sync_status not in (RecordSyncStatus.FAILED, RecordSyncStatus.CONFLICT):
-                skipped.append({
-                    "state_id": str(sid),
-                    "reason": f"Record status is '{record.sync_status.value}', not failed or conflict",
-                })
+                skipped.append(
+                    {
+                        "state_id": str(sid),
+                        "reason": f"Record status is '{record.sync_status.value}', not failed or conflict",
+                    }
+                )
                 continue
             max_v = max(record.internal_version_id, record.external_version_id)
             record.internal_version_id = max_v
