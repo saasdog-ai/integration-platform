@@ -1,0 +1,36 @@
+# -----------------------------------------------------------------------------
+# Integration Platform - Terraform Configuration Example (GCP)
+# -----------------------------------------------------------------------------
+# Copy this to terraform.tfvars for local development.
+# -----------------------------------------------------------------------------
+
+# General
+company_prefix = "saasdog"
+environment    = "dev"
+gcp_project_id = "my-gcp-project-id"
+gcp_region     = "us-east1"
+app_name       = "integration-platform"
+
+# -----------------------------------------------------------------------------
+# Shared Infrastructure References
+# -----------------------------------------------------------------------------
+# These values come from the shared-infrastructure project outputs.
+# Run `terraform output` in shared-infrastructure/infra/gcp/terraform/ to get these.
+
+shared_vpc_connector_id                    = "projects/my-project/locations/us-east1/connectors/mycompany-shared-conn-dev"
+shared_cloud_sql_connection_name           = "my-project:us-east1:mycompany-shared-sql-dev"
+shared_cloud_sql_private_ip                = "10.x.x.x"
+shared_cloud_sql_master_password_secret_id = "mycompany-shared-cloud-sql-master-password-dev"
+
+# Application Configuration
+db_name = "integration_platform"
+
+# Cloud Run
+cloud_run_cpu           = "1"
+cloud_run_memory        = "512Mi"
+cloud_run_min_instances = 0
+cloud_run_max_instances = 4
+container_port          = 8000
+
+# Protection (set to true for production)
+enable_deletion_protection = false

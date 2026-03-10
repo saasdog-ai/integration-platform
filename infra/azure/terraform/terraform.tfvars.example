@@ -1,0 +1,38 @@
+# -----------------------------------------------------------------------------
+# Integration Platform - Terraform Configuration Example (Azure)
+# -----------------------------------------------------------------------------
+# Copy this to terraform.tfvars for local development.
+# -----------------------------------------------------------------------------
+
+# General
+company_prefix = "saasdog"
+environment    = "dev"
+azure_location = "eastus"
+app_name       = "integration-platform"
+
+# -----------------------------------------------------------------------------
+# Shared Infrastructure References
+# -----------------------------------------------------------------------------
+# These values come from the shared-infrastructure project outputs.
+# Run `terraform output` in shared-infrastructure/infra/azure/terraform/ to get these.
+
+shared_resource_group_name           = "mycompany-shared-rg-dev"
+shared_vnet_id                       = "/subscriptions/SUB_ID/resourceGroups/mycompany-shared-rg-dev/providers/Microsoft.Network/virtualNetworks/mycompany-shared-vnet-dev"
+shared_container_apps_environment_id = "/subscriptions/SUB_ID/resourceGroups/mycompany-shared-rg-dev/providers/Microsoft.App/managedEnvironments/mycompany-shared-cae-dev"
+shared_postgresql_fqdn               = "mycompany-shared-pg-dev.postgres.database.azure.com"
+shared_key_vault_id                  = "/subscriptions/SUB_ID/resourceGroups/mycompany-shared-rg-dev/providers/Microsoft.KeyVault/vaults/mycompany-shared-kv-dev"
+shared_key_vault_uri                 = "https://mycompany-shared-kv-dev.vault.azure.net/"
+shared_postgresql_password_secret_id = "/subscriptions/SUB_ID/resourceGroups/mycompany-shared-rg-dev/providers/Microsoft.KeyVault/vaults/mycompany-shared-kv-dev/secrets/mycompany-shared-pg-master-password-dev"
+
+# Application Configuration
+db_name = "integration_platform"
+
+# Container App
+container_app_cpu          = 0.25
+container_app_memory       = "0.5Gi"
+container_app_min_replicas = 0
+container_app_max_replicas = 4
+container_port             = 8000
+
+# Protection (set to true for production)
+enable_deletion_protection = false
