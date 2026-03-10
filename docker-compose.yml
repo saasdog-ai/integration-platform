@@ -1,11 +1,23 @@
 version: '3.8'
 
-# NOTE: This project shares the PostgreSQL instance with import-export-orchestrator
-# The database runs in the job_runner_db container on port 5433
-# To create the integration_platform database, run:
-#   docker exec -it job_runner_db psql -U postgres -c "CREATE DATABASE integration_platform;"
-
 services:
+  db:
+    image: postgres:15
+    container_name: integration_platform_db
+    environment:
+      POSTGRES_DB: integration_platform
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5434:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   localstack:
     image: localstack/localstack:latest
     container_name: integration_platform_localstack
@@ -30,8 +42,7 @@ services:
       dockerfile: Dockerfile.dev
     container_name: integration_platform_app
     environment:
-      # Uses shared PostgreSQL from job_runner_db container (port 5433 on host)
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@host.docker.internal:5433/integration_platform
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/integration_platform
       APP_ENV: development
       LOG_LEVEL: DEBUG
       # Use local/in-memory queue for development (no SQS dependency)
@@ -43,9 +54,9 @@ services:
       AWS_DEFAULT_REGION: us-east-1
     ports:
       - "8001:8000"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     depends_on:
+      db:
+        condition: service_healthy
       localstack:
         condition: service_healthy
     volumes:
@@ -57,3 +68,4 @@ services:
 
 volumes:
   localstack_data:
+  pgdata:

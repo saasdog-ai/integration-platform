@@ -99,3 +99,7 @@ Thumbs.db
 *.key
 credentials.json
 service-account.json
+
+# Internal docs (not for public repo)
+docs/CODE_REVIEW_FINDINGS.md
+docs/ADAPTER_SEPARATION_PLAN.md

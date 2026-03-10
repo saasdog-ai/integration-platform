@@ -71,16 +71,6 @@ jobs:
         with:
           terraform_version: 1.5.0
 
-      - name: Validate DATABASE_PASSWORD secret
-        run: |
-          if [ -z "${{ secrets.DATABASE_PASSWORD }}" ]; then
-            echo "Error: DATABASE_PASSWORD secret is not set"
-            echo "Please configure it in: Settings > Secrets and variables > Actions"
-            echo "Or in: Settings > Environments > ${{ github.event.inputs.environment || 'dev' }} > Secrets"
-            exit 1
-          fi
-          echo "DATABASE_PASSWORD secret is configured"
-
       - name: Terraform Init
         working-directory: ./infra/aws/terraform
         run: |
@@ -130,7 +120,6 @@ jobs:
         working-directory: ./infra/aws/terraform
         timeout-minutes: 10
         env:
-          TF_VAR_database_password: ${{ secrets.DATABASE_PASSWORD }}
           TF_VAR_image_tag: ${{ github.sha }}
         run: |
           echo "[$(date -u)] Starting terraform plan..."
@@ -143,7 +132,6 @@ jobs:
         working-directory: ./infra/aws/terraform
         timeout-minutes: 20
         env:
-          TF_VAR_database_password: ${{ secrets.DATABASE_PASSWORD }}
           TF_VAR_image_tag: ${{ github.sha }}
         run: |
           echo "[$(date -u)] Starting terraform apply..."

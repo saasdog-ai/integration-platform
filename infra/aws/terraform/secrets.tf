@@ -2,13 +2,12 @@
 # Secrets Manager - Database URL
 # -----------------------------------------------------------------------------
 # Creates the DATABASE_URL connection string using:
-# - Shared RDS endpoint from shared-infrastructure
-# - App-specific database name and credentials
+# - Shared RDS master credentials (self-bootstrapping, no manual DB user needed)
+# - App-specific database name
 
-# Generate a password for this application's database user
-resource "random_password" "db_password" {
-  length  = 32
-  special = false
+# Read master password from shared infrastructure's Secrets Manager secret
+data "aws_secretsmanager_secret_version" "rds_master_password" {
+  secret_id = var.shared_rds_master_password_secret_arn
 }
 
 # Store the complete DATABASE_URL for the application
@@ -24,11 +23,9 @@ resource "aws_secretsmanager_secret" "database_url" {
 
 resource "aws_secretsmanager_secret_version" "database_url" {
   secret_id = aws_secretsmanager_secret.database_url.id
-  # Using the shared RDS with app-specific database
-  # IMPORTANT: The database and user must be created by a DBA before first deployment.
-  # Run: psql -h <rds-endpoint> -U postgres -f scripts/init-database.sql
-  # See scripts/init-database.sql for details.
-  secret_string = "postgresql+asyncpg://${var.db_username}:${urlencode(random_password.db_password.result)}@${local.rds_address}:5432/${var.db_name}"
+  # Uses RDS master credentials — start.sh auto-creates the database and runs migrations.
+  # No manual init-database.sql step required.
+  secret_string = "postgresql+asyncpg://postgres:${urlencode(data.aws_secretsmanager_secret_version.rds_master_password.secret_string)}@${local.rds_address}:5432/${var.db_name}"
 }
 
 # -----------------------------------------------------------------------------
