@@ -232,6 +232,23 @@ curl https://your-app-url/docs
 | `SYNC_GLOBALLY_DISABLED` | Kill switch for all sync jobs | `false` |
 | `DISABLED_INTEGRATIONS` | Comma-separated list of integrations to disable | - |
 
+### How Environment Variables Are Configured
+
+The same Docker image is used across all environments. What changes is how env vars are injected:
+
+| Environment | How variables are set |
+|---|---|
+| **Local (no Docker)** | `.env` file in the project root. Pydantic Settings auto-loads it. Copy `.env.example` to get started. |
+| **Local (Docker Compose)** | `docker-compose.yml` `environment:` block. Values are hardcoded for local dev (e.g., `DATABASE_URL` points to the local `db` container). |
+| **AWS (ECS/Fargate)** | Terraform's ECS task definition ([`infra/aws/terraform/ecs.tf`](infra/aws/terraform/ecs.tf)). Non-sensitive values go in the `environment` block; secrets (`DATABASE_URL`, `ADMIN_API_KEY`) are pulled from AWS Secrets Manager via the `secrets` block. |
+
+**Per-environment configuration on AWS**: Terraform derives several values automatically from `var.environment`:
+- `APP_ENV` maps `"dev"` → `"development"`, `"prod"` → `"production"`
+- `AUTH_ENABLED` is `"true"` for prod, `"false"` otherwise
+- Resource names, secret ARNs, and queue URLs are all environment-scoped by Terraform
+
+To deploy multiple environments (dev, staging, prod), use separate `terraform.tfvars` files with different `environment` values, or use Terraform workspaces. Each environment gets its own ECS service, ALB, secrets, and SQS queue — all derived from the same Terraform configs.
+
 > **Production validation**: When `APP_ENV=production`, the app enforces that `AUTH_ENABLED=true`, `JWT_SECRET_KEY` is changed, and `ADMIN_API_KEY` is set. It will refuse to start otherwise.
 
 ## Customization Guide
