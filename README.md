@@ -234,21 +234,6 @@ curl https://your-app-url/docs
 
 > **Production validation**: When `APP_ENV=production`, the app enforces that `AUTH_ENABLED=true`, `JWT_SECRET_KEY` is changed, and `ADMIN_API_KEY` is set. It will refuse to start otherwise.
 
-### Tear down
-
-`terraform destroy` in integration-platform first, then shared-infrastructure. State backends (S3 bucket, DynamoDB table) are preserved for the next spin-up.
-
-### Cost Estimate (AWS, dev environment)
-
-| Resource | Monthly |
-|----------|---------|
-| NAT Gateway | ~$32 |
-| ALB | ~$16 |
-| ECS Fargate (0.25 vCPU) | ~$9 |
-| RDS (db.t3.micro) | ~$13 |
-| Secrets Manager + KMS | ~$2 |
-| **Total** | **~$73** |
-
 ## Customization Guide
 
 ### Connect to Your Own Data (Replace `internal_repo.py`)
