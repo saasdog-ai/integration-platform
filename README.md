@@ -21,7 +21,7 @@ Third-party integration vendors like Workato, MuleSoft, and Tray.io charge thous
 - **Audit logging** -- append-only history for every sync operation and manual override
 - **REST API** -- all features exposed as API endpoints, plus admin APIs for defaults and overrides
 - **Embeddable UI** -- React micro-frontend you can drop into your host app via module federation
-- **Multi-cloud Terraform** -- deploy to AWS (ECS/Fargate), GCP (Cloud Run), or Azure (Container Apps)
+- **Multi-cloud Terraform** -- deploy to AWS (ECS/Fargate), GCP (Cloud Run), or Azure (Container Apps). *AWS is production-tested; GCP and Azure configs are included but not yet tested in production*
 
 ### How to Use It
 
@@ -126,7 +126,7 @@ terraform output
 | `rds_security_group_id` | `shared_rds_security_group_id` |
 | `rds_master_password_secret_arn` | `shared_rds_master_password_secret_arn` |
 
-> **Multi-cloud**: GCP and Azure Terraform configs are included under `infra/gcp/` and `infra/azure/`. Use `CLOUD=gcp` or `CLOUD=azure` with the orchestration script (Step 2 alternative).
+> **Multi-cloud**: GCP and Azure Terraform configs are included under `infra/gcp/` and `infra/azure/`. However, only AWS has been tested in production — GCP and Azure configs are provided as a starting point and may need adjustments.
 
 ### Step 2: Deploy integration-platform
 
@@ -328,13 +328,21 @@ See the project's `CLAUDE.md` for the full adapter, strategy, and mapper contrac
 
 ### Credential Encryption
 
-OAuth tokens are encrypted at rest using pluggable encryption:
+OAuth tokens are encrypted at rest using pluggable encryption. The encryption backend is selected automatically based on `CLOUD_PROVIDER`:
 
-| Provider | Backend | Config |
-|----------|---------|--------|
-| AWS | KMS | Set `KMS_KEY_ID` |
-| Azure | Key Vault | Set `AZURE_KEYVAULT_URL` |
-| Local | Fernet | Default for development |
+| Provider | Backend | How It's Provisioned |
+|----------|---------|---------------------|
+| AWS | KMS | Terraform creates the key (`infra/aws/terraform/kms.tf`) and injects `KMS_KEY_ID` into the ECS task definition automatically — no manual setup needed |
+| GCP | Cloud KMS | Terraform creates the keyring and key (`infra/gcp/terraform/kms.tf`) and injects `GCP_KMS_KEYRING` + `GCP_KMS_KEY` into Cloud Run automatically |
+| Azure | Key Vault | Set `AZURE_KEYVAULT_URL` to your Key Vault endpoint (e.g., `https://myvault.vault.azure.net/`) |
+| Local | Fernet | Default for development (`CLOUD_PROVIDER=local`) — generates a random key on startup, **not suitable for production** |
+
+**In production**, the app raises an error on startup if no cloud encryption backend is configured. If you deploy via Terraform, encryption is handled automatically. If you deploy manually, set the corresponding environment variables:
+- **AWS**: `CLOUD_PROVIDER=aws` + `KMS_KEY_ID=<key-id-or-arn>` (create a symmetric KMS key in the AWS Console or via `aws kms create-key`)
+- **GCP**: `CLOUD_PROVIDER=gcp` + `GCP_KMS_KEYRING=<keyring-name>` + `GCP_KMS_KEY=<key-name>`
+- **Azure**: `CLOUD_PROVIDER=azure` + `AZURE_KEYVAULT_URL=<vault-url>`
+
+The ECS task role (AWS) and Cloud Run service account (GCP) are granted `kms:Encrypt`/`kms:Decrypt` permissions by Terraform. The encryption implementation is in `app/infrastructure/encryption/`.
 
 ### Admin API
 
