@@ -404,7 +404,7 @@ Host apps ([saas-host-app](https://github.com/saasdog-ai/saas-host-app), [admin-
 
 All endpoints require an `X-Client-ID` header (dev mode) or Bearer JWT token (production) for multi-tenant isolation.
 
-Interactive documentation is available at `/docs` (Swagger UI) and `/redoc` (ReDoc) when the server is running.
+Interactive documentation is available at `/docs` (Swagger UI) and `/redoc` (ReDoc) when the server is running. For detailed request/response examples with curl commands, see the [full API Reference](docs/API_REFERENCE.md).
 
 ### Endpoints Summary
 
