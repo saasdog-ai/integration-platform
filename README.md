@@ -32,36 +32,7 @@ The included QuickBooks Online and Xero integrations are fully working reference
 3. **Describe what you need** -- tell your AI tool to *"add a Sage integration following the same patterns as QuickBooks and Xero"*
 4. **Test and ship** -- run the 500+ included tests as a baseline, add integration-specific tests, and deploy
 
-## Architecture Overview
-
-```
-┌──────────────────────────────────────────────────────┐
-│  API Layer  (FastAPI routers, DTOs, OpenAPI docs)     │
-├──────────────────────────────────────────────────────┤
-│  Auth       (JWT / X-Client-ID, admin API key)        │
-├──────────────────────────────────────────────────────┤
-│  Services   (SyncOrchestrator, JobRunner, Settings)   │
-├──────────────────────────────────────────────────────┤
-│  Domain     (Entities, enums, interfaces — no deps)   │
-├──────────────────────────────────────────────────────┤
-│  Infrastructure                                       │
-│    Adapters  (QBO, Xero, mock)                        │
-│    DB        (SQLAlchemy repos, Alembic migrations)   │
-│    Queue     (SQS / in-memory)                        │
-│    Encryption (KMS / Key Vault / Fernet)              │
-├──────────────────────────────────────────────────────┤
-│  Integrations                                         │
-│    quickbooks/  strategy, mappers, client, constants  │
-│    xero/        strategy, mappers, client, constants  │
-│    shared/      InternalDataRepository (your data)    │
-└──────────────────────────────────────────────────────┘
-```
-
-**Key tables**: `integration_state` (record-level sync tracking with version vectors), `sync_jobs` (job execution history), `user_integrations` (OAuth connections per tenant), `user_integration_settings` (sync rules per tenant).
-
-**Sync flow**: User triggers sync → job queued → orchestrator selects strategy → strategy fetches/pushes records per entity in dependency order → version vectors equalized → history written.
-
-For detailed sync architecture (version vectors, conflict resolution, change detection modes), see [docs/SYNC_ARCHITECTURE.md](docs/SYNC_ARCHITECTURE.md).
+For system architecture, sync engine internals, and data flow diagrams, see [docs/SYNC_ARCHITECTURE.md](docs/SYNC_ARCHITECTURE.md).
 
 ## Deployment Guide
 

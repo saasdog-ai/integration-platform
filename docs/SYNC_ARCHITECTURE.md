@@ -2,84 +2,61 @@
 
 Deep dive into the integration platform's sync engine — version vectors, conflict resolution, change detection, and sync directions.
 
-For a high-level overview, see the main [README](../README.md#architecture-overview).
+For project overview and deployment instructions, see the main [README](../README.md).
 
 ## System Diagram
 
+The integration platform runs as a **separate microservice** alongside your application. Your app embeds the platform's micro-frontend for the UI and calls its REST API for backend operations.
+
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│  Your Application                                                   │
-│                                                                     │
-│  ┌──────────────┐    ┌──────────────────────────────────────────┐   │
-│  │  Host App     │    │  Integration Platform                    │   │
-│  │  (React)      │    │                                          │   │
-│  │              ├────►│  REST API (FastAPI)                      │   │
-│  │  saas-host   │    │    │                                      │   │
-│  │  admin-host  │    │    ├── /integrations   (OAuth, connect)   │   │
-│  └──────────────┘    │    ├── /sync-jobs      (trigger, status)  │   │
-│                      │    ├── /settings        (sync rules)      │   │
-│                      │    └── /admin           (cross-tenant)    │   │
-│                      │                                          │   │
-│                      │  ┌─────────────────────────────────────┐  │   │
-│                      │  │  Sync Orchestrator                  │  │   │
-│                      │  │                                     │  │   │
-│                      │  │  ┌─────────┐  ┌────────┐           │  │   │
-│                      │  │  │  QBO    │  │  Xero  │  + more   │  │   │
-│                      │  │  │Strategy │  │Strategy│           │  │   │
-│                      │  │  └────┬────┘  └───┬────┘           │  │   │
-│                      │  │       │            │                │  │   │
-│                      │  │  ┌────▼────────────▼────┐          │  │   │
-│                      │  │  │  Version Vectors     │          │  │   │
-│                      │  │  │  iv / ev / lsv       │          │  │   │
-│                      │  │  │  Conflict Resolution │          │  │   │
-│                      │  │  └──────────┬───────────┘          │  │   │
-│                      │  └─────────────┼───────────────────────┘  │   │
-│                      └────────────────┼──────────────────────────┘   │
-│                                       │                             │
-│                      ┌────────────────▼──────────────────────────┐   │
-│                      │  PostgreSQL                                │   │
-│                      │                                            │   │
-│                      │  integration_state   (record-level sync)   │   │
-│                      │  sync_jobs           (job history)         │   │
-│                      │  user_integrations   (OAuth credentials)   │   │
-│                      │  sample_* tables     (your business data)  │   │
-│                      └────────────────────────────────────────────┘   │
-└───────────────────────────────────┬─────────────────────────────────┘
-                                    │
-                    ┌───────────────┼───────────────┐
-                    │               │               │
-           ┌────────▼──────┐ ┌─────▼──────┐ ┌──────▼─────┐
-           │  QuickBooks   │ │   Xero     │ │  Sage, etc │
-           │  Online API   │ │   API      │ │  (add new) │
-           │               │ │            │ │            │
-           │  OAuth 2.0    │ │  OAuth 2.0 │ │  OAuth 2.0 │
-           │  REST API     │ │  REST API  │ │  REST API  │
-           └───────────────┘ └────────────┘ └────────────┘
+┌──────────────────────────┐
+│  Your Application        │
+│                          │
+│  ┌────────────────────┐  │
+│  │  Integration MFE   │  │    ┌─────────────────────────────────────────────┐
+│  │  (React, embedded  │──────►│  Integration Platform  (separate service)   │
+│  │   via Module       │  │    │                                             │
+│  │   Federation)      │  │    │  REST API (FastAPI)                         │
+│  └────────────────────┘  │    │    ├── /integrations  (OAuth, connect)      │
+│                          │    │    ├── /sync-jobs     (trigger, status)     │
+│  Your own backend can    │    │    ├── /settings       (sync rules)         │
+│  also call the REST API ─────►│    └── /admin          (cross-tenant)       │
+│  directly                │    │                                             │
+└──────────────────────────┘    │  Sync Orchestrator                          │
+                                │    ┌─────────┐  ┌────────┐                  │
+                                │    │  QBO    │  │  Xero  │  + more          │
+                                │    │Strategy │  │Strategy │                  │
+                                │    └────┬────┘  └───┬────┘                  │
+                                │         │            │                       │
+                                │    PostgreSQL (integration_state,            │
+                                │     sync_jobs, user_integrations)            │
+                                └─────────┬───────────┬────────────────────────┘
+                                          │           │
+                                 ┌────────▼──┐ ┌─────▼──────┐ ┌────────────┐
+                                 │ QuickBooks │ │   Xero     │ │ Sage, etc  │
+                                 │ Online API │ │   API      │ │ (add new)  │
+                                 │ OAuth 2.0  │ │  OAuth 2.0 │ │ OAuth 2.0  │
+                                 └────────────┘ └────────────┘ └────────────┘
 ```
 
 ### Data Flow
 
-**Inbound sync** (external → internal):
+**Inbound sync** (external → your system):
 ```
 External API  ──fetch──►  Strategy  ──map──►  internal_repo.upsert_*()  ──►  Your DB
-                              │
-                     update integration_state (ev++, equalize)
 ```
 
-**Outbound sync** (internal → external):
+**Outbound sync** (your system → external):
 ```
 Your DB  ──get_*()──►  Strategy  ──map──►  Adapter.create/update()  ──►  External API
-                           │
-                  update integration_state (iv++, equalize)
 ```
 
 **Bidirectional sync**:
 ```
-1. Fetch external records ──► classify each as inbound/outbound/conflict
+1. Fetch external records → classify each as inbound / outbound / conflict
 2. Conflicts resolved by master_if_conflict setting
 3. Process inbound records (external wins)
-4. Process outbound records (our system wins)
-5. Equalize version vectors: iv = ev = lsv = max(iv, ev)
+4. Process outbound records (your system wins)
 ```
 
 ## Version Vectors
