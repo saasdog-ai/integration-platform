@@ -25,7 +25,7 @@ Third-party integration vendors like Workato, MuleSoft, and Tray.io charge thous
 
 The included QuickBooks Online and Xero integrations are fully working reference implementations with inbound, outbound, and bidirectional sync across 7 entity types.
 
-1. **Clone and deploy** -- download the source and spin up infrastructure with the included Terraform configs (`CLOUD=aws|gcp|azure ./scripts/infra.sh up`)
+1. **Clone and deploy** -- download the source and spin up infrastructure with the included Terraform configs
 2. **Point your AI tool at the codebase** -- the project includes detailed `CLAUDE.md` files that give AI tools full context
 3. **Describe what you need** -- tell your AI tool to *"add a Sage integration following the same patterns as QuickBooks and Xero"*
 4. **Test and ship** -- run the 500+ included tests as a baseline, add integration-specific tests, and deploy
@@ -159,15 +159,6 @@ terraform init \
 terraform apply
 ```
 
-**Alternative — one-command deployment** (handles both projects):
-
-```bash
-# From the parent directory containing both repos
-CLOUD=aws COMPANY_PREFIX=mycompany ./scripts/infra.sh up
-```
-
-This bootstraps state backends, applies shared-infrastructure, reads its outputs, applies integration-platform, builds the Docker image, pushes to ECR, and deploys to ECS. Use `CLOUD=gcp` or `CLOUD=azure` for other clouds.
-
 ### Step 3: Set up secrets
 
 The container's `start.sh` script auto-creates the database and runs Alembic migrations on first boot. `DATABASE_URL` is auto-constructed by Terraform from the shared-infrastructure RDS outputs. The remaining secrets need manual setup:
@@ -243,11 +234,7 @@ curl https://your-app-url/docs
 
 ### Tear down
 
-```bash
-CLOUD=aws ./scripts/infra.sh down
-```
-
-Or manually: `terraform destroy` in integration-platform first, then shared-infrastructure. State backends (S3 bucket, DynamoDB table) are preserved for the next spin-up.
+`terraform destroy` in integration-platform first, then shared-infrastructure. State backends (S3 bucket, DynamoDB table) are preserved for the next spin-up.
 
 ### Cost Estimate (AWS, dev environment)
 
