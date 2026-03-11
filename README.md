@@ -163,7 +163,7 @@ terraform apply
 
 ### Step 3: Set up secrets
 
-The container's `start.sh` script auto-creates the database and runs Alembic migrations on first boot. `DATABASE_URL` is auto-constructed by Terraform from the shared-infrastructure RDS outputs. The remaining secrets need manual setup:
+The container's startup script ([`scripts/start.sh`](scripts/start.sh)) auto-creates the database and runs Alembic migrations on first boot. `DATABASE_URL` is auto-constructed by Terraform from the shared-infrastructure RDS outputs. The remaining secrets need manual setup:
 
 | Secret | Purpose | How to Create |
 |--------|---------|---------------|
