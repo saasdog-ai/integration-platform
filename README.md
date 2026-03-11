@@ -8,6 +8,8 @@ Third-party integration vendors like Workato, MuleSoft, and Tray.io charge thous
 
 **This may be the last integration framework you'll ever need.** This project handles API-based integrations (ERPs, CRMs, HRIS) -- real-time sync via REST/OAuth APIs. Its sister project, [import-export-orchestrator](https://github.com/saasdog-ai/import-export-orchestrator), handles file-based integrations (CSV, SFTP, bulk imports/exports). Together, they cover the two fundamental integration patterns. The sync engine, conflict resolution, and multi-tenant infrastructure are the hard parts -- once those are solved, adding a new integration is just describing API mappings. With AI coding tools, that takes minutes, not months.
 
+[See the product in action](https://youtu.be/NN46D0q5dQc) | [Book a demo](https://saasdog.ai/#book-demo)
+
 ### What's Included
 
 - **Sync engine** -- long-running sync jobs with job status tracking, per-record sync history, and incremental cursors
