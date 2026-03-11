@@ -6,7 +6,7 @@ A production-ready framework for building integrations between your Enterprise a
 
 Third-party integration vendors like Workato, MuleSoft, and Tray.io charge thousands of dollars per month. This framework gives you a production-ready starting point to build your own integrations instead -- and it's designed to be extended with AI coding tools like Claude Code.
 
-**This may be the last integration framework you'll ever need.** This project handles API-based integrations (ERPs, CRMs, HRIS) -- real-time sync via REST/OAuth APIs. Its sister project, [import-export-orchestrator](https://github.com/saasdog-ai/import-export-orchestrator), handles file-based integrations (CSV, SFTP, bulk imports/exports). Together, they cover the two fundamental integration patterns. The sync engine, conflict resolution, and multi-tenant infrastructure are the hard parts -- once those are solved, adding a new integration is just describing API mappings. With AI coding tools, that takes minutes, not months.
+**This may be the last integration framework you'll ever need.** This project handles API-based integrations (ERPs, CRMs, HRIS) -- real-time sync via REST/OAuth APIs. Its sister project, [import-export-orchestrator](https://github.com/saasdog-ai/import-export-orchestrator), handles file-based integrations (CSV, SFTP, bulk imports/exports). Together, they cover the two fundamental integration patterns (API based and File based). The sync engine, conflict resolution, and multi-tenant infrastructure are the hard parts -- once those are solved, adding a new integration is just describing API mappings. With AI coding tools, that takes minutes, not months.
 
 [See the product in action](https://youtu.be/NN46D0q5dQc) | [Book a demo](https://saasdog.ai/#book-demo)
 
