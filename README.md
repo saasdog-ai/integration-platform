@@ -170,7 +170,29 @@ This populates:
 
 For custom integrations, add rows to these tables (see [Adding New Integrations](#adding-new-integrations)).
 
-### Step 5: Verify deployment
+### Step 5: Build and deploy the application
+
+**CI/CD (recommended)**: Push to `main` branch. The GitHub Actions workflows handle building, pushing to ECR, and updating ECS automatically.
+
+**Manual deployment**:
+
+```bash
+# Login to ECR
+aws ecr get-login-password --region us-east-1 | \
+  docker login --username AWS --password-stdin <account>.dkr.ecr.us-east-1.amazonaws.com
+
+# Build for linux/amd64 (required on Apple Silicon Macs) and push
+docker buildx build --platform linux/amd64 --no-cache \
+  -t <ecr-url>:latest --push .
+
+# Force ECS to pick up the new image
+aws ecs update-service \
+  --cluster <cluster-name> \
+  --service <service-name> \
+  --force-new-deployment
+```
+
+### Step 6: Verify deployment
 
 ```bash
 curl https://your-app-url/health
@@ -178,6 +200,113 @@ curl https://your-app-url/health
 
 curl https://your-app-url/docs
 # Swagger UI — interactive API documentation
+```
+
+### CI/CD Setup
+
+Terraform creates a GitHub OIDC provider and IAM role for keyless CI/CD (`infra/aws/terraform/iam_cicd.tf`).
+
+**Workflow files**:
+- `.github/workflows/build-and-push-image.yml` — Build Docker image and push to ECR
+- `.github/workflows/deploy.yml` — Terraform infrastructure changes
+- `.github/workflows/ci.yml` — Tests and linting
+
+**Required GitHub secrets** (Settings > Environments > \[env\] > Secrets):
+
+| Secret | Description |
+|--------|-------------|
+| `AWS_ROLE_ARN` | IAM role ARN for GitHub OIDC (from `terraform output cicd_role_arn`) |
+| `TF_VAR_SHARED_VPC_ID` | shared-infrastructure VPC ID |
+| `TF_VAR_SHARED_PUBLIC_SUBNET_IDS` | Public subnet IDs (JSON list) |
+| `TF_VAR_SHARED_PRIVATE_SUBNET_IDS` | Private subnet IDs (JSON list) |
+| `TF_VAR_SHARED_ECS_CLUSTER_ARN` | ECS cluster ARN |
+| `TF_VAR_SHARED_ECS_CLUSTER_NAME` | ECS cluster name |
+| `TF_VAR_SHARED_RDS_ENDPOINT` | RDS endpoint (host:port) |
+| `TF_VAR_SHARED_RDS_ADDRESS` | RDS address (host only) |
+| `TF_VAR_SHARED_RDS_SECURITY_GROUP_ID` | RDS security group ID |
+| `TF_VAR_SHARED_RDS_MASTER_PASSWORD_SECRET_ARN` | Secrets Manager ARN for RDS master password |
+
+Shared-infrastructure values are passed as individual `TF_VAR_*` secrets (not a single tfvars file) to avoid GitHub Actions secret masking issues.
+
+### Secrets & Credentials
+
+How secrets are stored, created, and injected at runtime:
+
+| Secret | Storage | How It Gets There |
+|--------|---------|-------------------|
+| **Database URL** | AWS Secrets Manager | Terraform generates password, builds connection string, stores in Secrets Manager. ECS injects as `DATABASE_URL` env var at container startup |
+| **Admin API Key** | AWS Secrets Manager | Created manually once per environment (Step 3). ECS injects as `ADMIN_API_KEY` env var |
+| **OAuth client credentials** | Database (`available_integrations.connection_config` JSONB) | Seeded via `seed_sample_data.sql`; admin updates via API |
+| **OAuth tokens** | Database (`user_integrations.credentials_encrypted`) | Encrypted with KMS after OAuth callback; re-encrypted on token refresh |
+| **KMS key** | AWS KMS | Terraform creates with automatic rotation. `KMS_KEY_ID` injected as ECS env var |
+| **JWT signing key** | Environment variable (`JWT_SECRET_KEY`) | Must be set in deployment config; not in Secrets Manager |
+| **SQS queue URL** | ECS env var (`QUEUE_URL`) | Terraform outputs queue URL, set in task definition |
+| **AWS credentials** | IAM task role (production) / env vars (development) | ECS Fargate assigns task role automatically; local dev uses `.env` |
+
+**How secrets flow in production**:
+
+```
+Terraform apply
+  ├── Creates KMS key → KMS_KEY_ID → ECS task env var
+  ├── Creates SQS queue → QUEUE_URL → ECS task env var
+  ├── Generates DB password → DATABASE_URL → Secrets Manager → ECS task secret
+  └── Creates admin key shell → (manual: put-secret-value) → Secrets Manager → ECS task secret
+
+ECS Task Startup
+  ├── Execution role reads Secrets Manager → injects DATABASE_URL, ADMIN_API_KEY as env vars
+  └── Task role grants access to KMS, SQS, CloudWatch at runtime
+
+OAuth Flow
+  ├── Client credentials read from DB (available_integrations.connection_config)
+  ├── User authorizes → tokens received → encrypted with KMS → stored in DB
+  └── Sync job decrypts tokens with KMS → calls external API
+```
+
+**Development vs production**:
+
+| Secret | Development | Production |
+|--------|-------------|------------|
+| Database URL | `.env` file | Secrets Manager → ECS injection |
+| Admin API Key | Optional (access allowed without it) | Required (Secrets Manager → ECS) |
+| OAuth tokens | Encrypted with local Fernet | Encrypted with AWS KMS |
+| JWT signing key | Default `CHANGE_THIS_IN_PRODUCTION` | Must be a strong random key |
+| AWS credentials | `.env` or `~/.aws/credentials` | IAM task role (no keys needed) |
+
+**Security notes**:
+- No secrets in the Docker image — all injected at runtime via Secrets Manager or env vars
+- OAuth client credentials are in the database, not env vars — allows per-integration config without redeployment
+- KMS key rotation is enabled by default in Terraform
+- OAuth state tokens (CSRF protection) are stored in-memory — lost on restart, not shared across replicas
+
+### Troubleshooting
+
+**ECS tasks failing**:
+
+```bash
+# Check CloudWatch logs
+aws logs tail /ecs/saasdog-integration-platform-dev --follow
+
+# Common causes: DATABASE_URL secret incorrect, migration incompatibility, start.sh error
+```
+
+**Health check failing**:
+
+```bash
+# Verify target group health
+aws elbv2 describe-target-health --target-group-arn <target-group-arn>
+
+# Check security group allows port 8000 from ALB
+```
+
+**Database connection failed**:
+
+```bash
+# Verify RDS is accessible (from within VPC — bastion or VPN)
+psql -h <rds-endpoint> -U postgres -c "SELECT 1"
+
+# Check DATABASE_URL secret
+aws secretsmanager get-secret-value \
+  --secret-id "mycompany-integration-platform-database-url-dev"
 ```
 
 ### Environment Variables
