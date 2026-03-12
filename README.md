@@ -6,11 +6,13 @@ A production-ready framework for building integrations between your Enterprise a
 
 Third-party integration vendors like Workato, MuleSoft, and Tray.io charge thousands of dollars per month. This framework gives you a production-ready starting point to build your own integrations instead -- and it's designed to be extended with AI coding tools like Claude Code.
 
-**This may be the last integration framework you'll ever need.** This project handles API-based integrations (ERPs, CRMs, HRIS) -- real-time sync via REST/OAuth APIs. Its sister project, [import-export-orchestrator](https://github.com/saasdog-ai/import-export-orchestrator), handles file-based integrations (CSV, SFTP, bulk imports/exports). Together, they cover the two fundamental integration patterns (API based and File based). The sync engine, conflict resolution, and multi-tenant infrastructure are the hard parts -- once those are solved, adding a new integration is just describing API mappings. With AI coding tools, that takes minutes, not months.
+**This may (hopefully) be the last integration framework you'll ever need.** This project handles API-based integrations (ERPs, CRMs, HRIS) -- real-time sync via REST/OAuth APIs. Its sister project, [import-export-orchestrator](https://github.com/saasdog-ai/import-export-orchestrator), handles file-based integrations (CSV, bulk imports/exports). Together, they cover the two fundamental integration patterns (API based and File based). The sync engine provides the basic framework required for API based integrations -- once those are solved, adding a new integration is just describing API mappings. With AI coding tools, that takes minutes, not months.
+
+This project was based on experience creating similar integration platforms at large fintechs and should scale horizontally to handle thousands of clients. 
 
 [See the product in action](https://youtu.be/NN46D0q5dQc) | [Book a demo](https://saasdog.ai/#book-demo)
 
-### What's Included
+### What this project provides
 
 - **Sync engine** -- long-running sync jobs with job status tracking, per-record sync history, and incremental cursors
 - **Version vectors** -- three-component conflict detection with configurable resolution (external wins vs. our system wins)
@@ -30,7 +32,7 @@ The included QuickBooks Online and Xero integrations are fully working reference
 1. **Clone and deploy** -- download the source and spin up infrastructure with the included Terraform configs
 2. **Point your AI tool at the codebase** -- the project includes detailed `CLAUDE.md` files that give AI tools full context
 3. **Describe what you need** -- tell your AI tool to *"add a Sage integration following the same patterns as QuickBooks and Xero"*
-4. **Test and ship** -- run the 500+ included tests as a baseline, add integration-specific tests, and deploy
+4. **Test and ship** -- run the 500+ included tests as a baseline, add integration-specific tests, test manually and deploy
 
 For system architecture, sync engine internals, and data flow diagrams, see [docs/SYNC_ARCHITECTURE.md](docs/SYNC_ARCHITECTURE.md).
 
@@ -43,9 +45,9 @@ For system architecture, sync engine internals, and data flow diagrams, see [doc
 - [Docker](https://docs.docker.com/get-docker/)
 - PostgreSQL 15+ (provisioned automatically by shared-infrastructure)
 
-### Step 1: Deploy shared-infrastructure
+### Step 1: Deploy shared-infrastructure (optional)
 
-The [shared-infrastructure](https://github.com/saasdog-ai/shared-infrastructure) project creates the foundational resources (VPC, ECS cluster, RDS PostgreSQL) that this platform runs on.
+The [shared-infrastructure](https://github.com/saasdog-ai/shared-infrastructure) project creates foundational resources (VPC, ECS cluster, RDS PostgreSQL) that this platform runs on. **If you already have these resources**, skip this step and fill in the `terraform.tfvars` in Step 2 with your existing resource IDs instead.
 
 ```bash
 git clone https://github.com/saasdog-ai/shared-infrastructure.git
@@ -706,5 +708,5 @@ integration-platform/
 
 - **[shared-infrastructure](https://github.com/saasdog-ai/shared-infrastructure)** — Shared AWS/GCP/Azure infra (VPC, compute, database) — deploy this first
 - **[import-export-orchestrator](https://github.com/saasdog-ai/import-export-orchestrator)** — Sister project for async import/export jobs (shares PostgreSQL)
-- **[saas-host-app](https://github.com/saasdog-ai/saas-host-app)** — User-facing host app that embeds this platform's micro-frontend
-- **[admin-host-app](https://github.com/saasdog-ai/admin-host-app)** — Admin host app that embeds the micro-frontend with admin API key
+- **[saas-host-app](https://github.com/saasdog-ai/saas-host-app)** — Sample User-facing host app that embeds this platform's micro-frontend. Use this to test the full end-to-end functionality.
+- **[admin-host-app](https://github.com/saasdog-ai/admin-host-app)** — Sample Admin host app that embeds the micro-frontend with admin API key. Use this to test the full admin functionality.
